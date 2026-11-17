@@ -200,7 +200,7 @@ fun SettingsScreen(
     val backdrop = rememberLayerBackdrop()
     val liquidBackdrop = rememberKyantBackdrop()
     val glass = rememberGlassActive(blurEnabled)
-    val popupVisuals = GlassPopupDefaults.visuals()
+    val popupVisuals = appPopupVisuals()
     val scrollBehavior = MiuixScrollBehavior()
     val topScrolled = rememberTopBarScrolled(scrollBehavior)
 

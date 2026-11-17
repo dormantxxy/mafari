@@ -24,6 +24,7 @@ import top.yukonga.miuix.kmp.basic.FloatingActionButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.glass.GlassBottomSheet
+import top.yukonga.miuix.kmp.glass.GlassBottomSheetDefaults
 import top.yukonga.miuix.kmp.glass.GlassDialog
 import top.yukonga.miuix.kmp.glass.GlassDialogButton
 import top.yukonga.miuix.kmp.glass.GlassDialogButtonDefaults
@@ -33,6 +34,7 @@ import top.yukonga.miuix.kmp.glass.GlassDropdownPreference
 import top.yukonga.miuix.kmp.glass.GlassPopup
 import top.yukonga.miuix.kmp.glass.GlassPopupDefaults
 import top.yukonga.miuix.kmp.glass.GlassPopupVisuals
+import top.yukonga.miuix.kmp.material.GlassMaterial
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -229,7 +231,7 @@ private fun rememberOverlayContent(content: @Composable () -> Unit): @Composable
     val mode = LocalBlurMode.current
     val glassParams = LocalGlassParams.current
     val latest by rememberUpdatedState(content)
-    return remember(liquidBackdrop, mode) {
+    return remember(liquidBackdrop, mode, glassParams) {
         val wrapped: @Composable () -> Unit = {
             CompositionLocalProvider(LocalLiquidBackdrop provides liquidBackdrop, LocalBlurMode provides mode, LocalGlassParams provides glassParams) {
                 latest()
@@ -237,6 +239,20 @@ private fun rememberOverlayContent(content: @Composable () -> Unit): @Composable
         }
         wrapped
     }
+}
+
+/**
+ * 弹出菜单 / 下拉的玻璃外观。柔光玻璃下用自定义材质参数的样式和材质（null = 轻模糊背景为主体），
+ * 其余模式沿用上游默认。
+ */
+@Composable
+fun appPopupVisuals(sampling: Boolean = true): GlassPopupVisuals {
+    val dark = isAppDarkTheme()
+    val shading = sampling && GlassLook.shading()
+    return GlassPopupDefaults.visuals(
+        style = GlassLook.style(dark),
+        material = if (shading) GlassLook.material(dark) else GlassPopupDefaults.material(),
+    )
 }
 
 /** 按当前「模糊效果」设置取材质。 */
@@ -261,9 +277,16 @@ open class MiuixGlassMaterialBase(private val sampling: Boolean) : AppMaterial {
         title: String?, summary: String?, onDismissFinished: (() -> Unit)?, content: @Composable () -> Unit,
         preBlurred: Boolean,
     ) {
+        // 柔光玻璃：材质 / 样式 / 折射跟「自定义材质参数」走（上游默认的 dialogGlass 是 60dp 大模糊 + 三层白雾，会把样式盖住）
+        val shading = sampling && GlassLook.shading()
+        val dark = isAppDarkTheme()
         // 取样源已是预模糊壁纸：对话框材质默认 20dp 的实时模糊是在糊上加糊，半径清零即整段跳过模糊 pass
-        val dialogMaterial = GlassDialogDefaults.material().let {
-            if (sampling && preBlurred && backdrop != null) it.copy(blurRadius = 0.dp) else it
+        val dialogMaterial: GlassMaterial? = if (shading) {
+            GlassLook.material(dark)
+        } else {
+            GlassDialogDefaults.material().let {
+                if (sampling && preBlurred && backdrop != null) it.copy(blurRadius = 0.dp) else it
+            }
         }
         GlassDialog(
             onDismissRequest = onDismissRequest,
@@ -273,6 +296,8 @@ open class MiuixGlassMaterialBase(private val sampling: Boolean) : AppMaterial {
             title = title,
             summary = summary,
             material = dialogMaterial,
+            shading = shading,
+            style = GlassLook.style(dark),
             onDismissFinished = onDismissFinished,
             content = content,
         )
@@ -284,11 +309,16 @@ open class MiuixGlassMaterialBase(private val sampling: Boolean) : AppMaterial {
         enableWindowDim: Boolean, title: String?, startAction: @Composable (() -> Unit)?,
         endAction: @Composable (() -> Unit)?, onDismissFinished: (() -> Unit)?, content: @Composable () -> Unit,
     ) {
+        val shading = sampling && GlassLook.shading()
+        val dark = isAppDarkTheme()
         GlassBottomSheet(
             onDismissRequest = onDismissRequest,
             show = show,
             backdrop = bd(backdrop),
             modifier = modifier,
+            material = if (shading) GlassLook.material(dark) else GlassBottomSheetDefaults.material(),
+            shading = shading,
+            style = GlassLook.style(dark),
             enableWindowDim = enableWindowDim,
             title = title,
             startAction = startAction,
@@ -305,8 +335,8 @@ open class MiuixGlassMaterialBase(private val sampling: Boolean) : AppMaterial {
         preBlurred: Boolean, sizing: top.yukonga.miuix.kmp.glass.GlassPopupSizing, contentPadding: PaddingValues,
     ) {
         // 同 DialogHost：预模糊取样源上不再叠加 20dp 实时模糊
-        val base = GlassPopupDefaults.visuals()
-        val visuals = if (sampling && preBlurred && backdrop != null) {
+        val base = appPopupVisuals(sampling)
+        val visuals = if (sampling && preBlurred && backdrop != null && !(sampling && GlassLook.shading())) {
             base.copy(material = base.material?.copy(blurRadius = 0.dp))
         } else base
         GlassPopup(
@@ -581,7 +611,7 @@ fun AppDropdownPreference(
     summary: String? = null,
     startAction: @Composable (() -> Unit)? = null,
     insideMargin: PaddingValues = top.yukonga.miuix.kmp.basic.BasicComponentDefaults.InsideMargin,
-    visuals: GlassPopupVisuals = GlassPopupDefaults.visuals(),
+    visuals: GlassPopupVisuals = appPopupVisuals(),
     marqueeItems: Boolean = false,
 ) = currentMaterial().DropdownRow(
     onSelectedIndexChange, items, selectedIndex, title, backdrop, modifier, enabled, showValue,

@@ -1,6 +1,12 @@
 package dev.dsh.miuixbrowser.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +19,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -55,6 +65,8 @@ fun GlassParamsSheet(
         onDismissRequest = onDismissRequest,
     ) {
         val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.62f).dp
+        // 选中「自定义」（或本来就是自定义参数）时展开参数；选模板时保持用户上次的展开状态
+        var customExpanded by remember { mutableStateOf(settings.glassPreset == -1) }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -62,7 +74,7 @@ fun GlassParamsSheet(
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 28.dp),
         ) {
-            SmallTitle(text = tr("模板"))
+            GroupTitle(tr("模板"))
             GlassPresets.ALL.forEachIndexed { index, preset ->
                 PresetRow(
                     title = tr(preset.name),
@@ -71,71 +83,87 @@ fun GlassParamsSheet(
                     onClick = { settings.applyGlassPreset(index) },
                 )
             }
-            if (settings.glassPreset == -1) {
-                Text(
-                    text = tr("当前为自定义参数"),
-                    fontSize = 13.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-                )
-            }
+            PresetRow(
+                title = tr("自定义"),
+                summary = tr("手动调整模糊、折射、光影、色彩等全部参数"),
+                selected = settings.glassPreset == -1,
+                onClick = { customExpanded = !customExpanded },
+                trailing = if (customExpanded) tr("收起") else tr("展开"),
+            )
 
-            SmallTitle(text = tr("材质"))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        settings.updateGlassParams(settings.glassParams.copy(frostMaterial = !settings.glassParams.frostMaterial))
-                        settings.commitGlassParams()
-                    }
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            AnimatedVisibility(
+                visible = customExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = tr("叠加磨砂白色材质"), fontSize = 16.sp, color = MiuixTheme.colorScheme.onSurface)
-                    Text(
-                        text = tr("开启后玻璃更雾、更不透，背景模糊跟「背景模糊」滑条走"),
-                        fontSize = 13.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    GroupTitle(tr("材质"))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                settings.updateGlassParams(settings.glassParams.copy(frostMaterial = !settings.glassParams.frostMaterial))
+                                settings.commitGlassParams()
+                            }
+                            .padding(horizontal = ContentInset, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = tr("叠加磨砂白色材质"), fontSize = 16.sp, color = MiuixTheme.colorScheme.onSurface)
+                            Text(
+                                text = tr("开启后玻璃更雾、更不透，背景模糊跟「背景模糊」滑条走"),
+                                fontSize = 13.sp,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        AppSwitch(
+                            checked = settings.glassParams.frostMaterial,
+                            onCheckedChange = {
+                                settings.updateGlassParams(settings.glassParams.copy(frostMaterial = it))
+                                settings.commitGlassParams()
+                            },
+                        )
+                    }
+
+                    var lastGroup = ""
+                    GlassParamsFields.forEach { field ->
+                        if (field.group != lastGroup) {
+                            lastGroup = field.group
+                            GroupTitle(tr(field.group))
+                        }
+                        FieldSlider(field = field, settings = settings)
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        text = tr("恢复默认（清透）"),
+                        onClick = { settings.applyGlassPreset(0) },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = ContentInset),
                     )
                 }
-                AppSwitch(
-                    checked = settings.glassParams.frostMaterial,
-                    onCheckedChange = {
-                        settings.updateGlassParams(settings.glassParams.copy(frostMaterial = it))
-                        settings.commitGlassParams()
-                    },
-                )
             }
-
-            var lastGroup = ""
-            GlassParamsFields.forEach { field ->
-                if (field.group != lastGroup) {
-                    lastGroup = field.group
-                    SmallTitle(text = tr(field.group))
-                }
-                FieldSlider(field = field, settings = settings)
-            }
-
-            Spacer(Modifier.height(8.dp))
-            TextButton(
-                text = tr("恢复默认（清透）"),
-                onClick = { settings.applyGlassPreset(0) },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-            )
         }
     }
+}
+
+/** 本 sheet 内所有行 / 标题 / 滑条统一的左右内边距，保证标题与正文左对齐。 */
+private val ContentInset = 20.dp
+
+/** 分组标题。不用 miuix 的 SmallTitle：它自带 28dp 的左边距，会比 20dp 的正文行更靠右。 */
+@Composable
+private fun GroupTitle(text: String) {
+    SmallTitle(text = text, insideMargin = PaddingValues(horizontal = ContentInset, vertical = 8.dp))
 }
 
 private val GlassParamsFields: List<GlassField> get() = dev.dsh.miuixbrowser.data.GlassParams.FIELDS
 
 @Composable
-private fun PresetRow(title: String, summary: String, selected: Boolean, onClick: () -> Unit) {
+private fun PresetRow(title: String, summary: String, selected: Boolean, onClick: () -> Unit, trailing: String? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 10.dp),
+            .padding(horizontal = ContentInset, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -146,6 +174,9 @@ private fun PresetRow(title: String, summary: String, selected: Boolean, onClick
                 color = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
             )
             Text(text = summary, fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        }
+        if (trailing != null) {
+            Text(text = trailing, fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
         if (selected) {
             Icon(
@@ -161,7 +192,7 @@ private fun PresetRow(title: String, summary: String, selected: Boolean, onClick
 @Composable
 private fun FieldSlider(field: GlassField, settings: AppSettings) {
     val value = field.get(settings.glassParams).coerceIn(field.min, field.max)
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = ContentInset, vertical = 4.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(text = tr(field.name), fontSize = 15.sp, color = MiuixTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
             Text(text = field.show(value), fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)

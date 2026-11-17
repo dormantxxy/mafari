@@ -1987,7 +1987,6 @@ CSV 导入 · 加密存储 · 自动填充	CSV import · Encrypted storage · Au
 半透明磨砂质感，柔和稳定，不做折射	Translucent frosted look, soft and stable, no refraction
 柔光玻璃 / 磨砂 / 液态玻璃 / 纯色	Soft glass / Frosted / Liquid glass / Solid color
 自定义材质参数	Custom material parameters
-当前为自定义参数	Using custom parameters
 模板	Presets
 材质	Material
 叠加磨砂白色材质	Add frosted white layer
@@ -2027,3 +2026,4 @@ CSV 导入 · 加密存储 · 自动填充	CSV import · Encrypted storage · Au
 泛白	Whitening
 遮盖度	Opacity
 伽马	Gamma
+手动调整模糊、折射、光影、色彩等全部参数	Manually tune blur, refraction, lighting, color and every other parameter

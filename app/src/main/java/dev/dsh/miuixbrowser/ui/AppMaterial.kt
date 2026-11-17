@@ -2,7 +2,27 @@ package dev.dsh.miuixbrowser.ui
 
 import dev.dsh.miuixbrowser.data.BLUR_LIQUID
 import dev.dsh.miuixbrowser.data.BLUR_OFF
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
+import dev.dsh.miuixbrowser.data.BLUR_MIUIX
+import top.yukonga.miuix.kmp.blur.ProgressiveBlur
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.glass.GlassTopAppBarDefaults
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
@@ -226,18 +246,66 @@ interface AppMaterial {
  * 在调用处读出当前值，再在内容里重新提供一遍。
  */
 @Composable
-private fun rememberOverlayContent(content: @Composable () -> Unit): @Composable () -> Unit {
+private fun rememberOverlayContent(content: @Composable () -> Unit, sheetTopBlur: Boolean = false): @Composable () -> Unit {
     val liquidBackdrop = LocalLiquidBackdrop.current
     val mode = LocalBlurMode.current
     val glassParams = LocalGlassParams.current
     val latest by rememberUpdatedState(content)
-    return remember(liquidBackdrop, mode, glassParams) {
+    return remember(liquidBackdrop, mode, glassParams, sheetTopBlur) {
         val wrapped: @Composable () -> Unit = {
             CompositionLocalProvider(LocalLiquidBackdrop provides liquidBackdrop, LocalBlurMode provides mode, LocalGlassParams provides glassParams) {
-                latest()
+                if (sheetTopBlur) SheetTopBlur { latest() } else latest()
             }
         }
         wrapped
+    }
+}
+
+/**
+ * 所有 sheet（[AppBottomSheet] 统一入口）内容滚动到头部时的顶部渐进效果，所有材质都生效：
+ * - 柔光 / 磨砂 / 液态玻璃（设备支持 RuntimeShader）：渐进模糊（自上而下由强到弱，参数同 GlassTopAppBar 的渐进模糊带），
+ *   内容录制成一层 backdrop，在内容区顶部盖一条渐进模糊带；
+ * - 纯色（关闭模糊）或不支持 RuntimeShader：主题 surface 色 → 透明的渐变，与子页面顶栏的 fallback 渐变一致。
+ * 滚动量由嵌套滚动累计，带子随滚动淡入（未滚动时完全透明，不改变静止外观），不拦截触摸。
+ */
+@Composable
+private fun SheetTopBlur(content: @Composable () -> Unit) {
+    val blur = LocalBlurMode.current != BLUR_OFF && top.yukonga.miuix.kmp.material.isRuntimeShaderSupported()
+    val backdrop = rememberLayerBackdrop()
+    var scrolled by remember { mutableFloatStateOf(0f) }
+    val connection = remember {
+        object : NestedScrollConnection {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                // 子项向上滚（内容上移）时 consumed.y < 0
+                scrolled = (scrolled - consumed.y).coerceAtLeast(0f)
+                return Offset.Zero
+            }
+        }
+    }
+    val rampPx = with(LocalDensity.current) { GlassTopAppBarDefaults.ProgressiveBlurRampDistance.toPx() }
+    val surface = MiuixTheme.colorScheme.surface
+    val fadeBrush = remember(surface) { GlassTopAppBarDefaults.bandBrush(surface) }
+    Box(modifier = Modifier.nestedScroll(connection)) {
+        Box(modifier = if (blur) Modifier.layerBackdrop(backdrop) else Modifier) { content() }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(48.dp)
+                .graphicsLayer { alpha = (scrolled / rampPx).coerceIn(0f, 1f) }
+                .then(
+                    if (blur) {
+                        Modifier.progressiveTextureBlur(
+                            backdrop = backdrop,
+                            shape = RectangleShape,
+                            gradient = ProgressiveBlur.Top.copy(curve = 0.5f),
+                            blurRadius = GlassTopAppBarDefaults.ProgressiveBlurRadius.value,
+                        )
+                    } else {
+                        Modifier.background(fadeBrush)
+                    },
+                ),
+        )
     }
 }
 
@@ -251,7 +319,7 @@ fun appPopupVisuals(sampling: Boolean = true): GlassPopupVisuals {
     val shading = sampling && GlassLook.shading()
     return GlassPopupDefaults.visuals(
         style = GlassLook.style(dark),
-        material = if (shading) GlassLook.material(dark) else GlassPopupDefaults.material(),
+        material = if (shading) GlassLook.largeMaterial(dark) else GlassPopupDefaults.material(),
     )
 }
 
@@ -282,7 +350,7 @@ open class MiuixGlassMaterialBase(private val sampling: Boolean) : AppMaterial {
         val dark = isAppDarkTheme()
         // 取样源已是预模糊壁纸：对话框材质默认 20dp 的实时模糊是在糊上加糊，半径清零即整段跳过模糊 pass
         val dialogMaterial: GlassMaterial? = if (shading) {
-            GlassLook.material(dark)
+            GlassLook.largeMaterial(dark)
         } else {
             GlassDialogDefaults.material().let {
                 if (sampling && preBlurred && backdrop != null) it.copy(blurRadius = 0.dp) else it
@@ -316,7 +384,7 @@ open class MiuixGlassMaterialBase(private val sampling: Boolean) : AppMaterial {
             show = show,
             backdrop = bd(backdrop),
             modifier = modifier,
-            material = if (shading) GlassLook.material(dark) else GlassBottomSheetDefaults.material(),
+            material = if (shading) GlassLook.largeMaterial(dark) else GlassBottomSheetDefaults.material(),
             shading = shading,
             style = GlassLook.style(dark),
             enableWindowDim = enableWindowDim,
@@ -457,7 +525,10 @@ open class MiuixGlassMaterialBase(private val sampling: Boolean) : AppMaterial {
         inPage: Boolean, content: @Composable () -> Unit,
     ) {
         val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+        val dark = isAppDarkTheme()
         top.yukonga.miuix.kmp.glass.GlassIconButton(
+            style = GlassLook.barStyle(dark),
+            material = if (GlassLook.shading()) GlassLook.barMaterial(dark) else null,
             onClick = {
                 if (enabled) {
                     haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
@@ -557,7 +628,8 @@ fun AppBottomSheet(
     val material = currentMaterial()
     material.SheetHost(
         onDismissRequest, show, backdrop, modifier, enableWindowDim, title, startAction, endAction, onDismissFinished,
-        content = rememberOverlayContent(content),
+        // 所有 sheet 统一走这里：内容滚到头部时的顶部渐进模糊（纯色材质为 surface→透明渐变）
+        content = rememberOverlayContent(content, sheetTopBlur = true),
     )
 }
 

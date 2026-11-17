@@ -62,7 +62,7 @@ nightly 的 Java API 偶尔会改，**建议在 `gradle.properties` 锁定**：`
 | 下拉刷新 / 底栏随滚动收起 | ✅ | ScrollDelegate |
 | 崩溃恢复 | ✅ | onCrash / onKill 后重开会话并回到原页面 |
 | 视频全屏 | ✅ | 系统栏隐藏 + 横屏，同时收起应用自己的顶栏 / 底栏（`BrowserTab.geckoFullscreen`） |
-| 文件选择 / 拍照上传、alert / confirm / prompt、`<select>` 下拉、HTTP / 代理认证、日期时间、弹窗拦截 | ✅ | `GeckoPrompts.kt`（PromptDelegate）：文件 / 拍照包装成 WebView 同款 `FileChooserParams` 复用现有选择器；其余用系统对话框 |
+| 文件选择 / 拍照上传、alert / confirm / prompt、`<select>` 下拉、HTTP / 代理认证、日期时间、弹窗拦截 | ✅ | `GeckoPrompts.kt`（PromptDelegate）：文件 / 拍照包装成 WebView 同款 `FileChooserParams` 复用现有选择器；其余用系统对话框（网页登录的「保存密码」走应用自己的玻璃确认框、「选择账号」走锚点下拉菜单，均在 `LoginPromptDialog`） |
 | 网站通知 | ⛔ | 现在直接拒绝（WebView 版本来也没有） |
 
 ### 依赖 WebView 专有 API 的功能
@@ -78,6 +78,7 @@ nightly 的 Java API 偶尔会改，**建议在 `gradle.properties` 锁定**：`
 | DNT / Sec-GPC | 请求头 + JS 属性 | ✅ pref `privacy.donottrackheader.enabled` + `privacy.globalprivacycontrol.enabled` |
 | 剪贴板 / 媒体静音 / 通知拒绝（JS 层覆写） | 注入脚本 | ⛔ 不适用；Gecko 走权限系统 |
 | 网页重定向权限（拦截无手势的跨站跳转） | `shouldOverrideUrlLoading` + `hitTestResult` | ✅ `onLoadRequest`（`isDirectNavigation` / `hasUserGesture` / `isRedirect`）；Gecko 取不到触点下是否 `<a>`，有手势一律视为用户点击 |
+| 打开其他应用权限（拦截无手势自动唤起 intent:// weixin:// 等，与网页重定向相互独立） | `shouldOverrideUrlLoading`，`interceptRedirect(external = true)` | ✅ `geckoExternalRequest`（只认全局设置，Gecko 暂无按站点例外） |
 | 代理（HTTP / SOCKS5 / 认证 / Socks5Relay） | `ProxyController` | ✅ `WebViewProxy` 最终采用的规则（含 SOCKS5 认证用的本机中转）同步写入 `network.proxy.*`；HTTP 代理认证在 `onAuthPrompt` 自动提交 |
 | Passkey | WebView WebAuthn + Credential Manager | Gecko 自带 WebAuthn，是否弹系统 Passkey 界面需实测 |
 | 缓存清理 | `WebView.clearCache` | ✅ 同时调用 `StorageController.clearData` |

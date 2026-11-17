@@ -1,5 +1,26 @@
 package dev.dsh.miuixbrowser
 
+import dev.dsh.miuixbrowser.i18n.tr
+
+import dev.dsh.miuixbrowser.adblock.AdBlock
+import dev.dsh.miuixbrowser.adblock.AdBlockBridge
+import dev.dsh.miuixbrowser.download.Downloader
+import dev.dsh.miuixbrowser.browser.ShortcutHelper
+import dev.dsh.miuixbrowser.data.AppSettings
+import dev.dsh.miuixbrowser.engine.gecko.GeckoSitePerms
+import dev.dsh.miuixbrowser.engine.webview.FingerprintInjector
+import dev.dsh.miuixbrowser.engine.webview.FpFallbackBridge
+import dev.dsh.miuixbrowser.net.WebViewProxy
+import dev.dsh.miuixbrowser.engine.webview.WebViewDebug
+import dev.dsh.miuixbrowser.script.ExtensionStore
+import dev.dsh.miuixbrowser.script.GmBridge
+import dev.dsh.miuixbrowser.script.ScriptResources
+import dev.dsh.miuixbrowser.script.UserScript
+import dev.dsh.miuixbrowser.script.UserscriptEngine
+import dev.dsh.miuixbrowser.util.Diag
+import dev.dsh.miuixbrowser.util.ErrorPages
+import dev.dsh.miuixbrowser.util.ErrorSpec
+import dev.dsh.miuixbrowser.util.isSameSite
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.animation.ValueAnimator
@@ -127,8 +148,11 @@ class WebAppActivity : ComponentActivity() {
         appTitle = intent.getStringExtra(ShortcutHelper.EXTRA_TITLE).orEmpty().ifBlank { startHost }
         updateTaskDescription(appTitle)
 
-        settings = AppSettings(this)
+        settings = appContainer.settings
+        GeckoSitePerms.load(this) // 例外网站（与浏览器共用）
         AdBlock.init(this)
+        WebViewDebug.load(this)
+        AdBlock.startCompile() // 独立 PWA 窗口没有主界面的启动阶段，直接编译
         WebViewProxy.applyFrom(settings)
 
         val systemDark =
@@ -161,7 +185,7 @@ class WebAppActivity : ComponentActivity() {
         webView = WebView(this).apply { setBackgroundColor(defaultBg) }
         fpInjector = FingerprintInjector(webView)
         fpInjector.onUnprotectedBlocked = { target ->
-            showErrorPage(webView, target, "指纹保护：该页面未能在加载前注册保护，已停止加载")
+            showErrorPage(webView, target, ErrorPages.fingerprintBlocked())
         }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
@@ -337,7 +361,14 @@ class WebAppActivity : ComponentActivity() {
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (!request.isForMainFrame) return
-                showErrorPage(view, request.url.toString(), error.description?.toString().orEmpty())
+                showErrorPage(view, request.url.toString(), ErrorPages.fromWebView(error.errorCode, error.description?.toString()))
+            }
+
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                // 只接管空响应体的 4xx / 5xx；带正文的是网站自己的错误页，照常展示
+                if (!request.isForMainFrame) return
+                if (!ErrorPages.shouldReplaceHttpError(errorResponse.statusCode, errorResponse.responseHeaders)) return
+                showErrorPage(view, request.url.toString(), ErrorPages.fromHttp(errorResponse.statusCode, errorResponse.reasonPhrase))
             }
 
             override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
@@ -361,6 +392,11 @@ class WebAppActivity : ComponentActivity() {
         }
 
         webView.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
+                WebViewDebug.logConsole(message)
+                return super.onConsoleMessage(message)
+            }
+
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 progress.progress = newProgress
                 progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
@@ -397,7 +433,10 @@ class WebAppActivity : ComponentActivity() {
             override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
                 runOnUiThread {
                     val host = runCatching { Uri.parse(origin).host }.getOrNull().orEmpty()
-                    if (!isSameSite(host, startHost)) {
+                    // 例外网站优先于全局设置：拒绝 → 直接拒；允许 → 不受「只放行本站」限制
+                    val exc = GeckoSitePerms.override(host, GeckoSitePerms.LOCATION)
+                    val mode = exc ?: settings.locationPermission
+                    if (mode == 2 || (exc != 1 && !isSameSite(host, startHost))) {
                         callback.invoke(origin, false, false)
                     } else {
                         ensurePermissions(
@@ -438,9 +477,9 @@ class WebAppActivity : ComponentActivity() {
                     referer = webView.url,
                     withCookies = true,
                 )
-                Toast.makeText(this, "已开始下载，可在 Mafari「下载」中查看", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, tr("已开始下载，可在 Mafari「下载」中查看"), Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(this, "这类下载请在 Mafari 浏览器中打开该网站再试", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, tr("这类下载请在 Mafari 浏览器中打开该网站再试"), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -490,7 +529,7 @@ class WebAppActivity : ComponentActivity() {
      * 脚本列表与浏览器共用同一份存储；必须在首次加载网页之前调用。
      */
     private fun setupUserScripts() {
-        extensions = ExtensionStore(this)
+        extensions = appContainer.extensions
         runCatching {
             webView.addJavascriptInterface(
                 GmBridge(
@@ -510,7 +549,7 @@ class WebAppActivity : ComponentActivity() {
                                 referer = webView.url,
                                 withCookies = true,
                             )
-                            Toast.makeText(this, "已开始下载，可在 Mafari「下载」中查看", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this, tr("已开始下载，可在 Mafari「下载」中查看"), Toast.LENGTH_SHORT).show()
                         } else {
                             onResult?.invoke(false, "unsupported url")
                         }
@@ -655,6 +694,11 @@ class WebAppActivity : ComponentActivity() {
                         pulled = event.y - touchDownY
                         val progress = (pulled / thresholdPx).coerceIn(0f, 1f)
                         if (progress > 0.05f) {
+                            // 顶部栏收起时根布局没有顶部留白：补上状态栏 / 摄像头挖孔的高度，避免图标压在摄像头上
+                            (refreshSpinner.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                                val want = (18 * resources.displayMetrics.density).toInt() + (topInset - topPad).coerceAtLeast(0)
+                                if (lp.topMargin != want) { lp.topMargin = want; refreshSpinner.layoutParams = lp }
+                            }
                             refreshSpinner.visibility = View.VISIBLE
                             refreshSpinner.progress = progress
                             refreshSpinner.alpha = 0.4f + 0.6f * progress
@@ -690,13 +734,24 @@ class WebAppActivity : ComponentActivity() {
 
     private fun handleWebPermission(request: PermissionRequest) {
         val host = request.origin?.host.orEmpty()
-        if (!isSameSite(host, startHost)) {
+        val camExc = GeckoSitePerms.override(host, GeckoSitePerms.CAMERA)
+        val micExc = GeckoSitePerms.override(host, GeckoSitePerms.MIC)
+        // 例外网站有「允许」时不受「只放行本站」限制
+        if (!isSameSite(host, startHost) && camExc != 1 && micExc != 1) {
             request.deny()
             return
         }
+        val camMode = camExc ?: settings.cameraPermission
+        val micMode = micExc ?: settings.micPermission
         val needs = mutableListOf<String>()
-        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE in request.resources) needs += android.Manifest.permission.CAMERA
-        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE in request.resources) needs += android.Manifest.permission.RECORD_AUDIO
+        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE in request.resources) {
+            if (camMode == 2) { request.deny(); return }
+            needs += android.Manifest.permission.CAMERA
+        }
+        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE in request.resources) {
+            if (micMode == 2) { request.deny(); return }
+            needs += android.Manifest.permission.RECORD_AUDIO
+        }
         val supported = setOf(
             PermissionRequest.RESOURCE_VIDEO_CAPTURE,
             PermissionRequest.RESOURCE_AUDIO_CAPTURE,
@@ -756,27 +811,13 @@ class WebAppActivity : ComponentActivity() {
                 fpInjector.prepare(fallback)
                 webView.loadUrl(fallback)
             } else {
-                Toast.makeText(this, "未安装对应应用", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, tr("未安装对应应用"), Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    private fun showErrorPage(view: WebView, failingUrl: String, reason: String) {
-        val fg = if (dark) "#E6E6E6" else "#222222"
-        val bg = if (dark) "#1A1A1A" else "#FFFFFF"
-        val safeUrl = android.text.TextUtils.htmlEncode(failingUrl)
-        val safeReason = android.text.TextUtils.htmlEncode(reason)
-        val html = """
-            <html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-            <body style="margin:0;background:$bg;color:$fg;font-family:sans-serif;display:flex;
-                flex-direction:column;align-items:center;justify-content:center;height:100vh;text-align:center">
-              <div style="font-size:18px;margin-bottom:8px">页面加载失败</div>
-              <div style="font-size:13px;opacity:.6;padding:0 24px;word-break:break-all">$safeReason</div>
-              <a href="$safeUrl" style="margin-top:22px;padding:10px 28px;border-radius:22px;
-                 background:#3B7DFF;color:#fff;text-decoration:none">重试</a>
-            </body></html>
-        """.trimIndent()
-        view.loadDataWithBaseURL(failingUrl, html, "text/html", "UTF-8", failingUrl)
+    private fun showErrorPage(view: WebView, failingUrl: String, spec: ErrorSpec) {
+        view.loadDataWithBaseURL(failingUrl, ErrorPages.render(spec, failingUrl, dark), "text/html", "UTF-8", failingUrl)
     }
 
     /** 状态栏 / 手势条区域的底色跟随网页（theme-color 或 body 背景），图标深浅随之切换 */

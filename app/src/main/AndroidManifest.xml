@@ -4,18 +4,42 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- DLNA 投屏：SSDP 组播搜索设备（普通权限，安装即授予） -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Android 17（targetSdk 37）起访问局域网（SSDP 搜索 / 连接电视）必须有此运行时权限，属于「附近设备」权限组 -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Android 16 实时更新（Live Updates）：下载进度显示在状态栏胶囊 / 锁屏 -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
 
+    <!-- 包可见性：检测已安装的第三方下载器 -->
+    <queries>
+        <package android:name="com.dv.adm.pay" />
+        <package android:name="com.dv.adm" />
+        <package android:name="idm.internet.download.manager.plus" />
+        <package android:name="idm.internet.download.manager" />
+        <package android:name="org.freedownloadmanager.fdm" />
+        <package android:name="com.gopeed" />
+        <!-- 自动填充下拉里显示原生 App 的名字（见 MafariAutofillService.appLabel）：只需要能看到有桌面图标的应用 -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <package android:name="com.xunlei.downloadprovider" />
+    </queries>
+
     <application
+        android:name=".MafariApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -33,6 +57,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.MiuixBrowser">
@@ -45,6 +70,13 @@
                 <data android:scheme="https" />
             </intent-filter>
         </activity>
+
+        <!-- 扫一扫：CameraX + ML Kit 内置版识别，只由菜单里的「扫一扫」启动 -->
+        <activity
+            android:name=".ScanActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale"
+            android:theme="@style/Theme.MiuixBrowser" />
 
         <!-- 「添加到桌面」生成的轻应用：独立任务、无底栏；同一网址再次点图标回到已打开的那一个 -->
         <activity
@@ -115,6 +147,34 @@
             </intent-filter>
         </activity-alias>
 
+        <activity-alias
+            android:name=".IconMinimalV2"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_minimal"
+            android:roundIcon="@mipmap/ic_launcher_minimal"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".IconUltraDarkV2"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_ultradark"
+            android:roundIcon="@mipmap/ic_launcher_ultradark"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- 网页 <input type=file capture> 备用输出路径 -->
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -127,7 +187,7 @@
         </provider>
 
         <receiver
-            android:name=".DownloadActionReceiver"
+            android:name=".download.DownloadActionReceiver"
             android:exported="false" />
 
         <receiver
@@ -135,9 +195,50 @@
             android:exported="false" />
 
         <service
-            android:name=".DownloadService"
+            android:name=".download.DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- 系统自动填充服务：在系统设置里选中后，WebView / Gecko 网页里的登录框用密码页的数据填充，见 MafariAutofillService -->
+        <service
+            android:name=".MafariAutofillService"
+            android:exported="true"
+            android:label="@string/autofill_service_label"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/autofill_service_config" />
+        </service>
+
+        <!-- 「填充前验证身份」的透明验证页，只由上面的服务通过 PendingIntent 启动 -->
+        <activity
+            android:name=".AutofillAuthActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- 原生 App 里「选择账号…」的透明界面：只由自动填充服务通过 PendingIntent 启动 -->
+        <activity
+            android:name=".AutofillPickActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale"
+            android:theme="@style/Theme.MafariTranslucent" />
+
+        <!-- 系统分享面板里的「发送到设备」：由 BrowserScreen 分享时放进 EXTRA_CHOOSER_CUSTOM_ACTIONS 的 PendingIntent 启动 -->
+        <activity
+            android:name=".SendTabActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale"
+            android:theme="@style/Theme.MafariTranslucent" />
     </application>
 
 </manifest>

@@ -90,7 +90,7 @@ Mafari 是一款基于 **miuix** 设计风格的 Android 浏览器：界面简�
 ## 三个版本都有的功能
 
 **界面与浏览**
-- 单条悬浮底栏，支持柔光玻璃与液态玻璃效果；向下滚动时自动让出空间，回到顶部再恢复；底栏可左右滑动缩成圆形搜索钮，导航栏位置可选「靠上 / 靠下 / 始终最小化」。
+- 单条悬浮底栏，「高级材质」可选柔光玻璃（带折射与边缘高光）、磨砂（无折射，更稳更省）、液态玻璃或纯色；向下滚动时自动让出空间，回到顶部再恢复；底栏可左右滑动缩成圆形搜索钮，导航栏位置可选「靠上 / 靠下 / 始终最小化」。
 - 多标签，可在文字列表与卡片两种样式间切换；地址栏可显示网站标题、主域名或完整域名。
 - 主页内容（收藏、书签分组、隐私报告、最近浏览、下载项）可显示 / 隐藏并拖动排序；起始页可设为默认主页、新标签页或指定网页。
 - 点击主页的书签分组，会在图标下方弹出小窗，直接浏览子分组与书签，不用跳转页面。
@@ -135,17 +135,20 @@ Mafari 是一款基于 **miuix** 设计风格的 Android 浏览器：界面简�
 
 ## 想自己构建？
 
-需要 JDK 17+ 与 Android SDK。以 lite 为例：
+需要 JDK 17+、Android SDK 和 git。miuix 不随仓库提供，要先拉取上游并打上本地补丁，再构建（以 lite 为例）：
 
 ```bash
+bash tools/miuix-sync.sh   # 拉取 miuix 到 third_party/miuix 并应用 tools/miuix-patches（版本见 miuix.ref）
 ./gradlew :app:assembleLiteArm64Debug
 ```
+
+默认跟随 miuix 主线；需要固定版本时，在 `miuix.ref` 里填 `commit=`（或运行 `bash tools/miuix-sync.sh --pin` 写入当前提交）。
 
 完整的构建说明、版本变体、自动发布流程与代码结构，请见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 许可证
 
-本项目以 [Apache License 2.0](LICENSE) 发布；内置的 `miuix/` 子工程同为 Apache-2.0，见 [miuix/LICENSE](miuix/LICENSE)。
+本项目以 [Apache License 2.0](LICENSE) 发布；构建时拉取的 miuix 上游同为 Apache-2.0（见其仓库 LICENSE），本地改造以补丁形式放在 `tools/miuix-patches/`。
 
 项目地址：<https://github.com/rosenii/mafari>
 
@@ -162,3 +165,13 @@ Mafari 由个人业余时间开发维护，完全免费、无广告。如果它�
 </div>
 
 点个 ⭐ Star、反馈问题、推荐给朋友，同样是很大的支持。
+
+## 多语言 / Localization
+
+设置 → 外观 → 第一行「语言」：跟随系统 / English / 简体中文 / 繁體中文（切换后自动重启生效）。
+
+- 源码中的界面文案以简体中文为键：`tr("设置")`；带变量用 `{0}` `{1}`：`tr("共 {0} 项", n)`（`i18n/I18n.kt`）。
+- English：`app/src/main/assets/i18n/en.tsv`（`中文原文<TAB>English`，`\n` `\t` `\\` 为转义）。
+- 繁體中文：`zh-TW-phrases.tsv`（台湾用语）+ `s2t.txt`（简→繁逐字表）运行时转换；个别用词不理想时在 phrases 里加一行即可。
+- 找不到译文时回退为简体中文原文，不会崩溃。新增文案只需在代码里写 `tr("…")`，再往 en.tsv 补一行。
+- 系统级字符串（应用名、自动填充服务名）在 `res/values*/strings.xml`，跟随系统语言。

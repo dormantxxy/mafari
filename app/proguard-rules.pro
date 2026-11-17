@@ -1,6 +1,12 @@
 # mafari proguard rules
 -dontwarn org.jetbrains.compose.**
 -keep class dev.dsh.miuixbrowser.** { *; }
+# GeckoView：JNI 与反射会按名字找类，混淆 / 裁剪会直接崩
+-keep class org.mozilla.geckoview.** { *; }
+-keep class org.mozilla.gecko.** { *; }
+-dontwarn org.mozilla.**
+# 普通 lite 里 Firefox 同步库只 compileOnly（不进 APK），共用源码里的 Fxa* 引用的 mozilla.* 类在 R8 里不存在，忽略告警
+-dontwarn mozilla.**
 # BouncyCastle（加密引擎只用轻量 API，无反射；忽略它可选依赖的告警）
 -dontwarn org.bouncycastle.**
 # OkHttp（WebDAV 同步）：可选的 TLS 提供者 / 平台类告警
@@ -23,3 +29,23 @@
 # SQLCipher（历史记录库）：JNI 按名字回调 Java 类，混淆会直接崩
 -keep class net.zetetic.database.** { *; }
 -dontwarn net.zetetic.**
+
+# Firefox 账号 / Sync（application-services：UniFFI + JNA 靠反射加载）
+-keep class mozilla.appservices.** { *; }
+-keep class mozilla.components.service.fxa.** { *; }
+-keep class mozilla.components.browser.storage.sync.** { *; }
+-keep class mozilla.components.concept.fetch.** { *; }
+-keep class mozilla.components.lib.fetch.** { *; }
+-keep class com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.** { *; }
+-dontwarn com.sun.jna.**
+-dontwarn java.awt.**
+# 扫一扫：ML Kit（内置版条码识别）靠 manifest 里的组件注册表 + 反射初始化，CameraX 内部也有反射；保留避免 release 里被裁掉 / 改名
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_barcode.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_common.** { *; }
+-keep class com.google.android.gms.internal.mlkit_common.** { *; }
+-dontwarn com.google.mlkit.**
+-dontwarn com.google.android.gms.internal.mlkit_**
+-keep class androidx.camera.** { *; }
+-dontwarn androidx.camera.**

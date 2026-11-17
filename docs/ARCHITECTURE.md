@@ -19,7 +19,9 @@ mafari-dual/
 │     ├─ gecko/assets/               仅 gecko 变体：内置拓展 mafari-gm-ext/（manifest / background.js / relay.js）、
 │     │                              mafari_gm_gecko_shim.js、mafari-bookmarks-shim.js（Floccus 书签垫片）
 │     └─ test/                       JVM 单测：CryptoEngine、BackupFormat、GitNames、GitHistory、WebDavNames
-├─ miuix/                            UI 库源码（includeBuild + dependencySubstitution，Apache-2.0，自带 AGENTS.md）
+├─ miuix.ref                         miuix 上游仓库与版本（跟随主线）
+├─ third_party/miuix/                上游源码（gitignore，tools/miuix-sync.sh 生成，includeBuild + dependencySubstitution）
+├─ tools/miuix-patches/              对上游的本地改造补丁（git am 格式）
 │                                    业务改动不要放这里；模块：ui / preference / icons / glass / blur / nav / squircle …
 ├─ docs/                             ARCHITECTURE（本文）、GECKO、GECKO_GM、FINGERPRINT + 截图
 ├─ tools/                            node 测试：gm-ext-test（Gecko GM 链路）、userscript-test（用户脚本解析）
@@ -29,7 +31,7 @@ mafari-dual/
 
 ## 2. 构建变体（先理解这个，否则容易写出 lite 崩溃的代码）
 
-`flavorDimensions = engine × abi`：
+`flavorDimensions = engine × abi`；engine 有三个：`gecko` / `lite` / `liteSync`（= lite + Firefox 同步，只构建 `liteSyncArm64`）：
 
 | | `lite`（无内核版） | `gecko`（Gecko 版） |
 | --- | --- | --- |
@@ -37,9 +39,11 @@ mafari-dual/
 | `BuildConfig.GECKO_ENABLED` | `false` | `true` |
 | ABI | `liteArm64` / `liteArm32` / `liteX64` 各一个包 | 只有 `geckoArm64` |
 | `src/gecko/assets` | 不打包 | 打包 |
+| Firefox 同步库（FxA / Places） | 仅 `compileOnly`，**不进 APK** | `implementation` |
+| `BuildConfig.SYNC_ENABLED` | `false`（`liteSync` 为 `true`） | `true` |
 
-- 唯一判断入口 `EngineSupport`：`GECKO_BUNDLED`（编译期常量，R8 据此裁剪）、`geckoAvailable()`（打包了 **且** 设备是 arm64-v8a）、`defaultIsGecko(ctx)`（设置选了 Gecko 且可用）。
-- **铁律**：共用代码凡是会碰到 `Gecko*` 类的地方，必须先过 `EngineSupport`，否则 lite 运行时 `NoClassDefFoundError`。
+- 唯一判断入口 `EngineSupport`：`SYNC_BUNDLED`（有无 Firefox 同步，gecko / liteSync 为 true）、`SYNC_LITE`（liteSync，更新选包用）、`GECKO_BUNDLED`（编译期常量，R8 据此裁剪）、`geckoAvailable()`（打包了 **且** 设备是 arm64-v8a）、`defaultIsGecko(ctx)`（设置选了 Gecko 且可用）。
+- **铁律**：共用代码凡是会碰到 `Gecko*` 类的地方，必须先过 `EngineSupport`，否则 lite 运行时 `NoClassDefFoundError`；碰 `Fxa*`（Firefox 同步）同理要先过 `EngineSupport.SYNC_BUNDLED`（`proguard-rules.pro` 里的 `-dontwarn mozilla.**` 就是为普通 lite 里缺失的同步库类准备的）。
 - 构建时指定具体任务（如 `:app:assembleLiteArm64Debug`、`:app:assembleGeckoArm64Release`），不要跑 `assemble`。
 - 默认两个版本同一个 applicationId（可互相覆盖升级）；`-PgeckoAppIdSuffix=.gecko` 可并存。
 
@@ -102,11 +106,11 @@ MainActivity ──► BrowserScreen（Compose，约 3000 行：手势 / 弹层 
 
 ## 5. 数据与存储
 
-**加密库 `history.db`（SQLCipher 整库 AES-256，`HistoryDb`）**——绝大多数结构化数据都在这一个库里：
+**加密库 `history.db`（SQLCipher 整库 AES-256，`AppDatabase`）**——绝大多数结构化数据都在这一个库里：
 
 | 表 | 负责文件 | 内容 |
 | --- | --- | --- |
-| `history` | `History.kt`（`HistoryStore`） | 浏览历史 |
+| `history` | `HistoryDao.kt` / `HistoryStore.kt` | 浏览历史 |
 | `bookmarks` / `bookmark_folders` / meta | `BookmarkDb`、`Favorites.kt`（`FavoritesStore`） | 书签；id 稳定不变，Floccus 同步靠它做增量对账 |
 | `scripts` | `ScriptDb`、`Extensions.kt`（`ExtensionStore`） | 油猴脚本，主键为脚本 id（GM 值也按它存，所以必须稳定） |
 | `gm_values` | `GmStore` | GM_setValue 数据（取代旧的 SharedPreferences `userscript_gm`），WebView 与 Gecko 共用 |
@@ -115,8 +119,9 @@ MainActivity ──► BrowserScreen（Compose，约 3000 行：手势 / 弹层 
 | `tabs` | `TabDb` | 见 §4 |
 
 - 库密钥：随机 32 字节，经 `SecureStore`（Android Keystore 保护的 `EncryptionEngine`）封装后存 SharedPreferences `mafari_history_db`；密钥取不回来则删库重建。
-- 所有写入走 **`HistoryDb.io`（单线程执行器 `mafari-db-writer`）**，按提交顺序执行；`HistoryDb.get()` 返回 null 表示库不可用，各功能降级为「不记录」而不是崩溃。
-- 新增表：在 `HistoryDb.open()` 里 `CREATE TABLE IF NOT EXISTS`；旧库补列写 `migrate()`（参考 `TabDb.migrate`）。
+- 所有写入走 **`AppDatabase.io`（单线程执行器 `mafari-db-writer`）**，按提交顺序执行；`AppDatabase.get()` 返回 null 表示库不可用，各功能降级为「不记录」而不是崩溃。
+- 新增 / 修改表、索引、列：在 `Migrations.kt` 的 `STEPS` 末尾追加一个版本号 +1 的 `Step`（别改已发布的旧步骤）；每步一个事务，成功后写 `PRAGMA user_version`。旧库补列写 `migrate()`（参考 `TabDb.migrate`）并在新 Step 里调用。
+- 连接 / 就绪 / 写线程在 `AppDatabase.kt`；旧 SharedPreferences 数据导入在 `LegacyImports.kt`；`history` 表 SQL 在 `HistoryDao.kt`。
 - 其余设置在 SharedPreferences：`mafari_settings`（`AppSettings`）、`mafari`（杂项）、`mafari_ad_rules`、`mafari_cookies`、`mafari_menu`、`mafari_gecko_protect` 等。
 - 诊断：`Diag`（默认关，写 `/sdcard/Android/media/<pkg>/diag.txt`）；未捕获异常写 `crash.txt`（`MainActivity.installCrashLogger`）。
 
@@ -128,13 +133,14 @@ MainActivity ──► BrowserScreen（Compose，约 3000 行：手势 / 弹层 
 | --- | --- |
 | `CipherSuite.kt` | 套件注册表 `CipherSuites`、`Envelope`、`KeyProvider`。**套件号发布后永不复用 / 不改格式；淘汰的套件不删，只改 `DEFAULT_ID`** |
 | `CryptoEngine.kt` | `EncryptionEngine`（seal / open / reseal）、`AndroidKeyVault`（Keystore）、`SecureStore`（按 `PURPOSE_*` 加密小字符串：库密钥、WebDAV 密码、Git 令牌 / 私钥、默认口令…） |
-| `Backup.kt` | `BackupFormat`（`.mfbak`，文件头记录套件与 Argon2id 参数，写最新版读所有版本）、`BackupCategory`（书签 / 历史 / 设置 / 脚本 / 脚本数据 / 去广告 / Cookie）、`BackupManager`（收集与恢复） |
+| `Backup.kt` | `BackupFormat`（`.mfbak`，文件头记录套件与 Argon2id 参数，写最新版读所有版本）、`BackupCategory`（书签 / 历史 / 标签列表 / 设置 / 脚本 / 脚本数据 / 去广告 / Cookie）、`BackupManager`（收集与恢复） |
 | `WebDav.kt` / `GitSync.kt` | 云同步：WebDAV（OkHttp，强制 HTTP/1.1，上传后读回大小校验，留 10 份）/ Git（JGit + JSch，令牌或 Deploy key，只留最近 10 个提交并强推） |
 | `BackupAuto.kt` | 自动推送：启动时到期则推送到当前连接及开启「一并同步」的目标 |
 | `BiometricGate.kt` | 查看 / 修改默认口令、每次恢复前的身份验证 |
 | `BackupScreen.kt` | 备份页 UI（约 1800 行） |
 | `WebViewCookies.kt` / `CookieControl.kt` | Cookie 导出导入（WebView 读 Chromium Cookie 库副本；Gecko 经内置拓展）与清理 |
 
+- 标签列表（`tabs/list` 单元）：`TabDb.exportJson` 导出（含缩略图 base64 + Gecko 会话状态），`prepareRestore` 里先 `parseBackup` 校验，`applyRestore` 调 `TabDb.restoreAll` 在 `AppDatabase.io` 上单事务整表替换，并置 `TabDb.frozen` 让 `sync / saveThumb / saveState` 停写（否则界面里还活着的旧标签会把恢复的列表覆盖回去；进程随后重启）。
 - 恢复**只覆盖备份里有数据的类别**，没选 / 为空的类别保持原样。
 - 备份里设备上是密文的键必须存**明文**（再由备份信封加密），否则换机无法恢复（`BackupManager.DEVICE_ENCRYPTED`）；已迁到 DB 的数据走 DB 导出（`DB_BACKED`）。
 - 新增要进备份的设置：加入 `BackupManager.PREFS` 并在 `categoryOf` 里归类。
@@ -168,16 +174,16 @@ MainActivity ──► BrowserScreen（Compose，约 3000 行：手势 / 弹层 
 
 - **下载**：`Downloader`（自研，不走系统下载器；多线程分段 + 断点续传 + 暂停 / 重试，先写缓存再入库 `/sdcard/Download/mafari`）、`DownloadService`（前台服务 + 进度通知 / 小米超级岛）、`DownloadDb`、`DownloadsScreen`。
   Gecko 下 ≤64MB 且有 Content-Length 的直接消费 Gecko 响应体（带登录态），更大的仍由 `Downloader` 重新请求（**不带 Cookie**）。
-- **更新**：`UpdateChecker`（启动检查，进程内一次）+ `AboutScreen`（`UpdateChannel`：lite / gecko / canary-lite / canary-gecko；`pickApkUrl` 按变体与本机 ABI 选包）+ `GitHubAccelerate`（镜像并发探测）。**改 APK 命名必须同步 `pickApkUrl`。**
+- **更新**：`UpdateChecker`（启动检查，进程内一次）+ `AboutScreen`（`UpdateChannel`：lite / gecko / canary-lite / canary-gecko；`pickApkUrl` 按变体与本机 ABI 选包；已装 liteSync 时 lite 通道只选 `sync_lite` 包，普通 lite 排除它）+ `GitHubAccelerate`（镜像并发探测）。**改 APK 命名必须同步 `pickApkUrl`。**
 - **视觉**：`AppMaterial`（`MiuixGlassMaterial` / `LiquidGlassMaterial` / `FlatMaterial` 三套材质抽象，设置页统一经它取组件）、`GlassKit`、`LiquidGlassKit/Components`（Kyant backdrop）、`BlurEffects`、`WallpaperBlurCache`、`TopInset`（状态栏留白在布局阶段读取，避免每帧重组整个 `BrowserScreen`）。
   液态玻璃采样层**内部**的按钮要用实色底（`inPage`），否则递归采样闪退。
 - **图标 / 快捷方式**：`AppIconManager`（5 个 `activity-alias`，名带 `V2`，切换推迟到 `onStop`）、`ShortcutHelper` + `WebAppActivity`。
 
 ## 10. CI 与发布（`.github/workflows/release.yml`）
 
-- 触发：push `main` / `gecko` / `dual`、tag `v*`、手动。一次构建同时产出 `Mafari-<标签>-gecko.apk` 与 `Mafari-<标签>-lite-<arm64-v8a|armeabi-v7a|x86_64>.apk` + `SHA256SUMS.txt`。
+- 触发：push `main` / `gecko` / `dual`、tag `v*`、手动。一次构建同时产出 `Mafari-<标签>-gecko.apk` 与 `Mafari-<标签>-lite-<arm64-v8a|armeabi-v7a|x86_64>.apk`（不含 Firefox 同步）与 `Mafari-<标签>-sync_lite-arm64.apk`（lite + 同步，仅 arm64）+ `SHA256SUMS.txt`。
 - `v*` tag → 正式 Release；`gecko` 分支 → `gecko-<构建号>` 预发布；`dual` 分支 → 以应用版本名直接发正式 Release（同版本名重复构建会覆盖安装包，要让用户收到更新请先提高 `versionName`）。
-- 签名来自环境变量 / Secrets（不配则出 debug 包）；Telegram 推送可选。Release 正文取自 `CHANGELOG.md` 对应版本小节。
+- 签名来自环境变量 / Secrets（不配则出 debug 包）；Telegram 推送可选（文案 = 更新日志 + 底部下载链接，安装包附在同一条消息里；超过 50MB 的包只给直链）。Release 正文取自 `CHANGELOG.md` 对应版本小节。
 
 ## 11. 约定与易踩的坑
 
@@ -186,17 +192,18 @@ MainActivity ──► BrowserScreen（Compose，约 3000 行：手势 / 弹层 
 3. 热路径（请求拦截、滚动、主线程）禁止：遍历大集合拼字符串、读 asset / 文件、同步序列化大 JSON。
 4. `BrowserTab.contentView` 读取会触发 `ensureGecko()`——后台标签要做的事（关闭 / 延迟投递）不要碰它。
 5. 无痕标签：不落盘、不回收、不记隐私统计、Gecko 私有会话必须在创建时指定。
-6. 数据库访问一律经 `HistoryDb.get()` / `HistoryDb.io`；拿到 null 要降级，不要抛。
+6. 数据库访问一律经 `AppDatabase.get()` / `AppDatabase.io`；拿到 null 要降级，不要抛。
 7. Gecko Nightly 的 Java API 偶尔变化：建议在 `gradle.properties` 锁定 `geckoViewVersion`。
 8. 改动原则（项目作者的要求）：**最小改动、最小资源占用、最大代码复用**；先复用已有组件 / 抽象（如 `AppMaterial`、`AppDropdownPreference`），不要另起一套。
-9. 文档漂移提示：`GeckoGm.kt` 文件头注释仍写「GM 值在 SharedPreferences `userscript_gm`」，实际已迁到 `GmStore`（`gm_values` 表）；`BackupManager.PREFS` 里的 `userscript_gm` 仅为兼容旧数据。
+9. Firefox 同步**不在启动时初始化**，只在打开同步页（`FxaScreen`）或 `SendTabActivity` 时才 `FxaSync.init`；因此未打开过同步页时 `FxaSync.ui` 一直是 Loading，不会自动同步。Firefox 同步（`FxaSync.init` → `FxaApi.start`）的初始化里真正重的是 Rust 组件 / NSS 加载，放在后台协程（`FxaSync.initJob`），不要挪回 `MainActivity.onCreate`；而 Storage / `FxaAccountManager` 的**构造必须在主线程**（放后台会构造失败，表现为 `lateinit property manager has not been initialized`），`FxaApi.start` 里已用 `withContext(Dispatchers.Main)` 包住。`FxaApi` 的各接口在 `start` 完成前会因 `lateinit` 未初始化而抛异常，调用方都已在 `runCatching` / 已登录状态之后调用；新增调用点要么先 `initJob.join()`，要么同样包 `runCatching`。
+10. 文档漂移提示：`GeckoGm.kt` 文件头注释仍写「GM 值在 SharedPreferences `userscript_gm`」，实际已迁到 `GmStore`（`gm_values` 表）；`BackupManager.PREFS` 里的 `userscript_gm` 仅为兼容旧数据。
 
 ## 12. 想改 X，先看 Y
 
 | 想改 | 先看 |
 | --- | --- |
 | 标签切换 / 恢复 / 回收策略 | `BrowserState`（`activate` / `restoreSavedTabs` / `reclaimEngines`）、`BrowserTab`（`discardEngine` / `loadPending`）、`TabDb` |
-| 地址栏 / 底栏 / 手势 | `BrowserBottomBar`、`BrowserScreen` |
+| 地址栏 / 底栏 / 手势（导航栏位置 `AppSettings.barPosition`：顶部 / 底部 / 始终最小化；快速朝屏幕中间一扫换边） | `BrowserBottomBar`、`BrowserScreen` |
 | 主页（收藏 / 隐私报告 / 排序） | `HomeScreen`、`Favorites.kt`、`BookmarkDb` |
 | 更多面板 / 菜单项 | `BrowserMenuPanels`、`MenuActions` |
 | 设置项 | `AppSettings`、`SettingsScreen` 及各子页（路由在 `AppRoute`） |
@@ -207,8 +214,8 @@ MainActivity ──► BrowserScreen（Compose，约 3000 行：手势 / 弹层 
 | 去广告规则语法 / 性能 | `AdBlockEngine`、`AdBlock` |
 | 备份格式 / 加密 | `Backup.kt`、`CipherSuite.kt`、`CryptoEngine.kt` |
 | 云同步 | `WebDav.kt`、`GitSync.kt`、`BackupAuto.kt` |
-| 下载 | `Downloader`、`DownloadService`、`DownloadDb` |
-| 玻璃 / 液态玻璃材质 | `AppMaterial`、`GlassKit`、`LiquidGlass*`、`miuix/miuix-glass` |
+| 下载 | `download/` 目录：`Downloader`、`ExternalDownloader`、`DownloadService`、`DownloadDb` |
+| 玻璃 / 磨砂 / 液态玻璃材质（四种「高级材质」：柔光玻璃 = miuix-glass + 折射，磨砂 = miuix-glass 无折射，由 `GlassLook` 切换；补丁 0008 提供弹窗 / 对话框 / 抽屉的全局开关 `GlassSurfaceShading`） | `AppMaterial`、`GlassKit`、`GlassLook`、`LiquidGlass*`、`third_party/miuix/miuix-glass` |
 | 发版 / 更新选包 | `release.yml`、`app/build.gradle.kts`、`AboutScreen.pickApkUrl`、`CHANGELOG.md` |
 
 ## 13. 文档地图
@@ -220,7 +227,37 @@ MainActivity ──► BrowserScreen（Compose，约 3000 行：手势 / 弹层 
 | `docs/GECKO.md` | 双内核适配矩阵、Gecko 高级保护、about:config 偏好 |
 | `docs/GECKO_GM.md` | Gecko 油猴（内置 WebExtension）方案、安全模型、验证清单 |
 | `docs/FINGERPRINT.md` | WebView 指纹保护的安全边界与降级路径 |
-| `miuix/AGENTS.md` | UI 库自身的协作约定 |
+| `third_party/miuix/AGENTS.md` | UI 库自身的协作约定 |
 | `CHANGELOG.md` | 变更历史（发版小节同时是 Release 正文） |
 
 > 后续建议（未做）：抽出 `EngineAdapter` 接口统一 WebView / Gecko；订阅等小数据继续往加密库迁移。
+
+
+## 进程级容器与启动编排
+
+- `MafariApp.container`（`AppContainer`）持有进程内唯一的 `AppSettings` / `FavoritesStore` / `HistoryStore` / `ExtensionStore`，任何 `Context` 用 `context.appContainer.xxx` 取；不要再自己 `new`。
+- 冷启动步骤集中在 `StartupCoordinator`：`onProcessCreate` → `onActivityCreate` → 库就绪闸门（`isContentReady` / `awaitContentReady`）→ `onContentShown`。加启动任务先想清楚属于哪个阶段。
+
+## 标签内核操作
+
+`BrowserTab` 里两个内核共有的基础操作（前进后退 / 刷新 / 加载 / 查找 / 滚动 / 标题 / 历史下标）经 `TabEngineOps`（`TabEngineOps.kt`）调用，`WebViewTabOps` 与 `GeckoTabOps` 各一份实现。截图、UA、脚本注入、权限、阅读模式等仍在 `BrowserTab` 里按 `isGecko` 分支。
+
+## 包结构（`dev.dsh.miuixbrowser`）
+
+| 子包 | 内容 |
+|---|---|
+| （根包） | 清单里按类名引用的入口：`MafariApp`、各 `*Activity` / `*Service` / `*Receiver`（下载相关的 `DownloadService` / `DownloadActionReceiver` 在 `download/`，清单里写 `.download.xxx`），以及 `AppContainer`、`StartupCoordinator`、`StartupWarmup` |
+| `download/` | 下载全部集中在这里：`Downloader`（下载引擎）、`ExternalDownloader`（第三方下载器交接）、`DownloadService`（前台服务）、`DownloadActionReceiver`（通知按钮）、`DownloadDb`（任务表）、`DownloadsScreen`（下载页） |
+| `data/` | 加密库（`AppDatabase`、`Migrations`、`LegacyImports`）、各表 DAO（`HistoryDao`、`BookmarkDb`、`TabDb`、`ScriptDb`、`PasswordDb`）、`*Store`、`AppSettings`、`WriteBehind`、图标存储 |
+| `backup/` | 备份 / 恢复、自动备份 |
+| `browser/` | 与内核无关的浏览核心：`BrowserState` / `BrowserTab`、Cookie、快捷方式、密码导入导出等 |
+| `engine/`、`engine/gecko`、`engine/webview` | `EngineSupport`、`TabEngineOps`；Gecko 相关实现；WebView 相关（Cookie、指纹注入） |
+| `sync/`、`sync/fxa` | Git / WebDAV / Floccus 同步；Firefox 帐户同步 |
+| `adblock/` | 去广告规则与引擎、跟踪器列表 |
+| `crypto/` | 加密引擎、加密套件、生物识别、加密锁 |
+| `script/` | 油猴脚本引擎、GM 桥、拓展（脚本）存储 |
+| `net/` | `HttpFetcher`、代理、SOCKS5、GitHub 加速 |
+| `ui/` | 所有 `*Screen` / `*Sheet` / 对话框、玻璃与模糊效果等界面组件 |
+| `util/` | `Diag`、`UrlUtils` |
+
+新增文件按职责放进对应子包；跨包引用用显式 import。清单里新增组件类请放在根包，否则要在 AndroidManifest 里写全限定名。

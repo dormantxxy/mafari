@@ -40,8 +40,8 @@
   var _clearInterval = W.clearInterval.bind(W);
 
   var bridge = null;
-  // 原生桥：window.MafariGM
-  try { bridge = W.MafariGM || null; } catch (e) { bridge = null; }
+  // Gecko：由 GeckoGm 在外层闭包里传入 __mafariBridge（页面拿不到）；WebView：window.MafariGM
+  try { bridge = (typeof __mafariBridge !== 'undefined' && __mafariBridge) || W.MafariGM || null; } catch (e) { bridge = null; }
 
   function log(level, msg) {
     try { console[level]('[Mafari] ' + META.name + ': ' + msg); } catch (e) {}
@@ -125,6 +125,8 @@
   }
   if (!shouldRun(W.location.href)) return;
   (W.__mafariRan || (W.__mafariRan = {}))[META.id] = 1;
+  // Gecko 没有 evaluateJavascript 可供原生来问：上报「本页真正运行了哪些脚本」（WebView 的桥没有该方法，忽略）
+  try { if (bridge && typeof bridge.ran === 'function') bridge.ran(META.id); } catch (e) {}
 
   // ------------------------------------------------------------------ helpers
   function whenRoot(cb) {
@@ -246,12 +248,43 @@
       }
     });
   }
+  // 桥支持 onValueChange（Gecko shim）：别的标签 / 框架写值时由桥直接通知，不开 1s 轮询（省定时器 + 每秒一次 getValues）
+  var hooked = false;
+  function hasListenerFor(n) {
+    for (var id in listeners) if (listeners[id] && listeners[id].name === n) return true;
+    return false;
+  }
+  function checkKey(n) {
+    function apply(raw) {
+      var prev = lastSeen[n];
+      if (raw === prev) return;
+      lastSeen[n] = raw;
+      fireChange(n, parseVal(prev, undefined), parseVal(raw, undefined), true);
+    }
+    if (bridge && typeof bridge.getValueAsync === 'function') { // 大值只有异步能拿到；同步命中的直接回调
+      var sync = true;
+      try {
+        bridge.getValueAsync(META.id, n, function (raw) {
+          if (raw === null && !sync) return; // 异步拿到 null 可能是超时 / 放弃，不当成删除（真删除的广播是同步命中的）
+          apply(raw);
+        });
+        sync = false;
+        return;
+      } catch (e) {}
+    }
+    apply(rawGet(n));
+  }
+  function onBridgeChange(k) { if (hasListenerFor(k)) checkKey(k); }
   function ensurePoll() {
-    if (pollTimer) return;
+    if (hooked || pollTimer) return;
+    if (bridge && typeof bridge.onValueChange === 'function') {
+      try { bridge.onValueChange(META.id, onBridgeChange); hooked = true; return; } catch (e) {}
+    }
     pollTimer = _setInterval(pollTick, POLL_INTERVAL_MS);
   }
   function stopPoll() {
     if (pollTimer) { _clearInterval(pollTimer); pollTimer = null; }
+    if (hooked) { hooked = false; try { bridge.onValueChange(META.id, null); } catch (e) {} }
   }
 
   function GM_getValue(k, d) { return parseVal(rawGet(k), d); }
@@ -313,13 +346,17 @@
     listeners[id] = { name: name, cb: cb };
     if (!Object.prototype.hasOwnProperty.call(lastSeen, name)) {
       lastSeen[name] = rawGet(name);
+      if (lastSeen[name] === null && bridge && typeof bridge.getValueAsync === 'function') {
+        // 大值同步读不到（首次是 null）：后台补一次基线，免得之后拉到值时被当成「新增」
+        try { bridge.getValueAsync(META.id, String(name), function (raw) { if (raw !== null && lastSeen[name] === null) lastSeen[name] = raw; }); } catch (e) {}
+      }
     }
     ensurePoll();
     return id;
   }
   function GM_removeValueChangeListener(id) {
     delete listeners[id];
-    if (pollTimer && !Object.keys(listeners).length) stopPoll();
+    if ((pollTimer || hooked) && !Object.keys(listeners).length) stopPoll();
   }
 
   // ------------------------------------------------------------------ styles / elements
@@ -628,7 +665,7 @@
 
       var opts = {
         url: url, method: method, headers: headers, timeout: details.timeout || 0,
-        anonymous: !!details.anonymous, ua: navigator.userAgent, lang: navigator.language,
+        anonymous: !!details.anonymous, ua: navigator.userAgent, lang: navigator.language, sid: META.id,
         redirect: details.redirect || 'follow', referrer: W.location.href
       };
       try { bridge.xhrStart(reqId, JSON.stringify(opts), prep.b64); }
@@ -684,6 +721,34 @@
 
     // Fallback: toast only; do NOT fake ondone.
     try { if (bridge && typeof bridge.toast === 'function') bridge.toast(title ? title + '：' + text : text); } catch (e) {}
+  }
+
+  // ------------------------------------------------------------------ Mafari 宿主能力（系统画中画 / DLNA 投屏 / 外部播放器）
+  // GM_mafariHost(op, args, onEvent) → Promise<结果 | null>。null = 宿主不支持（桥不存在 / 超时 / 不是主界面）。
+  // 传了 onEvent 就是订阅：原生之后随时可以往回推事件，回调常驻到页面卸载；不传则结果回来后立刻摘掉回调。
+  function GM_mafariHost(op, args, onEvent) {
+    return new Promise(function (resolve) {
+      if (!bridge || typeof bridge.host !== 'function') { resolve(null); return; }
+      var cbId = 'h_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      var fn = '__mafariHostCallback_' + cbId;
+      var persist = typeof onEvent === 'function';
+      var done = false, timer = null;
+      function finish(v) {
+        if (done) return;
+        done = true;
+        if (timer) _clearTimeout(timer);
+        if (!persist) delCb(fn);
+        resolve(v);
+      }
+      setCb(fn, function (kind, json) {
+        var v = null;
+        try { v = JSON.parse(json); } catch (e) {}
+        if (kind === 'r') finish(v);
+        else if (persist) safeCall(onEvent, null, [v], 'mafariHost');
+      });
+      timer = _setTimeout(function () { finish(null); }, 6000);
+      try { bridge.host(String(op), JSON.stringify(args || {}), cbId); } catch (e) { finish(null); }
+    });
   }
 
   function GM_openInTab(url, opts) {
@@ -859,9 +924,14 @@
       accessKey: optsObj && optsObj.accessKey ? String(optsObj.accessKey) : null,
       autoClose: !!(optsObj && optsObj.autoClose)
     };
+    notifyMenu();
     return id;
   }
-  function GM_unregisterMenuCommand(id) { delete menu.cmds[id]; }
+  function GM_unregisterMenuCommand(id) { delete menu.cmds[id]; notifyMenu(); }
+  // Gecko 没有 evaluateJavascript 可供原生来问，菜单变化时主动上报（WebView 的桥没有该方法，直接忽略）
+  function notifyMenu() {
+    try { if (bridge && typeof bridge.menuChanged === 'function') bridge.menuChanged(); } catch (e) {}
+  }
 
   // ------------------------------------------------------------------ tabs
   var tabObj = {};
@@ -1129,10 +1199,40 @@
   var GM = {
     openFileStream: openFileStream,
     info: GM_info,
-    getValue: p(GM_getValue),
+    // 大值（Gecko 桥不内联进快照）只能异步拿：有 getValueAsync 就走它，其余桥沿用同步读
+    getValue: function (k, d) {
+      if (bridge && typeof bridge.getValueAsync === 'function') {
+        return new Promise(function (resolve) {
+          try { bridge.getValueAsync(META.id, String(k), function (raw) { resolve(parseVal(raw, d)); }); }
+          catch (e) { resolve(GM_getValue(k, d)); }
+        });
+      }
+      return p(GM_getValue)(k, d);
+    },
     setValue: p(GM_setValue), deleteValue: p(GM_deleteValue),
     listValues: p(GM_listValues),
-    getValues: p(GM_getValues),
+    // 大值同步读不到：有 getValueAsync 就逐个异步取（已在本地的同步回调，没有额外 Promise），全部到齐后一次 resolve
+    getValues: function (keys) {
+      if (!bridge || typeof bridge.getValueAsync !== 'function') return p(GM_getValues)(keys);
+      return new Promise(function (resolve) {
+        var list, defs = null;
+        if (Array.isArray(keys)) list = keys;
+        else if (keys && typeof keys === 'object') { defs = keys; list = Object.keys(keys); }
+        else list = GM_listValues();
+        var out = {}, left = list.length;
+        if (!left) { resolve(out); return; }
+        list.forEach(function (k) {
+          var done = false;
+          function fin(raw) {
+            if (done) return;
+            done = true;
+            out[k] = parseVal(raw, defs ? defs[k] : undefined);
+            if (--left === 0) resolve(out);
+          }
+          try { bridge.getValueAsync(META.id, String(k), fin); } catch (e) { fin(rawGet(k)); }
+        });
+      });
+    },
     setValues: p(GM_setValues), deleteValues: p(GM_deleteValues),
     addValueChangeListener: p(GM_addValueChangeListener), removeValueChangeListener: p(GM_removeValueChangeListener),
     addStyle: p(GM_addStyle), addElement: p(GM_addElement),
@@ -1140,6 +1240,7 @@
     getResourceUrl: p(GM_getResourceURL), getResourceURL: p(GM_getResourceURL),
     xmlHttpRequest: promisifyXhr, xmlhttpRequest: promisifyXhr,
     notification: p(GM_notification), openInTab: p(GM_openInTab), setClipboard: p(GM_setClipboard),
+    mafariHost: p(GM_mafariHost),
     download: GM_download_promise,
     registerMenuCommand: p(GM_registerMenuCommand), unregisterMenuCommand: p(GM_unregisterMenuCommand),
     getTab: p(function () { return tabObj; }), saveTab: p(GM_saveTab),
@@ -1157,7 +1258,7 @@
     GM_addValueChangeListener, GM_removeValueChangeListener, GM_addStyle, GM_addElement,
     GM_getResourceText, GM_getResourceURL, GM_xmlhttpRequest, GM_notification, GM_openInTab,
     GM_setClipboard, GM_download, GM_registerMenuCommand, GM_unregisterMenuCommand,
-    GM_getTab, GM_saveTab, GM_getTabs, GM_cookie, GM_log, GM, unsafeWindow, define, module, exports
+    GM_getTab, GM_saveTab, GM_getTabs, GM_cookie, GM_log, GM_mafariHost, GM, unsafeWindow, define, module, exports
   ) {
     return (__MAFARI_FN__ () {
 __MAFARI_CODE__
@@ -1174,7 +1275,7 @@ __MAFARI_CODE__
         GM_setClipboard, GM_download, GM_registerMenuCommand, GM_unregisterMenuCommand,
         GM_getTab, GM_saveTab, GM_getTabs, GM_cookie,
         function () { try { console.log.apply(console, arguments); } catch (e) {} },
-        GM, W, undefined, undefined, undefined);
+        GM_mafariHost, GM, W, undefined, undefined, undefined);
     } catch (err) {
       log('error', (err && err.stack) || (err && err.message) || err);
       return;

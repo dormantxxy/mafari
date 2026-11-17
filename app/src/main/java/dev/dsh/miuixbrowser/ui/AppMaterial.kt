@@ -227,10 +227,11 @@ interface AppMaterial {
 private fun rememberOverlayContent(content: @Composable () -> Unit): @Composable () -> Unit {
     val liquidBackdrop = LocalLiquidBackdrop.current
     val mode = LocalBlurMode.current
+    val glassParams = LocalGlassParams.current
     val latest by rememberUpdatedState(content)
     return remember(liquidBackdrop, mode) {
         val wrapped: @Composable () -> Unit = {
-            CompositionLocalProvider(LocalLiquidBackdrop provides liquidBackdrop, LocalBlurMode provides mode) {
+            CompositionLocalProvider(LocalLiquidBackdrop provides liquidBackdrop, LocalBlurMode provides mode, LocalGlassParams provides glassParams) {
                 latest()
             }
         }
@@ -550,11 +551,12 @@ fun BoxScope.AppGlassPopup(
     val m = currentMaterial()
     val liquidBackdrop = LocalLiquidBackdrop.current
     val mode = LocalBlurMode.current
+    val glassParams = LocalGlassParams.current
     with(m) {
         PopupHost(
             show, onDismissRequest, anchorBounds, backdrop, modifier, alignStart,
             content = {
-                CompositionLocalProvider(LocalLiquidBackdrop provides liquidBackdrop, LocalBlurMode provides mode) {
+                CompositionLocalProvider(LocalLiquidBackdrop provides liquidBackdrop, LocalBlurMode provides mode, LocalGlassParams provides glassParams) {
                     content()
                 }
             },

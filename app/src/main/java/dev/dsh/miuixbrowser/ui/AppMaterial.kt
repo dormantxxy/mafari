@@ -13,6 +13,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.geometry.Size
+import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -262,16 +272,47 @@ private fun rememberOverlayContent(content: @Composable () -> Unit, sheetTopBlur
 }
 
 /**
+ * sheet 顶部带是否用 miuix 纹理渐进模糊（false = 主题色渐变遮罩）。
+ *
+ * 之前内容变黑的根因：miuix 的模糊着色器末尾会把「alpha > 1/255 的像素」整个重置成不透明
+ * （见上游 Shaders.kt 的 unpremul terminator：`half4(color.rgb / color.a, 1.0)`），
+ * 它假定被采样的层是不透明的页面。sheet 内容背后是透明的玻璃面板，图标的每个有色像素都会被拉成不透明黑块。
+ * 现在录制层里先垫一层不透明的主题 surface 色再画内容（只影响录制层，屏幕上的内容照常绘制），
+ * 带子再用自上而下的渐变蒙版淡出，下沿与真实内容无缝衔接。
+ */
+private const val SHEET_TOP_TEXTURE_BLUR = true
+
+/** 渐进带溢出到 sheet 左右边缘的距离：与上游 sheet 的内边距（insideMargin.width）一致。 */
+private val SheetTopBleedX = BottomSheetDefaults.insideMargin.width
+
+/** 渐进带向上溢出的距离：盖住拖动条区域（上游 DragHandleArea 高 24dp）。 */
+private val SheetTopBleedY = 24.dp
+
+/**
  * 所有 sheet（[AppBottomSheet] 统一入口）内容滚动到头部时的顶部渐进效果，所有材质都生效：
  * - 柔光 / 磨砂 / 液态玻璃（设备支持 RuntimeShader）：渐进模糊（自上而下由强到弱，参数同 GlassTopAppBar 的渐进模糊带），
  *   内容录制成一层 backdrop，在内容区顶部盖一条渐进模糊带；
  * - 纯色（关闭模糊）或不支持 RuntimeShader：主题 surface 色 → 透明的渐变，与子页面顶栏的 fallback 渐变一致。
  * 滚动量由嵌套滚动累计，带子随滚动淡入（未滚动时完全透明，不改变静止外观），不拦截触摸。
+ * 带子向左 / 右 / 上溢出，盖满整个 sheet 顶部（含内边距与拖动条），并按 sheet 的顶部圆角裁剪。
  */
 @Composable
 private fun SheetTopBlur(content: @Composable () -> Unit) {
-    val blur = LocalBlurMode.current != BLUR_OFF && top.yukonga.miuix.kmp.material.isRuntimeShaderSupported()
-    val backdrop = rememberLayerBackdrop()
+    val blur = SHEET_TOP_TEXTURE_BLUR && LocalBlurMode.current != BLUR_OFF &&
+        top.yukonga.miuix.kmp.material.isRuntimeShaderSupported()
+    val surface = MiuixTheme.colorScheme.surface
+    // 录制层先垫不透明底色再画内容：模糊着色器要求被采样的层不透明，否则半透明像素会被拉成不透明黑块
+    // 底色向左 / 右 / 上多铺一圈（带子溢出的那部分也要有不透明像素可采样）
+    val backdrop = rememberLayerBackdrop {
+        val bx = SheetTopBleedX.toPx()
+        val by = SheetTopBleedY.toPx()
+        drawRect(
+            color = surface.copy(alpha = 1f),
+            topLeft = Offset(-bx, -by),
+            size = Size(size.width + bx * 2f, size.height + by),
+        )
+        drawContent()
+    }
     var scrolled by remember { mutableFloatStateOf(0f) }
     val connection = remember {
         object : NestedScrollConnection {
@@ -283,8 +324,18 @@ private fun SheetTopBlur(content: @Composable () -> Unit) {
         }
     }
     val rampPx = with(LocalDensity.current) { GlassTopAppBarDefaults.ProgressiveBlurRampDistance.toPx() }
-    val surface = MiuixTheme.colorScheme.surface
     val fadeBrush = remember(surface) { GlassTopAppBarDefaults.bandBrush(surface) }
+    val bandShape = remember {
+        RoundedCornerShape(topStart = BottomSheetDefaults.cornerRadius, topEnd = BottomSheetDefaults.cornerRadius)
+    }
+    // 自上而下淡出的蒙版：顶部几乎不透明，到带子下沿完全透明，与真实内容无缝衔接
+    val maskBrush = remember {
+        Brush.verticalGradient(
+            0f to Color.Black.copy(alpha = 0.92f),
+            0.55f to Color.Black.copy(alpha = 0.6f),
+            1f to Color.Transparent,
+        )
+    }
     Box(modifier = Modifier.nestedScroll(connection)) {
         Box(modifier = if (blur) Modifier.layerBackdrop(backdrop) else Modifier) { content() }
         Box(
@@ -292,15 +343,36 @@ private fun SheetTopBlur(content: @Composable () -> Unit) {
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .height(48.dp)
-                .graphicsLayer { alpha = (scrolled / rampPx).coerceIn(0f, 1f) }
+                // 内容区外面还有 sheet 的内边距（左右）和拖动条一带（顶部）：带子向左 / 右 / 上溢出，
+                // 不改变父布局测得的大小，也不拦截触摸。
+                .layout { measurable, constraints ->
+                    val bleedX = SheetTopBleedX.roundToPx()
+                    val bleedY = SheetTopBleedY.roundToPx()
+                    val w = constraints.maxWidth
+                    val h = constraints.maxHeight
+                    val placeable = measurable.measure(Constraints.fixed(w + bleedX * 2, h + bleedY))
+                    layout(w, h) { placeable.placeRelative(-bleedX, -bleedY) }
+                }
+                .graphicsLayer {
+                    alpha = (scrolled / rampPx).coerceIn(0f, 1f)
+                    // 离屏合成：下面的渐变蒙版用 DstIn，只作用于带子自己，不能影响 sheet 的其他像素
+                    compositingStrategy = CompositingStrategy.Offscreen
+                }
+                .clip(bandShape)
                 .then(
                     if (blur) {
-                        Modifier.progressiveTextureBlur(
-                            backdrop = backdrop,
-                            shape = RectangleShape,
-                            gradient = ProgressiveBlur.Top.copy(curve = 0.5f),
-                            blurRadius = GlassTopAppBarDefaults.ProgressiveBlurRadius.value,
-                        )
+                        Modifier
+                            .progressiveTextureBlur(
+                                backdrop = backdrop,
+                                shape = RectangleShape,
+                                gradient = ProgressiveBlur.Top.copy(curve = 0.5f),
+                                blurRadius = GlassTopAppBarDefaults.ProgressiveBlurRadius.value,
+                            )
+                            // drawBackdrop 先画模糊层再 drawContent()：这里在它之后叠蒙版，淡出带子下沿
+                            .drawWithContent {
+                                drawContent()
+                                drawRect(brush = maskBrush, blendMode = BlendMode.DstIn)
+                            }
                     } else {
                         Modifier.background(fadeBrush)
                     },

@@ -54,7 +54,8 @@ diff --git a/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/BottomS
 index 56c687a..6fe30ac 100644
 --- a/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/BottomSheetContentLayout.kt
 +++ b/miuix-ui/src/commonMain/kotlin/top/yukonga/miuix/kmp/layout/BottomSheetContentLayout.kt
-@@ -58,6 +58,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
+@@ -58,6 +58,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
++import androidx.compose.foundation.layout.navigationBars
  import androidx.compose.ui.input.pointer.PointerIcon
  import androidx.compose.ui.input.pointer.pointerHoverIcon
  import androidx.compose.ui.input.pointer.pointerInput
@@ -62,7 +63,7 @@ index 56c687a..6fe30ac 100644
  import androidx.compose.ui.layout.onGloballyPositioned
  import androidx.compose.ui.platform.LocalDensity
  import androidx.compose.ui.platform.LocalWindowInfo
-@@ -65,6 +66,7 @@ import androidx.compose.ui.semantics.onClick
+@@ -65,6 +67,7 @@ import androidx.compose.ui.semantics.onClick
  import androidx.compose.ui.semantics.semantics
  import androidx.compose.ui.text.font.FontWeight
  import androidx.compose.ui.text.style.TextAlign
@@ -70,7 +71,7 @@ index 56c687a..6fe30ac 100644
  import androidx.compose.ui.unit.Dp
  import androidx.compose.ui.unit.DpSize
  import androidx.compose.ui.unit.Velocity
-@@ -119,6 +121,9 @@ internal val LocalBottomSheetNestedScrollConnection = staticCompositionLocalOf<B
+@@ -119,6 +122,9 @@ internal val LocalBottomSheetNestedScrollConnection = staticCompositionLocalOf<B
   * @param allowDismiss Whether to allow dismissing the sheet via drag or back gesture.
   * @param enableNestedScroll Whether to enable nested scrolling for the content.
   * @param topInset Optional top inset override. If null, calculated from window insets.
@@ -80,7 +81,7 @@ index 56c687a..6fe30ac 100644
   * @param dimColor The unanimated dimming color.
   * @param surface Optional replacement for the default surface, including the overscroll fill.
   * @param content The content of the bottom sheet.
-@@ -145,6 +150,7 @@ internal fun BottomSheetContentLayout(
+@@ -145,6 +151,7 @@ internal fun BottomSheetContentLayout(
      allowDismiss: Boolean = true,
      enableNestedScroll: Boolean = true,
      topInset: Dp? = null,
@@ -88,7 +89,7 @@ index 56c687a..6fe30ac 100644
      dimColor: Color = MiuixTheme.colorScheme.windowDimming,
      surface: (@Composable BottomSheetSurfaceScope.() -> Modifier)? = null,
      content: @Composable () -> Unit,
-@@ -325,6 +331,7 @@ internal fun BottomSheetContentLayout(
+@@ -325,6 +332,7 @@ internal fun BottomSheetContentLayout(
                  },
                  modifier = sheetModifier,
                  topInset = topInset,
@@ -96,7 +97,7 @@ index 56c687a..6fe30ac 100644
                  enableNestedScroll = enableNestedScroll,
                  surface = surface?.let { sheetSurface -> { sheetSurface(surfaceScope) } },
                  overscrollSurface = surface?.let { sheetSurface ->
-@@ -368,6 +375,7 @@ internal fun BottomSheetContent(
+@@ -368,6 +376,7 @@ internal fun BottomSheetContent(
      onDismissRequest: (() -> Unit)?,
      modifier: Modifier = Modifier,
      topInset: Dp? = null,
@@ -104,7 +105,7 @@ index 56c687a..6fe30ac 100644
      enableNestedScroll: Boolean = true,
      startAction: @Composable (() -> Unit)? = null,
      endAction: @Composable (() -> Unit)? = null,
-@@ -587,6 +595,7 @@ internal fun BottomSheetContent(
+@@ -587,6 +596,7 @@ internal fun BottomSheetContent(
          allowDismiss = allowDismiss,
          windowHeight = windowHeight,
          topInset = calculatedTopInset,
@@ -112,7 +113,7 @@ index 56c687a..6fe30ac 100644
          enableNestedScroll = enableNestedScroll,
          sheetHeightPx = sheetHeightPx,
          dragOffsetY = dragOffsetY,
-@@ -622,6 +631,7 @@ private fun BottomSheetColumn(
+@@ -622,6 +632,7 @@ private fun BottomSheetColumn(
      allowDismiss: Boolean,
      windowHeight: Dp,
      topInset: Dp,
@@ -120,7 +121,7 @@ index 56c687a..6fe30ac 100644
      enableNestedScroll: Boolean,
      sheetHeightPx: MutableIntState,
      dragOffsetY: Animatable<Float, *>,
-@@ -680,27 +690,94 @@ private fun BottomSheetColumn(
+@@ -680,27 +691,94 @@ private fun BottomSheetColumn(
                  .padding(horizontal = insideMargin.width)
                  .padding(bottom = insideMargin.height),
          ) {

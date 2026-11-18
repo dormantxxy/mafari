@@ -222,6 +222,7 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.layout.LocalBottomSheetInsets
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -2123,6 +2124,8 @@ BrowserChunk {
                     null
                 },
                 endAction = null,
+                // 标签列表 / 更多菜单自带滚动容器，自己把头部和导航栏高度做成内边距（铺到头部和导航栏下面再渐隐）
+                scrollContent = true,
                 // 所有弹层统一采样页面模糊。卡顿的根因不在弹层自己的模糊，而在页面每帧被重复回放，
                 // 已由上方的离屏缓存 / 整页冻结解决，所以更多菜单、标签列表可以恢复模糊。
                 backdrop = if (glassAvailable && settings.blurEnabled) glassBackdrop else null,
@@ -2132,11 +2135,18 @@ BrowserChunk {
                 onDismissRequest = { sheet = Sheet.None },
                 onDismissFinished = { if (sheet == Sheet.None) sheetHostActive = false },
             ) {
+                val sheetInsets = LocalBottomSheetInsets.current
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(bottom = 8.dp),
+                        .then(
+                            // 链接 / 图片 / 元素菜单不滚动：整体推到头部下方、导航栏上方；标签列表和更多菜单在各自的滚动容器里处理
+                            if (lastActiveSheet == Sheet.Tabs || lastActiveSheet == Sheet.Menu) {
+                                Modifier
+                            } else {
+                                Modifier.padding(top = sheetInsets.top, bottom = sheetInsets.bottom + 8.dp)
+                            },
+                        ),
                 ) {
                 when (lastActiveSheet) {
                 Sheet.Tabs -> {
@@ -2150,8 +2160,11 @@ BrowserChunk {
                         state = tabsListState,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = screenH * 0.68f),
-                        contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp),
+                            .heightIn(max = screenH * 0.68f + sheetInsets.top + sheetInsets.bottom),
+                        contentPadding = PaddingValues(
+                            top = sheetInsets.top + 4.dp,
+                            bottom = sheetInsets.bottom + 8.dp,
+                        ),
                         verticalArrangement = if (cardStyle) Arrangement.spacedBy(10.dp) else Arrangement.Top,
                     ) {
                         if (cardStyle) {
@@ -2241,8 +2254,10 @@ BrowserChunk {
                     val menuMaxH = (LocalConfiguration.current.screenHeightDp * 0.44f).dp
                     Box(
                         modifier = Modifier
-                            .heightIn(max = menuMaxH)
-                            .verticalScroll(rememberScrollState()),
+                            .heightIn(max = menuMaxH + sheetInsets.top + sheetInsets.bottom)
+                            .verticalScroll(rememberScrollState())
+                            // 先滚动后加内边距：内边距在滚动内容里面，菜单能滚到头部和导航栏下面
+                            .padding(top = sheetInsets.top, bottom = sheetInsets.bottom + 8.dp),
                     ) {
                     MenuGrid(
                         labelFor = { action ->
@@ -3226,7 +3241,8 @@ internal fun UaDialog(
         backdrop = backdrop,
         onDismissRequest = onDismiss,
     ) {
-        Column(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 24.dp)) {
+        // 导航栏留白由 AppBottomSheet 统一处理（沉浸 sheet），这里不再自己加
+        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
             UA_PRESETS.forEach { preset ->
                 val presetIcon = when (preset.name) {
                     tr("跟随系统") -> MiuixIcons.Glass.Settings

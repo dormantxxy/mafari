@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -28,6 +30,8 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
 import dev.dsh.miuixbrowser.data.BLUR_MIUIX
+import top.yukonga.miuix.kmp.blur.BlendColorEntry
+import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.ProgressiveBlur
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
@@ -38,6 +42,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -256,15 +261,20 @@ interface AppMaterial {
  * 在调用处读出当前值，再在内容里重新提供一遍。
  */
 @Composable
-private fun rememberOverlayContent(content: @Composable () -> Unit, sheetTopBlur: Boolean = false): @Composable () -> Unit {
+private fun rememberOverlayContent(
+    content: @Composable () -> Unit,
+    sheetTopBlur: Boolean = false,
+    sheetContentPadding: Dp = 0.dp,
+    sheetHasHeader: Boolean = false,
+): @Composable () -> Unit {
     val liquidBackdrop = LocalLiquidBackdrop.current
     val mode = LocalBlurMode.current
     val glassParams = LocalGlassParams.current
     val latest by rememberUpdatedState(content)
-    return remember(liquidBackdrop, mode, glassParams, sheetTopBlur) {
+    return remember(liquidBackdrop, mode, glassParams, sheetTopBlur, sheetContentPadding, sheetHasHeader) {
         val wrapped: @Composable () -> Unit = {
             CompositionLocalProvider(LocalLiquidBackdrop provides liquidBackdrop, LocalBlurMode provides mode, LocalGlassParams provides glassParams) {
-                if (sheetTopBlur) SheetTopBlur { latest() } else latest()
+                if (sheetTopBlur) SheetTopBlur(sheetContentPadding, sheetHasHeader) { latest() } else latest()
             }
         }
         wrapped
@@ -282,34 +292,61 @@ private fun rememberOverlayContent(content: @Composable () -> Unit, sheetTopBlur
  */
 private const val SHEET_TOP_TEXTURE_BLUR = true
 
-/** 渐进带溢出到 sheet 左右边缘的距离：与上游 sheet 的内边距（insideMargin.width）一致。 */
-private val SheetTopBleedX = BottomSheetDefaults.insideMargin.width
+/** 渐进带高度（内容区顶部向下）。上游顶栏的带约 150dp / 模糊半径 80dp，sheet 取同比例缩小。 */
+private val SheetTopBandHeight = 64.dp
 
-/** 渐进带向上溢出的距离：盖住拖动条区域（上游 DragHandleArea 高 24dp）。 */
-private val SheetTopBleedY = 24.dp
+/** 渐进带的最大模糊半径（dp），与带高成比例：带太矮而半径太大，模糊会在几十 dp 内陡降，边缘发硬。 */
+private const val SheetTopBlurRadius = 48f
+
+/** 无标题栏时，带向上溢出的距离：盖住拖动条区域（上游 DragHandleArea 高 24dp）。有标题栏时不溢出，避免盖住标题和按钮。 */
+private val SheetTopHandleBleed = 24.dp
+
+/** 带子底色雾化，与上游 GlassTopAppBar 渐进模糊带一致（surface 30%）。 */
+private const val SheetTopTintAlpha = 0.3f
+
+/**
+ * 淡出蒙版：quintic smootherstep（与上游 TopAppBarBandBrush 同一条曲线），顶部近似不透明，
+ * 到带子下沿完全透明。比三段线性渐变少一个「拐点」，下沿与真实内容衔接更柔和。
+ */
+private fun sheetTopMaskBrush(): Brush {
+    val stops = List(17) { it / 16f }
+    return Brush.verticalGradient(
+        *stops.map { t ->
+            val fade = t * t * t * (t * (t * 6f - 15f) + 10f)
+            t to Color.Black.copy(alpha = 0.94f * (1f - fade))
+        }.toTypedArray(),
+    )
+}
 
 /**
  * 所有 sheet（[AppBottomSheet] 统一入口）内容滚动到头部时的顶部渐进效果，所有材质都生效：
  * - 柔光 / 磨砂 / 液态玻璃（设备支持 RuntimeShader）：渐进模糊（自上而下由强到弱，参数同 GlassTopAppBar 的渐进模糊带），
- *   内容录制成一层 backdrop，在内容区顶部盖一条渐进模糊带；
+ *   内容录制成一层 backdrop，在内容区顶部盖一条渐进模糊带，并叠 surface 雾化色；
  * - 纯色（关闭模糊）或不支持 RuntimeShader：主题 surface 色 → 透明的渐变，与子页面顶栏的 fallback 渐变一致。
- * 滚动量由嵌套滚动累计，带子随滚动淡入（未滚动时完全透明，不改变静止外观），不拦截触摸。
- * 带子向左 / 右 / 上溢出，盖满整个 sheet 顶部（含内边距与拖动条），并按 sheet 的顶部圆角裁剪。
+ *
+ * 实现要点：
+ * - 滚动量由嵌套滚动累计，带子随滚动淡入（未滚动时完全透明，不改变静止外观），不拦截触摸。
+ *   累计会漂移（程序化 scrollTo 不走嵌套滚动、内容切换等），所以「向下拉但子项已无法再消费」时
+ *   直接归零——此刻子项必然在顶部。
+ * - 滚动量为 0 时带子根本不进入组合（`derivedStateOf` 只在 0 / 非 0 翻转时重组），
+ *   静止状态下不挂模糊着色器；录制层仍保留，保证第一帧滚动时就有可采样的内容。
+ * - 带子铺满 sheet 整个宽度（sheet 已无内边距，见 [AppBottomSheet]），只在无标题栏时向上溢出盖住拖动条，
+ *   并按 sheet 的顶部圆角裁剪。
  */
 @Composable
-private fun SheetTopBlur(content: @Composable () -> Unit) {
+private fun SheetTopBlur(contentPadding: Dp, hasHeader: Boolean, content: @Composable () -> Unit) {
     val blur = SHEET_TOP_TEXTURE_BLUR && LocalBlurMode.current != BLUR_OFF &&
         top.yukonga.miuix.kmp.material.isRuntimeShaderSupported()
     val surface = MiuixTheme.colorScheme.surface
+    val bleedTop = if (hasHeader) 0.dp else SheetTopHandleBleed
     // 录制层先垫不透明底色再画内容：模糊着色器要求被采样的层不透明，否则半透明像素会被拉成不透明黑块
-    // 底色向左 / 右 / 上多铺一圈（带子溢出的那部分也要有不透明像素可采样）
+    // 底色向上多铺一圈（带子溢出盖住拖动条的那部分也要有不透明像素可采样）
     val backdrop = rememberLayerBackdrop {
-        val bx = SheetTopBleedX.toPx()
-        val by = SheetTopBleedY.toPx()
+        val by = bleedTop.toPx()
         drawRect(
             color = surface.copy(alpha = 1f),
-            topLeft = Offset(-bx, -by),
-            size = Size(size.width + bx * 2f, size.height + by),
+            topLeft = Offset(0f, -by),
+            size = Size(size.width, size.height + by),
         )
         drawContent()
     }
@@ -317,67 +354,72 @@ private fun SheetTopBlur(content: @Composable () -> Unit) {
     val connection = remember {
         object : NestedScrollConnection {
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                // 子项向上滚（内容上移）时 consumed.y < 0
-                scrolled = (scrolled - consumed.y).coerceAtLeast(0f)
+                scrolled = if (consumed.y == 0f && available.y > 0f) {
+                    0f // 向下拉但子项已无法消费：子项在顶部，修正累计漂移
+                } else {
+                    // 子项向上滚（内容上移）时 consumed.y < 0
+                    (scrolled - consumed.y).coerceAtLeast(0f)
+                }
                 return Offset.Zero
             }
         }
     }
+    val showBand by remember { derivedStateOf { scrolled > 0f } }
     val rampPx = with(LocalDensity.current) { GlassTopAppBarDefaults.ProgressiveBlurRampDistance.toPx() }
     val fadeBrush = remember(surface) { GlassTopAppBarDefaults.bandBrush(surface) }
     val bandShape = remember {
         RoundedCornerShape(topStart = BottomSheetDefaults.cornerRadius, topEnd = BottomSheetDefaults.cornerRadius)
     }
-    // 自上而下淡出的蒙版：顶部几乎不透明，到带子下沿完全透明，与真实内容无缝衔接
-    val maskBrush = remember {
-        Brush.verticalGradient(
-            0f to Color.Black.copy(alpha = 0.92f),
-            0.55f to Color.Black.copy(alpha = 0.6f),
-            1f to Color.Transparent,
-        )
-    }
+    val maskBrush = remember { sheetTopMaskBrush() }
+    val blendColors = remember(surface) { listOf(BlendColorEntry(surface.copy(alpha = SheetTopTintAlpha))) }
+    val blurColors = BlurDefaults.blurColors(blendColors = blendColors) // @Composable，内部自带 remember
     Box(modifier = Modifier.nestedScroll(connection)) {
-        Box(modifier = if (blur) Modifier.layerBackdrop(backdrop) else Modifier) { content() }
+        // 左右留白放在录制层里面：录制层与 sheet 同宽，带子采样不会漏边
         Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(48.dp)
-                // 内容区外面还有 sheet 的内边距（左右）和拖动条一带（顶部）：带子向左 / 右 / 上溢出，
-                // 不改变父布局测得的大小，也不拦截触摸。
-                .layout { measurable, constraints ->
-                    val bleedX = SheetTopBleedX.roundToPx()
-                    val bleedY = SheetTopBleedY.roundToPx()
-                    val w = constraints.maxWidth
-                    val h = constraints.maxHeight
-                    val placeable = measurable.measure(Constraints.fixed(w + bleedX * 2, h + bleedY))
-                    layout(w, h) { placeable.placeRelative(-bleedX, -bleedY) }
-                }
-                .graphicsLayer {
-                    alpha = (scrolled / rampPx).coerceIn(0f, 1f)
-                    // 离屏合成：下面的渐变蒙版用 DstIn，只作用于带子自己，不能影响 sheet 的其他像素
-                    compositingStrategy = CompositingStrategy.Offscreen
-                }
-                .clip(bandShape)
-                .then(
-                    if (blur) {
-                        Modifier
-                            .progressiveTextureBlur(
-                                backdrop = backdrop,
-                                shape = RectangleShape,
-                                gradient = ProgressiveBlur.Top.copy(curve = 0.5f),
-                                blurRadius = GlassTopAppBarDefaults.ProgressiveBlurRadius.value,
-                            )
-                            // drawBackdrop 先画模糊层再 drawContent()：这里在它之后叠蒙版，淡出带子下沿
-                            .drawWithContent {
-                                drawContent()
-                                drawRect(brush = maskBrush, blendMode = BlendMode.DstIn)
-                            }
-                    } else {
-                        Modifier.background(fadeBrush)
-                    },
-                ),
-        )
+            modifier = (if (blur) Modifier.layerBackdrop(backdrop) else Modifier)
+                .padding(horizontal = contentPadding),
+        ) { content() }
+        if (showBand) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(SheetTopBandHeight)
+                    // 只向上溢出（无标题栏时盖住拖动条），不改变父布局测得的大小，也不拦截触摸。
+                    .layout { measurable, constraints ->
+                        val bleedY = bleedTop.roundToPx()
+                        val w = constraints.maxWidth
+                        val h = constraints.maxHeight
+                        val placeable = measurable.measure(Constraints.fixed(w, h + bleedY))
+                        layout(w, h) { placeable.placeRelative(0, -bleedY) }
+                    }
+                    .graphicsLayer {
+                        alpha = (scrolled / rampPx).coerceIn(0f, 1f)
+                        // 离屏合成：下面的渐变蒙版用 DstIn，只作用于带子自己，不能影响 sheet 的其他像素
+                        compositingStrategy = CompositingStrategy.Offscreen
+                    }
+                    .clip(bandShape)
+                    .then(
+                        if (blur) {
+                            Modifier
+                                .progressiveTextureBlur(
+                                    backdrop = backdrop,
+                                    shape = RectangleShape,
+                                    gradient = ProgressiveBlur.Top.copy(curve = 0.5f),
+                                    blurRadius = SheetTopBlurRadius,
+                                    colors = blurColors,
+                                )
+                                // drawBackdrop 先画模糊层再 drawContent()：这里在它之后叠蒙版，淡出带子下沿
+                                .drawWithContent {
+                                    drawContent()
+                                    drawRect(brush = maskBrush, blendMode = BlendMode.DstIn)
+                                }
+                        } else {
+                            Modifier.background(fadeBrush)
+                        },
+                    ),
+            )
+        }
     }
 }
 
@@ -463,6 +505,8 @@ open class MiuixGlassMaterialBase(private val sampling: Boolean) : AppMaterial {
             title = title,
             startAction = startAction,
             endAction = endAction,
+            // 取消 sheet 内边距：渐进模糊带与背景面板才能铺满整个宽度（左右留白由 AppBottomSheet 加在内容上）
+            insideMargin = DpSize.Zero,
             onDismissFinished = onDismissFinished,
             content = content,
         )
@@ -695,13 +739,30 @@ fun AppBottomSheet(
     startAction: @Composable (() -> Unit)? = null,
     endAction: @Composable (() -> Unit)? = null,
     onDismissFinished: (() -> Unit)? = null,
+    /**
+     * 内容与标题栏按钮的左右留白。sheet 本身已取消内边距（insideMargin = 0），
+     * 留白改由这里加在内容上；传 0.dp 可让内容（如列表分割线）通栏铺满。
+     */
+    contentHorizontalPadding: Dp = BottomSheetDefaults.insideMargin.width,
     content: @Composable () -> Unit,
 ) {
     val material = currentMaterial()
+    // 标题栏两侧按钮原先靠 sheet 内边距离开屏幕边缘，现在自己补上
+    val start: (@Composable () -> Unit)? = startAction?.let { a ->
+        { Box(Modifier.padding(start = contentHorizontalPadding)) { a() } }
+    }
+    val end: (@Composable () -> Unit)? = endAction?.let { a ->
+        { Box(Modifier.padding(end = contentHorizontalPadding)) { a() } }
+    }
     material.SheetHost(
-        onDismissRequest, show, backdrop, modifier, enableWindowDim, title, startAction, endAction, onDismissFinished,
+        onDismissRequest, show, backdrop, modifier, enableWindowDim, title, start, end, onDismissFinished,
         // 所有 sheet 统一走这里：内容滚到头部时的顶部渐进模糊（纯色材质为 surface→透明渐变）
-        content = rememberOverlayContent(content, sheetTopBlur = true),
+        content = rememberOverlayContent(
+            content,
+            sheetTopBlur = true,
+            sheetContentPadding = contentHorizontalPadding,
+            sheetHasHeader = title != null || startAction != null || endAction != null,
+        ),
     )
 }
 

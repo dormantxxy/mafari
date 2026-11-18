@@ -242,7 +242,8 @@ object LiquidGlassMaterial : AppMaterial {
             onDismissRequest = onDismissRequest,
             onDismissFinished = onDismissFinished,
             outsideMargin = BottomSheetDefaults.outsideMargin,
-            insideMargin = BottomSheetDefaults.insideMargin,
+            // 取消 sheet 内边距：左右留白由 AppBottomSheet 加在内容上
+            insideMargin = DpSize.Zero,
             dragHandleColor = BottomSheetDefaults.dragHandleColor(),
             dimColor = GlassBottomSheetDefaults.ScrimColor,
             surface = {

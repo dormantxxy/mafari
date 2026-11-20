@@ -1,13 +1,10 @@
 package dev.dsh.miuixbrowser.ui
 
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import dev.dsh.miuixbrowser.i18n.tr
 
-import dev.dsh.miuixbrowser.data.rememberSearchIcon
-import dev.dsh.miuixbrowser.engine.gecko.AmoAddon
-import dev.dsh.miuixbrowser.engine.gecko.GeckoExtItem
-import dev.dsh.miuixbrowser.engine.gecko.GeckoExtensionStore
-import dev.dsh.miuixbrowser.engine.gecko.findActivity
+import androidx.compose.ui.graphics.ImageBitmap
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.layerBackdrop as kyantLayerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop as rememberKyantBackdrop
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -86,18 +85,58 @@ import top.yukonga.miuix.kmp.icon.glass.Search
 import dev.dsh.miuixbrowser.ui.icons.Settings
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * Gecko 专属「拓展」页（WebExtension）。页面骨架沿用脚本页：玻璃顶栏 + 卡片列表。
- *
- * - 右上角：搜索 / 更多。搜索在顶栏下方展开输入框，向 Firefox 拓展商店（AMO）搜索，结果显示在列表最上方；
- * - 更多菜单：导入（底部 sheet：从链接 / 从文件）、全部更新；
- * - 下面是已安装的拓展。
- */
+/** Gecko 内核的「拓展」页：共用的 [ExtensionsManagerScreen] + [GeckoExtBackend]（WebExtensionController） */
 @Composable
 fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, blurEnabled: Boolean = true) {
+    // 只在 Gecko 内核下才会走到这里（无内核版没有 Gecko 类，见 EngineSupport）
+    val backend = remember { GeckoExtBackend() }
+    ExtensionsManagerScreen(backend = backend, onBack = onBack, onOpenUrl = onOpenUrl, blurEnabled = blurEnabled)
+}
+
+/**
+ * WebView 内核的「拓展」页：同一个管理页 + [WebViewExtBackend]（自研 WebExtension 运行时）。
+ * [onChanged]：安装 / 启停 / 卸载 / 更新之后调用，让已打开的标签重新装配拓展注入。
+ */
+@Composable
+fun WebViewExtensionsScreen(
+    system: dev.dsh.miuixbrowser.ext.ExtensionSystem,
+    onBack: () -> Unit,
+    onChanged: () -> Unit = {},
+    blurEnabled: Boolean = true,
+) {
+    val currentOnChanged by rememberUpdatedState(onChanged)
+    val backend = remember(system) { WebViewExtBackend(system) { currentOnChanged() } }
+    ExtensionsManagerScreen(
+        backend = backend,
+        onBack = onBack,
+        blurEnabled = blurEnabled,
+        // 功能菜单 / 设置页需要拓展 bridge，用 Sheet 承载拓展自己的页面
+        pageSheet = { request, backdrop, onDismiss ->
+            WebViewExtPageSheet(system = system, request = request, backdrop = backdrop, onDismiss = onDismiss)
+        },
+    )
+}
+
+/**
+ * 拓展管理页（两个内核共用）。页面骨架沿用脚本页：玻璃顶栏 + 卡片列表。
+ *
+ * - 右上角：搜索（后端有商店才显示）/ 更多。搜索在顶栏下方展开输入框，向拓展商店搜索，结果显示在列表最上方；
+ * - 更多菜单：导入（底部 sheet：从链接 / 从文件）、全部更新；
+ * - 下面是已安装的拓展。
+ *
+ * 页面只面对 [ExtManagerBackend]，不直接依赖任何内核。
+ */
+@Composable
+fun ExtensionsManagerScreen(
+    backend: ExtManagerBackend,
+    onBack: () -> Unit,
+    onOpenUrl: (String) -> Unit = {},
+    blurEnabled: Boolean = true,
+    /** 承载拓展自己的页面（功能菜单 / 设置页）的 Sheet；null = 当前内核不支持，相关入口不显示 */
+    pageSheet: (@Composable (ExtPageRequest?, top.yukonga.miuix.kmp.blur.Backdrop?, () -> Unit) -> Unit)? = null,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val store = GeckoExtensionStore
 
     val backdrop = rememberLayerBackdrop()
     val liquidBackdrop = rememberKyantBackdrop()
@@ -106,36 +145,39 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
     val scrollBehavior = MiuixScrollBehavior()
     val topScrolled = rememberTopBarScrolled(scrollBehavior)
 
-    var searchOpen by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
-    var results by remember { mutableStateOf<List<AmoAddon>?>(null) }
-    var searching by remember { mutableStateOf(false) }
-    var searchError by remember { mutableStateOf<String?>(null) }
+    val storeSearch = rememberExtStoreSearch()
     var installingIds by remember { mutableStateOf(setOf<String>()) }
     var showMore by remember { mutableStateOf(false) }
     var moreAnchor by remember { mutableStateOf(Rect.Zero) }
     var showImport by remember { mutableStateOf(false) }
     var updatingAll by remember { mutableStateOf(false) }
     var detailId by remember { mutableStateOf<String?>(null) }
-    var uninstalling by remember { mutableStateOf<GeckoExtItem?>(null) }
+    var uninstalling by remember { mutableStateOf<ExtEntry?>(null) }
     var busyIds by remember { mutableStateOf(setOf<String>()) }
-    var menuItem by remember { mutableStateOf<GeckoExtItem?>(null) }
+    var menuItem by remember { mutableStateOf<ExtEntry?>(null) }
     var menuAnchor by remember { mutableStateOf(Rect.Zero) }
-    val detail = detailId?.let { id -> store.items.firstOrNull { it.id == id } }
-    val focus = remember { FocusRequester() }
+    var pageRequest by remember { mutableStateOf<ExtPageRequest?>(null) }
+    val detail = detailId?.let { id -> backend.items.firstOrNull { it.id == id } }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
+    /** 先收起当前的设置 sheet / 菜单，再开拓展页 sheet（两层 sheet 同时切换时后一层可能被宿主吞掉） */
+    fun openExtPage(item: ExtEntry, kind: ExtPageRequest.Kind) {
+        detailId = null
+        menuItem = null
+        scope.launch {
+            delay(250)
+            pageRequest = ExtPageRequest(item.id, item.name, kind)
+        }
+    }
+
     // 安装确认框要 Activity；页面存在期间登记，离开时撤销
     DisposableEffect(Unit) {
-        store.activityProvider = { context.findActivity() }
+        backend.bind(context)
         // 不在离开页面时清掉：浏览页里点 .xpi 链接同样需要弹确认框（由 MainActivity 统一维护）
         onDispose { }
     }
-    LaunchedEffect(Unit) { runCatching { store.refresh(context) }.onFailure { toast(tr("读取拓展失败：{0}", it.message)) } }
-    LaunchedEffect(searchOpen) {
-        if (searchOpen) runCatching { focus.requestFocus() }
-    }
+    LaunchedEffect(Unit) { runCatching { backend.refresh(context) }.onFailure { toast(tr("读取拓展失败：{0}", it.message)) } }
 
     fun installFrom(key: String, uri: String, label: String) {
         if (key in installingIds) {
@@ -147,29 +189,13 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
         toast(tr("正在安装 {0}…", label))
         scope.launch {
             try {
-                store.install(context, uri)
-                    .onSuccess { toast(tr("已添加 {0}", it.name)) }
+                backend.install(context, uri)
+                    .onSuccess { toast(tr("已添加 {0}", it)) }
                     .onFailure { if (it.message != tr("已取消安装")) toast(it.message ?: tr("安装失败")) }
             } finally {
                 // 无论成功 / 取消 / 失败 / 协程被取消，都要把「安装中」状态放掉
                 installingIds = installingIds - key
             }
-        }
-    }
-
-    fun runSearch() {
-        val q = query.trim()
-        if (q.isEmpty() || searching) return
-        searching = true
-        searchError = null
-        scope.launch {
-            store.searchAmo(q)
-                .onSuccess { results = it }
-                .onFailure {
-                    results = emptyList()
-                    searchError = it.message
-                }
-            searching = false
         }
     }
 
@@ -181,7 +207,7 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
         }
         scope.launch {
             // 商店页面链接 → 解析出 xpi；其它按 .xpi 直链处理
-            val addon = store.resolveAmoPage(link).getOrElse {
+            val addon = backend.resolveStorePage(link).getOrElse {
                 toast(it.message ?: tr("访问商店失败"))
                 return@launch
             }
@@ -193,7 +219,7 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             scope.launch {
-                runCatching { store.stageFile(context, uri) }
+                runCatching { backend.stageFile(context, uri) }
                     .onSuccess { installFrom(it, it, tr("本地拓展")) }
                     .onFailure { toast(it.message ?: tr("读取文件失败")) }
             }
@@ -216,15 +242,8 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                             LiquidGlassBackButton(backdrop = liquid, surfaceVisible = topScrolled, onClick = onBack)
                         },
                         actions = {
-                            LiquidGlassButton(
-                                onClick = {
-                                    searchOpen = !searchOpen
-                                    if (!searchOpen) {
-                                        query = ""
-                                        results = null
-                                        searchError = null
-                                    }
-                                },
+                            if (backend.supportsStore) LiquidGlassButton(
+                                onClick = { storeSearch.toggle() },
                                 backdrop = liquid,
                                 surfaceVisible = topScrolled,
                                 modifier = Modifier.padding(end = 8.dp),
@@ -233,7 +252,7 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                                     imageVector = MiuixIcons.Glass.Search,
                                     contentDescription = tr("搜索"),
                                     modifier = Modifier.size(22.dp),
-                                    tint = if (searchOpen) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
+                                    tint = if (storeSearch.open) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
                                 )
                             }
                             LiquidGlassButton(
@@ -254,24 +273,7 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                         },
                         bottomContent = {
                             // 搜索框：在顶栏下方展开 / 收起
-                            AnimatedVisibility(
-                                visible = searchOpen,
-                                enter = expandVertically() + fadeIn(),
-                                exit = shrinkVertically() + fadeOut(),
-                            ) {
-                                TextField(
-                                    value = query,
-                                    onValueChange = { query = it },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                        .focusRequester(focus),
-                                    label = tr("在 Firefox 拓展商店搜索"),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                    keyboardActions = KeyboardActions(onSearch = { runSearch() }),
-                                )
-                            }
+                            ExtStoreSearchBox(state = storeSearch, onSearch = { scope.launch { storeSearch.search(backend) } })
                         },
                     )
                 },
@@ -285,7 +287,6 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                         .nestedScroll(scrollBehavior.nestedScrollConnection)
                         .background(MiuixTheme.colorScheme.surface),
                 ) {
-                    val found = results
                     LazyColumn(
                         contentPadding = PaddingValues(
                             top = innerPadding.calculateTopPadding() + 8.dp,
@@ -293,30 +294,15 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                         ),
                     ) {
                         // ---- 商店搜索结果（页面最上方）
-                        if (searchOpen && (searching || found != null)) {
-                            item { SmallTitle(text = tr("商店搜索结果")) }
-                            when {
-                                searching -> item { HintText(tr("正在搜索…")) }
-                                searchError != null -> item { HintText(searchError ?: "") }
-                                found.isNullOrEmpty() -> item { HintText(tr("没有找到「{0}」相关的拓展", query.trim())) }
-                                else -> items(found, key = { it.id }) { addon ->
-                                    // 已装拓展的 id 是 GUID，与 AMO 返回的 guid 对应（GUID 大小写不敏感）；没有 guid 时才退回按名称比
-                                    val installed = store.items.any {
-                                        if (addon.guid.isNotEmpty()) it.id.equals(addon.guid, ignoreCase = true)
-                                        else it.id == addon.slug || it.name == addon.name
-                                    }
-                                    AddonCard(
-                                        addon = addon,
-                                        installed = installed,
-                                        installing = "amo:${addon.id}" in installingIds,
-                                        onAdd = { installFrom("amo:${addon.id}", addon.xpiUrl, addon.name) },
-                                    )
-                                }
-                            }
-                        }
+                        if (backend.supportsStore) extStoreResults(
+                            state = storeSearch,
+                            installedItems = { backend.items },
+                            isInstalling = { "amo:${it.id}" in installingIds },
+                            onAdd = { installFrom("amo:${it.id}", it.xpiUrl, it.name) },
+                        )
 
                         // ---- 自动更新
-                        item {
+                        if (backend.supportsAutoUpdate) item {
                             Card(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                                 insideMargin = PaddingValues(0.dp),
@@ -324,27 +310,28 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                                 AppDropdownPreference(
                                     backdrop = if (glass) backdrop else null,
                                     title = tr("自动检查更新"),
-                                    summary = if (store.lastCheck.value == 0L) tr("尚未检查") else tr("上次检查 ") + formatTime(store.lastCheck.value),
+                                    summary = if (backend.lastCheck.value == 0L) tr("尚未检查") else tr("上次检查 ") + formatTime(backend.lastCheck.value),
                                     items = listOf(tr("手动"), tr("每天"), tr("每 3 天"), tr("每周")),
-                                    selectedIndex = store.autoUpdate.value.coerceIn(0, 3),
-                                    onSelectedIndexChange = { store.updateAutoUpdate(context, it) },
+                                    selectedIndex = backend.autoUpdate.value.coerceIn(0, 3),
+                                    onSelectedIndexChange = { backend.updateAutoUpdate(context, it) },
                                 )
                             }
                         }
 
                         // ---- 已安装
                         item { SmallTitle(text = tr("已安装拓展")) }
-                        if (store.items.isEmpty()) {
+                        if (backend.items.isEmpty()) {
                             item {
                                 HintText(
-                                    if (store.loading.value) tr("正在读取…")
-                                    else tr("还没有安装拓展。点右上角搜索，从 Firefox 拓展商店添加，或在「更多」里导入。"),
+                                    if (backend.loading) tr("正在读取…")
+                                    else backend.emptyHint,
                                 )
                             }
                         }
-                        items(store.items, key = { it.id }) { item ->
+                        items(backend.items, key = { it.id }) { item ->
                             InstalledCard(
                                 item = item,
+                                icon = backend.icon(item.id),
                                 busy = item.id in busyIds,
                                 onOpen = { detailId = item.id },
                                 onMore = { bounds ->
@@ -354,14 +341,14 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                                 onToggle = { on ->
                                     busyIds = busyIds + item.id
                                     scope.launch {
-                                        store.setEnabled(context, item, on).onFailure { toast(it.message ?: tr("操作失败")) }
+                                        backend.setEnabled(context, item.id, on).onFailure { toast(it.message ?: tr("操作失败")) }
                                         busyIds = busyIds - item.id
                                     }
                                 },
                             )
                         }
                         item {
-                            HintText(tr("拓展由Gecko内核运行，搜索结果来源于Firefox拓展商店，APP已原生支持油猴脚本，请勿再安装其它如**猴等油猴脚本类拓展程序"))
+                            HintText(backend.footerHint)
                         }
                     }
                 }
@@ -369,6 +356,7 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
             // 弹窗 / sheet 必须放在 Scaffold 的内容里：miuix 的 Overlay 弹层由 Scaffold 的弹层宿主渲染，放在 Scaffold 外面会一直不显示
             ExtSettingsSheet(
                 item = detail,
+                supportsPrivate = backend.supportsPrivate,
                 backdrop = if (glass) backdrop else null,
                 busy = detail?.id in busyIds,
                 onDismiss = { detailId = null },
@@ -376,7 +364,7 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                     val d = detail ?: return@ExtSettingsSheet
                     busyIds = busyIds + d.id
                     scope.launch {
-                        store.setEnabled(context, d, on).onFailure { toast(it.message ?: tr("操作失败")) }
+                        backend.setEnabled(context, d.id, on).onFailure { toast(it.message ?: tr("操作失败")) }
                         busyIds = busyIds - d.id
                     }
                 },
@@ -384,20 +372,27 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                     val d = detail ?: return@ExtSettingsSheet
                     busyIds = busyIds + d.id
                     scope.launch {
-                        store.setAllowedInPrivate(context, d, on).onFailure { toast(it.message ?: tr("设置失败")) }
+                        backend.setAllowedInPrivate(context, d.id, on).onFailure { toast(it.message ?: tr("设置失败")) }
                         busyIds = busyIds - d.id
                     }
                 },
+                pageSupported = pageSheet != null,
+                onOpenPopup = { detail?.let { openExtPage(it, ExtPageRequest.Kind.POPUP) } },
                 onOptions = {
-                    val url = detail?.optionsUrl
-                    detailId = null
-                    if (url != null) onOpenUrl(url)
+                    val d = detail
+                    val url = d?.optionsUrl
+                    if (d != null && url == null && d.hasOptionsPage && pageSheet != null) {
+                        openExtPage(d, ExtPageRequest.Kind.OPTIONS)
+                    } else {
+                        detailId = null
+                        if (url != null) onOpenUrl(url)
+                    }
                 },
                 onCheckUpdate = {
                     val d = detail ?: return@ExtSettingsSheet
                     busyIds = busyIds + d.id
                     scope.launch {
-                        store.updateOne(context, d)
+                        backend.updateOne(context, d.id)
                             .onSuccess { toast(if (it) tr("已更新 {0}", d.name) else tr("{0} 已是最新", d.name)) }
                             .onFailure { toast(it.message ?: tr("检查更新失败")) }
                         busyIds = busyIds - d.id
@@ -405,6 +400,8 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                 },
                 onUninstall = { uninstalling = detail },
             )
+
+            pageSheet?.invoke(pageRequest, if (glass) backdrop else null) { pageRequest = null }
 
             AppGlassDialog(
                 show = uninstalling != null,
@@ -424,7 +421,7 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                             detailId = null
                             if (target != null) {
                                 scope.launch {
-                                    store.uninstall(context, target)
+                                    backend.uninstall(context, target.id)
                                         .onSuccess { toast(tr("已卸载 {0}", target.name)) }
                                         .onFailure { toast(it.message ?: tr("卸载失败")) }
                                 }
@@ -438,8 +435,9 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                 }
             }
 
-            GeckoImportDialog(
+            ExtImportDialog(
                 show = showImport,
+                summary = backend.importSummary,
                 backdrop = if (glass) backdrop else null,
                 onDismiss = { showImport = false },
                 onLink = { link ->
@@ -449,7 +447,7 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                 onPickFile = {
                     showImport = false
                     runCatching {
-                        filePicker.launch(arrayOf("application/x-xpinstall", "application/zip", "application/octet-stream", "*/*"))
+                        filePicker.launch(arrayOf("application/x-xpinstall", "application/zip", "application/x-chrome-extension", "application/octet-stream", "*/*"))
                     }.onFailure { toast(tr("无法打开文件选择器：{0}", it.message)) }
                 },
             )
@@ -477,7 +475,7 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                         showMore = false
                         updatingAll = true
                         scope.launch {
-                            runCatching { store.updateAll(context) }
+                            runCatching { backend.updateAll(context) }
                                 .onSuccess { (ok, total) ->
                                     toast(
                                         when {
@@ -502,6 +500,14 @@ fun GeckoExtensionsScreen(onBack: () -> Unit, onOpenUrl: (String) -> Unit = {}, 
                 anchorBounds = Rect(menuAnchor.left, menuAnchor.bottom, menuAnchor.right, menuAnchor.bottom),
                 backdrop = if (glass) backdrop else null,
             ) {
+                val menuTarget = menuItem
+                if (pageSheet != null && menuTarget != null && menuTarget.hasPopup && menuTarget.enabled) {
+                    GlassPopupItem(
+                        text = tr("功能菜单"),
+                        onClick = { openExtPage(menuTarget, ExtPageRequest.Kind.POPUP) },
+                        icon = AppIcons.Puzzle,
+                    )
+                }
                 GlassPopupItem(
                     text = tr("拓展设置"),
                     onClick = {
@@ -534,10 +540,11 @@ private fun HintText(text: String) {
     )
 }
 
-/** 导入拓展弹窗（与脚本页的导入弹窗一致）：填链接导入，或点「从本地文件导入」选 .xpi */
+/** 导入拓展弹窗（与脚本页的导入弹窗一致）：填链接导入，或点「从本地文件导入」选拓展包 */
 @Composable
-private fun GeckoImportDialog(
+private fun ExtImportDialog(
     show: Boolean,
+    summary: String,
     backdrop: top.yukonga.miuix.kmp.blur.Backdrop?,
     onDismiss: () -> Unit,
     onLink: (String) -> Unit,
@@ -547,7 +554,7 @@ private fun GeckoImportDialog(
     AppGlassDialog(
         show = show,
         title = tr("导入拓展"),
-        summary = tr("支持拓展商店页面链接、.xpi 直链，或本地 .xpi 文件"),
+        summary = summary,
         backdrop = backdrop,
         onDismissRequest = onDismiss,
     ) {
@@ -585,65 +592,9 @@ private fun GeckoImportDialog(
 }
 
 @Composable
-private fun AddonCard(addon: AmoAddon, installed: Boolean, installing: Boolean, onAdd: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 8.dp),
-        insideMargin = PaddingValues(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            AddonIcon(url = addon.iconUrl, bitmapKey = null)
-            Spacer(Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = addon.name,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MiuixTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = buildString {
-                        append(addon.version)
-                        if (addon.users > 0) append(" · ").append(formatUsers(addon.users)).append(tr(" 用户"))
-                        if (addon.rating > 0) append(" · ★ ").append(String.format(java.util.Locale.US, "%.1f", addon.rating))
-                    },
-                    fontSize = 12.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (addon.summary.isNotBlank()) {
-                    Text(
-                        text = addon.summary,
-                        fontSize = 13.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-            AppTextButton(
-                text = when {
-                    installed -> tr("已添加")
-                    installing -> tr("安装中")
-                    else -> tr("添加")
-                },
-                onClick = onAdd,
-                enabled = !installed && !installing,
-                primary = !installed,
-                minWidth = 64.dp,
-                inPage = true, // 位于采样层内部，必须用实色底，否则液态玻璃下递归采样闪退
-            )
-        }
-    }
-}
-
-@Composable
 private fun InstalledCard(
-    item: GeckoExtItem,
+    item: ExtEntry,
+    icon: ImageBitmap?,
     busy: Boolean,
     onOpen: () -> Unit,
     onMore: (Rect) -> Unit,
@@ -655,7 +606,7 @@ private fun InstalledCard(
         insideMargin = PaddingValues(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            AddonIcon(url = "", bitmapKey = item.id)
+            AddonIcon(url = "", bitmap = icon, fromStore = false)
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f).clickable(onClick = onOpen)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -694,7 +645,7 @@ private fun InstalledCard(
                 modifier = Modifier
                     .padding(start = 4.dp)
                     .size(40.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                    .squircleClip(20.dp)
                     .onGloballyPositioned { moreBounds = it.boundsInRoot() }
                     .clickable { onMore(moreBounds) },
                 contentAlignment = Alignment.Center,
@@ -710,47 +661,27 @@ private fun InstalledCard(
     }
 }
 
-/** 拓展图标：商店结果按 url 加载；已安装的取 Gecko 给的位图；都没有时画占位色块 */
-@Composable
-private fun AddonIcon(url: String, bitmapKey: String?) {
-    val bmp = if (bitmapKey != null) GeckoExtensionStore.icons[bitmapKey] else rememberSearchIcon(url)
-    val shape = RoundedCornerShape(10.dp)
-    if (bmp != null) {
-        Image(bitmap = bmp, contentDescription = null, modifier = Modifier.size(40.dp).clip(shape))
-    } else {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(shape)
-                .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.14f)),
-        )
-    }
-}
-
-private fun formatUsers(n: Long): String = when {
-    n >= 100_000_000 -> String.format(java.util.Locale.US, tr("%.1f 亿"), n / 1e8)
-    n >= 10_000 -> String.format(java.util.Locale.US, tr("%.1f 万"), n / 1e4)
-    else -> n.toString()
-}
-
 private fun formatTime(ms: Long): String =
     java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ms))
 
 /** 拓展设置 sheet：启用 / 隐私浏览 / 设置 / 详细信息 / 权限 / 移除（与 Firefox 的拓展设置页一致） */
 @Composable
 private fun ExtSettingsSheet(
-    item: GeckoExtItem?,
+    item: ExtEntry?,
+    supportsPrivate: Boolean,
     backdrop: top.yukonga.miuix.kmp.blur.Backdrop?,
     busy: Boolean,
     onDismiss: () -> Unit,
     onToggle: (Boolean) -> Unit,
     onTogglePrivate: (Boolean) -> Unit,
+    pageSupported: Boolean,
+    onOpenPopup: () -> Unit,
     onOptions: () -> Unit,
     onCheckUpdate: () -> Unit,
     onUninstall: () -> Unit,
 ) {
     // 关闭动画期间 item 已变 null：保留最后一次内容，避免内容闪空
-    var last by remember { mutableStateOf<GeckoExtItem?>(null) }
+    var last by remember { mutableStateOf<ExtEntry?>(null) }
     if (item != null) last = item
     val shown = item ?: last
     // 0 = 主页，1 = 详细信息，2 = 权限
@@ -769,13 +700,18 @@ private fun ExtSettingsSheet(
             when (page) {
                 0 -> {
                     ToggleRow(title = tr("已启用"), checked = shown.enabled, enabled = !busy, onChange = onToggle)
-                    ToggleRow(
-                        title = tr("在隐私浏览中运行"),
-                        checked = shown.allowedInPrivate,
-                        enabled = !busy && shown.enabled,
-                        onChange = onTogglePrivate,
-                    )
-                    if (shown.optionsUrl != null) {
+                    if (supportsPrivate) {
+                        ToggleRow(
+                            title = tr("在隐私浏览中运行"),
+                            checked = shown.allowedInPrivate,
+                            enabled = !busy && shown.enabled,
+                            onChange = onTogglePrivate,
+                        )
+                    }
+                    if (pageSupported && shown.hasPopup) {
+                        SettingsRow(title = tr("功能菜单"), summary = tr("打开拓展的快捷菜单"), enabled = shown.enabled, onClick = onOpenPopup)
+                    }
+                    if (shown.optionsUrl != null || (pageSupported && shown.hasOptionsPage)) {
                         SettingsRow(title = tr("设置"), summary = tr("打开拓展自带的设置页"), enabled = shown.enabled, onClick = onOptions)
                     }
                     SettingsRow(title = tr("详细信息"), summary = tr("版本、作者、简介")) { page = 1 }
@@ -797,9 +733,10 @@ private fun ExtSettingsSheet(
                     if (shown.homepage.isNotBlank()) DetailLine(tr("主页"), shown.homepage)
                     DetailLine("ID", shown.id)
                     if (shown.description.isNotBlank()) DetailLine(tr("简介"), shown.description)
+                    if (shown.notes.isNotEmpty()) DetailLine(tr("兼容性"), shown.notes.joinToString("\n"))
                 }
                 else -> {
-                    val perms = GeckoExtensionStore.describePermissions(shown.permissions, shown.origins)
+                    val perms = shown.permissions
                     if (perms.isEmpty()) {
                         Text(
                             text = tr("此拓展不需要额外权限"),
@@ -844,7 +781,7 @@ private fun SettingsRow(title: String, summary: String, enabled: Boolean = true,
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .squircleClip(12.dp)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 12.dp, horizontal = 4.dp),
     ) {

@@ -163,6 +163,11 @@ import androidx.compose.ui.layout.positionInWindow
 import kotlinx.coroutines.CoroutineStart
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.max
+import kotlin.math.abs
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.animation.core.animate
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.graphics.nativeCanvas
@@ -223,6 +228,8 @@ import top.yukonga.miuix.kmp.glass.GlassPopupItem
 import top.yukonga.miuix.kmp.material.GlassShape
 import top.yukonga.miuix.kmp.material.GlassEdgeStrokes
 import top.yukonga.miuix.kmp.glass.glassPanel
+import top.yukonga.miuix.kmp.squircle.squircleBorder
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -231,6 +238,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  */
 /** 更多菜单里长按进入管理页（脚本 / 收藏 / 拓展）所需的按住时长，含系统长按判定时间 */
 internal const val MENU_LONG_PRESS_MS = 650L
+
+/** 「无痕浏览」开启时的高亮色（更多菜单与首页快捷菜单共用） */
+internal val MenuIncognitoPurple = Color(0xFF9C27B0)
 
 @Composable
 internal fun MenuGrid(
@@ -252,6 +262,8 @@ internal fun MenuGrid(
     adBlockActive: Boolean = false,
     /** 正在同步：「同步」图标和文字变主题色 */
     syncActive: Boolean = false,
+    /** 当前页正显示译文：「翻译」图标和文字变主题色 */
+    translateActive: Boolean = false,
     badgeFor: (MenuAction) -> Int = { 0 },
     lockedFor: (MenuAction) -> Boolean = { false },
 ) {
@@ -261,7 +273,7 @@ internal fun MenuGrid(
     val cellHeight = 88.dp
     val dividerHeight = 30.dp
     val columns = 4
-    val purple = Color(0xFF9C27B0)
+    val purple = MenuIncognitoPurple
     val amber = Color(0xFFFFB300)
     val lightBlue = Color(0xFF5AC8FA)
     val teal = Color(0xFF1DB9A5)
@@ -330,6 +342,7 @@ internal fun MenuGrid(
                                 action == MenuAction.GeckoExtensions && extensionsActive -> teal
                                 action == MenuAction.AdBlock && adBlockActive -> Color(0xFFE53935)
                                 action == MenuAction.Sync && syncActive -> MiuixTheme.colorScheme.primary
+                                action == MenuAction.Translate && translateActive -> MiuixTheme.colorScheme.primary
                                 else -> MiuixTheme.colorScheme.onSurface
                             },
                             dragged = dragAction == action,
@@ -553,8 +566,55 @@ internal fun TabCard(
     }
     val cardColor = if (item.incognito) Color(0xFF3D2B4F) else MiuixTheme.colorScheme.surfaceContainerHigh
     val highlightColor = MiuixTheme.colorScheme.primary
+
+    // ---- 左右滑动清除：带阻尼（橡皮筋）跟手，越过阈值时振动一次，松手越过阈值则清除并再振动 ----
+    val haptic = LocalHapticFeedback.current
+    val onCloseNow by rememberUpdatedState(onClose)
+    // 以 item.id 为 key：卡片被清除后列表重排，复用到的卡片不会带着上一张的位移
+    var rawDrag by remember(item.id) { mutableFloatStateOf(0f) }
+    var shown by remember(item.id) { mutableFloatStateOf(0f) }
+    var cardWidth by remember { mutableIntStateOf(0) }
+    var passedThreshold by remember(item.id) { mutableStateOf(false) }
+    var dismissing by remember(item.id) { mutableStateOf(false) }
+    val dragState = rememberDraggableState { delta ->
+        if (dismissing) return@rememberDraggableState
+        val w = cardWidth.toFloat()
+        rawDrag += delta
+        shown = SwipeDismiss.damped(rawDrag, w)
+        val pass = SwipeDismiss.passed(shown, w)
+        if (pass != passedThreshold) {
+            passedThreshold = pass
+            // 越过阈值（会清除）与退回阈值内（取消清除）都给一次轻振动，让用户知道松手会发生什么
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+    }
+
     Box(
         modifier = modifier
+            .onSizeChanged { cardWidth = it.width }
+            .graphicsLayer {
+                translationX = shown
+                alpha = SwipeDismiss.alpha(shown, cardWidth.toFloat())
+            }
+            .draggable(
+                state = dragState,
+                orientation = Orientation.Horizontal,
+                enabled = !dismissing,
+                onDragStopped = { velocity ->
+                    val w = cardWidth.toFloat()
+                    if (SwipeDismiss.shouldDismiss(shown, velocity, w)) {
+                        dismissing = true
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        val dir = if (shown >= 0f) 1f else -1f
+                        animate(shown, dir * w * 1.15f, animationSpec = tween(180)) { v, _ -> shown = v }
+                        onCloseNow()
+                    } else {
+                        passedThreshold = false
+                        rawDrag = 0f
+                        animate(shown, 0f, animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f)) { v, _ -> shown = v }
+                    }
+                },
+            )
             .height(160.dp)
             .then(
                 if (highlight) {
@@ -568,11 +628,11 @@ internal fun TabCard(
                     Modifier
                 },
             )
-            .clip(RoundedCornerShape(16.dp))
+            .squircleClip(16.dp)
             .background(cardColor)
             .then(
                 if (highlight) {
-                    Modifier.border(2.dp, highlightColor, RoundedCornerShape(16.dp))
+                    Modifier.squircleBorder(2.dp, highlightColor, 16.dp)
                 } else {
                     Modifier
                 },
@@ -649,6 +709,32 @@ internal fun TabCard(
     }
 }
 
+/**
+ * 标签页 sheet 头部的圆形按钮。柔光玻璃（[softBackdrop] 非空）：用柔光玻璃材质并以页面内容层为采样源，
+ * 与底栏 / 顶栏按钮一致；miuix 的玻璃按钮在顶栏之外不传采样源会退回平底色，所以必须显式传。
+ * 其它模式沿用 [LiquidGlassButton]（液态玻璃 / 磨砂 / 关闭模糊各自的材质）。
+ */
+@Composable
+internal fun TabsHeaderButton(
+    onClick: () -> Unit,
+    liquid: com.kyant.backdrop.Backdrop?,
+    softBackdrop: LayerBackdrop?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    if (softBackdrop != null) {
+        HapticGlassIconButton(
+            onClick = { if (enabled) onClick() },
+            modifier = modifier.alpha(if (enabled) 1f else 0.4f),
+            backdrop = softBackdrop,
+            content = content,
+        )
+    } else {
+        LiquidGlassButton(onClick = onClick, backdrop = liquid, modifier = modifier, enabled = enabled, content = content)
+    }
+}
+
 /** 标签页 sheet 左上角圆形新建按钮：在当前栏（标签页 / 无痕浏览页）新建，无长按操作。 */
 @Composable
 internal fun TabAddButton(
@@ -656,10 +742,12 @@ internal fun TabAddButton(
     onClick: () -> Unit,
     backdrop: com.kyant.backdrop.Backdrop?,
     modifier: Modifier = Modifier,
+    softBackdrop: LayerBackdrop? = null,
 ) {
-    LiquidGlassButton(
+    TabsHeaderButton(
         onClick = onClick,
-        backdrop = backdrop,
+        liquid = backdrop,
+        softBackdrop = softBackdrop,
         modifier = modifier,
         enabled = canAdd,
     ) {

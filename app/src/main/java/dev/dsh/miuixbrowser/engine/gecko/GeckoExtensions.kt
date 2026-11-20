@@ -36,7 +36,6 @@ import java.lang.reflect.Method
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Proxy
 import java.util.concurrent.atomic.AtomicBoolean
-import java.net.URLEncoder
 import kotlin.coroutines.resume
 
 /**
@@ -85,23 +84,8 @@ data class GeckoPopup(
     val session: org.mozilla.geckoview.GeckoSession,
 )
 
-/** Firefox 拓展商店（AMO）搜索结果 */
-data class AmoAddon(
-    val id: Long,
-    val slug: String,
-    /** 拓展的 GUID（如 firefox@tampermonkey.net），与已安装拓展的 id 对应；判断「是否已添加」靠它 */
-    val guid: String,
-    val name: String,
-    val summary: String,
-    val iconUrl: String,
-    val xpiUrl: String,
-    val version: String,
-    val users: Long,
-    val rating: Double,
-)
-
 /**
- * Gecko WebExtension 的应用层封装：列表 / 安装 / 更新 + AMO 搜索。
+ * Gecko WebExtension 的应用层封装：列表 / 安装 / 更新 + 搜索 / 解析见 net/AmoClient。
  *
  * GeckoView 的 `WebExtensionController` 在不同 nightly 之间签名有过调整（install 的参数、提示委托的拆分），
  * 所以安装与提示委托这两处按名字反射 / 动态代理，缺方法时报错而不是编译失败。
@@ -1196,101 +1180,5 @@ object GeckoExtensionStore {
         }
         return result
     }
-
-    // ------------------------------------------------------------------ AMO（addons.mozilla.org）
-
-    private const val AMO_API = "https://addons.mozilla.org/api/v5/addons"
-
-    suspend fun searchAmo(query: String): Result<List<AmoAddon>> = withContext(Dispatchers.IO) {
-        runCatching {
-            val url = "$AMO_API/search/?app=android&type=extension&sort=users&page_size=20&lang=zh-CN&q=" +
-                URLEncoder.encode(query, "UTF-8")
-            val results = JSONObject(httpGet(url)).optJSONArray("results") ?: return@runCatching emptyList()
-            (0 until results.length()).mapNotNull { parseAddon(results.getJSONObject(it)) }
-        }.recoverCatching { throw IllegalStateException(netMessage(it)) }
-    }
-
-    /** 把 addons.mozilla.org 的商店页面链接解析成拓展信息（取 xpi 下载地址）；不是商店页面返回 null */
-    suspend fun resolveAmoPage(url: String): Result<AmoAddon?> = withContext(Dispatchers.IO) {
-        runCatching {
-            val uri = Uri.parse(url)
-            val host = uri.host.orEmpty()
-            if (!host.endsWith("addons.mozilla.org")) return@runCatching null
-            val slug = Regex("/addon/([^/?#]+)").find(uri.path.orEmpty())?.groupValues?.get(1)
-                ?: return@runCatching null
-            parseAddon(JSONObject(httpGet("$AMO_API/addon/${URLEncoder.encode(slug, "UTF-8")}/?lang=zh-CN")))
-                ?: error(tr("商店里找不到这个拓展"))
-        }.recoverCatching { throw IllegalStateException(netMessage(it)) }
-    }
-
-    private fun netMessage(t: Throwable) =
-        t.message?.takeIf { it.startsWith(tr("服务器返回")) || it.startsWith(tr("商店")) } ?: tr("访问商店失败，检查网络")
-
-    /** 读字符串字段：缺失或 JSON null 都当空串（Android 的 optString 对 JSON null 会返回 "null" 字样） */
-    private fun str(o: JSONObject, key: String): String =
-        if (!o.has(key) || o.isNull(key)) "" else o.optString(key).trim()
-
-    /**
-     * AMO 的多语言字段：带 lang 参数时是字符串，否则是 {语言: 文本}；某个语言没有译文时值是 JSON null。
-     * 依次取 zh-CN、zh-TW、en-US、en-GB，最后取任意一个非空的语言。
-     */
-    private fun localized(o: JSONObject, key: String): String {
-        if (!o.has(key) || o.isNull(key)) return ""
-        return when (val v = o.opt(key)) {
-            is String -> v.trim().takeUnless { it.equals("null", true) }.orEmpty()
-            is JSONObject -> {
-                val order = listOf("zh-CN", "zh-TW", "en-US", "en-GB") + v.keys().asSequence().toList()
-                order.firstNotNullOfOrNull { k -> str(v, k).takeIf { it.isNotEmpty() } }.orEmpty()
-            }
-            else -> ""
-        }
-    }
-
-    private fun parseAddon(o: JSONObject): AmoAddon? {
-        val current = o.optJSONObject("current_version") ?: return null
-        val xpi = current.optJSONObject("file")?.let { str(it, "url") }?.takeIf { it.isNotBlank() }
-            ?: current.optJSONArray("files")?.optJSONObject(0)?.let { str(it, "url") }?.takeIf { it.isNotBlank() }
-            ?: return null
-        return AmoAddon(
-            id = o.optLong("id"),
-            slug = str(o, "slug"),
-            guid = str(o, "guid"),
-            name = localized(o, "name").ifBlank { str(o, "slug") },
-            summary = localized(o, "summary").replace(Regex("<[^>]+>"), "").trim(),
-            iconUrl = str(o, "icon_url"),
-            xpiUrl = xpi,
-            version = str(current, "version"),
-            users = o.optLong("average_daily_users"),
-            rating = o.optJSONObject("ratings")?.optDouble("average", 0.0) ?: 0.0,
-        )
-    }
-
-    private fun httpGet(url: String): String = HttpFetcher.getText(
-        url,
-        HttpFetcher.Options(
-            connectTimeoutMs = 10_000,
-            readTimeoutMs = 20_000,
-            maxBytes = 8 * 1024 * 1024,
-            userAgent = "Mozilla/5.0 mafari",
-            accept = "application/json",
-        ),
-    )
 }
 
-/** GeckoResult → 协程；值可能为 null */
-suspend fun <T> GeckoResult<T>.await(): T? = suspendCancellableCoroutine { cont ->
-    accept(
-        { value -> if (cont.isActive) cont.resume(value) },
-        { error -> if (cont.isActive) cont.resumeWith(Result.failure(error ?: IllegalStateException(tr("操作失败")))) },
-    )
-}
-
-/** Compose 的 context 常是 ContextWrapper，剥到 Activity */
-fun Context.findActivity(): Activity? {
-    var c: Context? = this
-    while (c is ContextWrapper) {
-        if (c is Activity) return c
-        c = c.baseContext
-    }
-    return null
-}

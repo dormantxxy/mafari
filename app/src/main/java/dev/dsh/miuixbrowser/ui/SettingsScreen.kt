@@ -1,5 +1,7 @@
 package dev.dsh.miuixbrowser.ui
 
+import top.yukonga.miuix.kmp.squircle.squircleBorder
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import top.yukonga.miuix.kmp.layout.LocalBottomSheetInsets
 import dev.dsh.miuixbrowser.i18n.tr
@@ -131,7 +133,7 @@ fun SettingsScreen(
     onApplyUserAgent: (String) -> Unit,
     onOpenDownloads: () -> Unit,
     onOpenScripts: () -> Unit,
-    onOpenGeckoExtensions: () -> Unit = {},
+    onOpenExtensions: () -> Unit = {},
     onOpenGeckoProtection: () -> Unit = {},
     onOpenGeckoDebug: () -> Unit = {},
     onOpenWebViewDebug: () -> Unit = {},
@@ -506,14 +508,12 @@ fun SettingsScreen(
                             },
                         )
                     }
-                    // 按内核显示：拓展属于 Gecko；网页增强 / 去广告依赖 WebView 专有 API；脚本管理两种内核通用
-                    EngineRow(visible = settings.geckoMode) {
-                        SettingsRow(
-                            title = tr("拓展"),
-                            summary = tr("管理 Firefox 扩展"),
-                            onClick = onOpenGeckoExtensions,
-                        )
-                    }
+                    // 拓展两种内核都有入口（Gecko：Firefox 扩展；WebView：自研运行时，实验性）；网页增强 / 去广告依赖 WebView 专有 API；脚本管理两种内核通用
+                    SettingsRow(
+                        title = tr("拓展"),
+                        summary = if (settings.geckoMode) tr("管理 Firefox 扩展") else tr("管理 WebView 拓展（实验性）"),
+                        onClick = onOpenExtensions,
+                    )
                     // 网页增强是 WebView 的总开关（脚本 + 去广告）；Gecko 下脚本只受脚本菜单里的开关控制
                     EngineRow(visible = !settings.geckoMode) {
                         AppSwitchPreference(
@@ -1128,7 +1128,7 @@ private fun WallpaperDialogRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .squircleClip(12.dp)
             .clickable(onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1174,7 +1174,7 @@ private fun AppIconPicker(selected: Int, onSelect: (Int) -> Unit) {
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
+                        .squircleClip(14.dp)
                         .clickable { onSelect(index) }
                         .padding(vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -1184,13 +1184,13 @@ private fun AppIconPicker(selected: Int, onSelect: (Int) -> Unit) {
                             .fillMaxWidth(0.88f)
                             .widthIn(max = 52.dp)
                             .aspectRatio(1f)
-                            .border(
+                            .squircleBorder(
                                 width = if (active) 2.dp else 0.dp,
                                 color = if (active) MiuixTheme.colorScheme.primary else Color.Transparent,
-                                shape = RoundedCornerShape(15.dp),
+                                cornerRadius = 15.dp,
                             )
                             .padding(2.5.dp)
-                            .clip(RoundedCornerShape(12.dp)),
+                            .squircleClip(12.dp),
                     ) {
                         Image(
                             painter = painterResource(option.preview),

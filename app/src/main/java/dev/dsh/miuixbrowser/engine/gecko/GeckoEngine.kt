@@ -173,6 +173,9 @@ class GeckoTabEngine(
         // 阅读模式：内置拓展（内容脚本检测 + 渲染）与会话端口
         GeckoReader.ensureInstalled(context)
         GeckoReader.attachSession(session, tab)
+        // 页内翻译：内置拓展（内容脚本取文本 / 贴译文）与会话端口
+        GeckoTranslate.ensureInstalled(context)
+        GeckoTranslate.attachSession(session, tab)
         if (!isAdopted) session.open(runtime)
         // 拓展按钮的弹出页请求按标签页 session 路由：给这个 session 挂上拓展的 ActionDelegate / TabDelegate
         GeckoExtensionStore.registerSession(session)
@@ -581,6 +584,7 @@ class GeckoTabEngine(
     fun destroy() {
         GeckoGm.detachSession(session)
         GeckoReader.detachSession(session)
+        GeckoTranslate.detachSession(session)
         GeckoViewLifecycle.unregister(this)
         clearFreeze()
         runCatching { view.releaseSession() }
@@ -675,6 +679,12 @@ class GeckoTabEngine(
                 }
                 val scheme = runCatching { Uri.parse(target).scheme?.lowercase() }.getOrNull()
                 if (scheme == null || scheme in INTERNAL_SCHEMES) {
+                    // 独立应用窗口（PWA）的范围闸门：站外的主框架导航交给浏览器
+                    if ((scheme == "http" || scheme == "https") &&
+                        tab.geckoNavGate?.invoke(target, request.hasUserGesture, request.isRedirect) == true
+                    ) {
+                        return GeckoResult.fromValue(AllowOrDeny.DENY)
+                    }
                     // 网页重定向权限：页面自己发起（无手势、非地址栏、非服务器 3xx）的跨站跳转
                     val direct = request.isDirectNavigation || SystemClock.uptimeMillis() - lastDirectLoadAt < 1_000
                     if ((scheme == "http" || scheme == "https") &&
@@ -686,6 +696,24 @@ class GeckoTabEngine(
                 }
                 // weixin:// alipays:// intent:// 等：交给系统。有用户手势 / 地址栏输入直接唤起；
                 // 页面自己无手势地唤起其他应用，按「网页重定向」权限处理（询问 / 总是允许 / 总是拒绝，与 WebView 一致）
+                val direct = request.isDirectNavigation || SystemClock.uptimeMillis() - lastDirectLoadAt < 1_000
+                if (request.hasUserGesture || direct) {
+                    tab.geckoLaunchExternal(Uri.parse(target))
+                } else {
+                    tab.geckoExternalRequest(Uri.parse(target))
+                }
+                return GeckoResult.fromValue(AllowOrDeny.DENY)
+            }
+
+            // 子框架（隐藏 iframe）里的应用协议：很多 H5 页面用 iframe.src = "weixin://dl/business/?t=…" 唤起微信小程序，
+            // 不处理的话 Gecko 会直接丢弃，表现为「点了没反应」。规则与顶层导航一致；其余子框架请求照常加载。
+            override fun onSubframeLoadRequest(
+                session: GeckoSession,
+                request: GeckoSession.NavigationDelegate.LoadRequest,
+            ): GeckoResult<AllowOrDeny>? {
+                val target = request.uri
+                val scheme = runCatching { Uri.parse(target).scheme?.lowercase() }.getOrNull()
+                if (scheme == null || scheme in INTERNAL_SCHEMES) return null
                 val direct = request.isDirectNavigation || SystemClock.uptimeMillis() - lastDirectLoadAt < 1_000
                 if (request.hasUserGesture || direct) {
                     tab.geckoLaunchExternal(Uri.parse(target))
@@ -799,6 +827,11 @@ class GeckoTabEngine(
 
             override fun onCloseRequest(session: GeckoSession) {
                 tab.geckoCloseRequest()
+            }
+
+            /** 页面声明了 Web App Manifest（PWA）：记下来，「添加到桌面」时用它的名称 / 图标 / 范围 / 显示模式 */
+            override fun onWebAppManifest(session: GeckoSession, manifest: org.json.JSONObject) {
+                tab.geckoWebAppManifest(manifest)
             }
 
             override fun onCrash(session: GeckoSession) {

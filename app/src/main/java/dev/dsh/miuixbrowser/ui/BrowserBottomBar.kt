@@ -1,6 +1,11 @@
 package dev.dsh.miuixbrowser.ui
 
 import dev.dsh.miuixbrowser.i18n.tr
+import dev.dsh.miuixbrowser.download.DownloadState
+import dev.dsh.miuixbrowser.download.Downloader
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.snapshotFlow
+import top.yukonga.miuix.kmp.icon.glass.Download
 
 import android.app.Activity
 import android.os.Build
@@ -182,6 +187,7 @@ import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.icon.basic.Check
 import dev.dsh.miuixbrowser.ui.icons.Settings
 import top.yukonga.miuix.kmp.icon.glass.Search
+import top.yukonga.miuix.kmp.icon.glass.Translate
 import top.yukonga.miuix.kmp.icon.glass.Phone
 import top.yukonga.miuix.kmp.icon.glass.More
 import top.yukonga.miuix.kmp.icon.glass.Info
@@ -212,6 +218,8 @@ import top.yukonga.miuix.kmp.glass.GlassPopupItem
 import top.yukonga.miuix.kmp.material.GlassShape
 import top.yukonga.miuix.kmp.material.GlassEdgeStrokes
 import top.yukonga.miuix.kmp.glass.glassPanel
+import top.yukonga.miuix.kmp.squircle.squircleBorder
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** MIUIX Glass 底板：主页用 glassPanel 真玻璃；无采样/关模糊时回退到渐变底板。 */
@@ -304,12 +312,34 @@ internal fun BottomBar(
     /** 当前页面有正在运行的脚本：在阅读图标的位置显示脚本图标（阅读图标优先，可阅读时由它占位） */
     scriptsRunning: Boolean = false,
     onScripts: () -> Unit = {},
+    /** 下载图标状态：有下载在进行 / 有已完成未查看的下载时非 null；优先级 下载 > 阅读 > 脚本 */
+    download: AddressDownloadState? = null,
+    onDownload: () -> Unit = {},
+    /** 当前页正在 / 已经翻译：地址栏最左侧显示翻译图标（优先级最高） */
+    translateVisible: Boolean = false,
+    /** 正显示原文：图标变灰；译文时是主题色 */
+    translateOriginal: Boolean = false,
+    onTranslateToggle: () -> Unit = {},
 ) {
     val haptic = LocalHapticFeedback.current
     val shape = RoundedCornerShape(29.dp)
     val showRefresh = shouldShowAddressRefresh(address = address, loading = loading, editing = editing)
-    val showReader = shouldShowAddressReader(readerVisible = readerVisible, editing = editing)
-    val showScripts = shouldShowAddressScripts(readerVisible = readerVisible, scriptsRunning = scriptsRunning, editing = editing)
+    val downloadVisible = download?.visible == true
+    val showTranslate = shouldShowAddressTranslate(translateVisible = translateVisible, editing = editing)
+    val showDownload = shouldShowAddressDownload(downloadVisible = downloadVisible, editing = editing, translateVisible = translateVisible)
+    val showReader = shouldShowAddressReader(
+        readerVisible = readerVisible,
+        editing = editing,
+        downloadVisible = downloadVisible,
+        translateVisible = translateVisible,
+    )
+    val showScripts = shouldShowAddressScripts(
+        readerVisible = readerVisible,
+        scriptsRunning = scriptsRunning,
+        editing = editing,
+        downloadVisible = downloadVisible,
+        translateVisible = translateVisible,
+    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -356,7 +386,7 @@ internal fun BottomBar(
                 modifier = Modifier
                     .weight(1f)
                     .height(40.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                    .squircleClip(20.dp)
                     .background(MiuixTheme.colorScheme.surface.copy(alpha = 0.6f))
                     // 编辑中不挂点击 / 长按复制：长按要留给输入框（放大镜、选词、拖动光标），而不是复制网址
                     .then(
@@ -378,7 +408,15 @@ internal fun BottomBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // 阅读模式图标：地址栏最左侧（比加载小圆点还靠左）
-                if (showReader) {
+                if (showTranslate) {
+                    // 翻译图标优先级最高（翻译 > 下载 > 阅读 > 脚本）：与它们同一位置、同一尺寸
+                    AddressTranslateButton(original = translateOriginal, onClick = onTranslateToggle)
+                    Spacer(Modifier.width(6.dp))
+                } else if (showDownload && download != null) {
+                    // 下载图标优先于阅读 / 脚本图标：与它们同一位置、同一尺寸
+                    AddressDownloadButton(state = download, onClick = onDownload)
+                    Spacer(Modifier.width(6.dp))
+                } else if (showReader) {
                     AddressReaderButton(active = readerActive, onClick = onReader)
                     Spacer(Modifier.width(6.dp))
                 } else if (showScripts) {
@@ -484,7 +522,7 @@ internal fun CountBadge(count: Int, modifier: Modifier = Modifier) {
         modifier = modifier
             .height(15.dp)
             .widthIn(min = 15.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .squircleClip(8.dp)
             .background(MiuixTheme.colorScheme.primary)
             .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center,
@@ -614,8 +652,20 @@ internal fun shouldShowAddressRefresh(address: String, loading: Boolean, editing
 internal val AddressRefreshWidth = 26.dp
 
 /** 阅读图标显示条件：页面可进入 / 正处于阅读模式，且不在输入状态（输入时让位给文字编辑）。 */
-internal fun shouldShowAddressReader(readerVisible: Boolean, editing: Boolean): Boolean =
-    readerVisible && !editing
+internal fun shouldShowAddressReader(
+    readerVisible: Boolean,
+    editing: Boolean,
+    downloadVisible: Boolean = false,
+    translateVisible: Boolean = false,
+): Boolean = readerVisible && !editing && !downloadVisible && !translateVisible
+
+/** 下载图标显示条件：有下载在进行 / 有已完成未查看的下载，且不在输入状态。优先级最高（下载 > 阅读 > 脚本）。 */
+internal fun shouldShowAddressDownload(downloadVisible: Boolean, editing: Boolean, translateVisible: Boolean = false): Boolean =
+    downloadVisible && !editing && !translateVisible
+
+/** 翻译图标显示条件：当前页正在 / 已经翻译，且不在输入状态。优先级最高（翻译 > 下载 > 阅读 > 脚本），与它们共用同一个位置。 */
+internal fun shouldShowAddressTranslate(translateVisible: Boolean, editing: Boolean): Boolean =
+    translateVisible && !editing
 
 /** 地址栏内阅读图标占用的宽度（按钮 24dp + 右侧间距 2dp），用于底栏宽度计算。 */
 internal val AddressReaderWidth = 26.dp
@@ -624,8 +674,229 @@ internal val AddressReaderWidth = 26.dp
  * 脚本图标显示条件：当前页面有正在运行的脚本，且不在输入状态；
  * 页面可阅读 / 正处于阅读模式时阅读图标优先，脚本图标让位（两者共用同一个位置）。
  */
-internal fun shouldShowAddressScripts(readerVisible: Boolean, scriptsRunning: Boolean, editing: Boolean): Boolean =
-    scriptsRunning && !readerVisible && !editing
+internal fun shouldShowAddressScripts(
+    readerVisible: Boolean,
+    scriptsRunning: Boolean,
+    editing: Boolean,
+    downloadVisible: Boolean = false,
+    translateVisible: Boolean = false,
+): Boolean = scriptsRunning && !readerVisible && !downloadVisible && !translateVisible && !editing
+
+/**
+ * 进程级单例：Activity 重建（旋转 / 切换主题）后界面拿到的仍是同一份状态，
+ * 「已点击查看」和各任务的完成时刻都不会丢，已隐藏的小圆点不会重新冒出来。
+ */
+internal val SharedAddressDownloadState = AddressDownloadState()
+
+/**
+ * 地址栏下载图标的状态（只统计本次运行期间产生 / 变化的任务，冷启动时库里的旧记录不触发）：
+ * - [running]：有任务正在下载 → 主题色进度环（总大小未知时为旋转的不定进度弧）
+ * - [paused]：没有进行中的任务，但有暂停的任务 → 灰色进度环；暂停满 3 分钟仍未继续则自动隐藏
+ * - [unseenFailed]：有任务失败 → 图标右上角红点；1 分钟内没点击则自动隐藏
+ * - [unseenDone]：有任务下载完成 → 图标右上角绿点；1 分钟内没点击则自动隐藏；红点优先于绿点
+ * 点击图标（打开下载页）后调用 [acknowledge]：已完成 / 失败的小圆点消失。
+ */
+@Stable
+internal class AddressDownloadState {
+    var running by mutableStateOf(false)
+        private set
+    var paused by mutableStateOf(false)
+        private set
+    /** 当前环显示的进度百分比 0..100；-1 = 总大小未知 */
+    var progressPct by mutableIntStateOf(-1)
+        private set
+    var unseenDone by mutableStateOf(false)
+        private set
+    var unseenFailed by mutableStateOf(false)
+        private set
+
+    val visible: Boolean get() = running || paused || unseenDone || unseenFailed
+
+    private var watched = emptySet<Long>()
+    private var acked = emptySet<Long>()
+    private val pausedSince = HashMap<Long, Long>()
+    private val failedSince = HashMap<Long, Long>()
+    private val doneSince = HashMap<Long, Long>()
+    private var last: Snapshot? = null
+
+    fun acknowledge() {
+        val s = last
+        acked = acked + watched + (s?.failedIds ?: emptySet()) + (s?.doneIds ?: emptySet())
+        recompute(System.currentTimeMillis())
+    }
+
+    private class Snapshot(
+        val runningIds: Set<Long>,
+        val pausedIds: Set<Long>,
+        val failedIds: Set<Long>,
+        val doneIds: Set<Long>,
+        val runPct: Int,
+        val pausedPct: Int,
+    )
+
+    private fun pctOf(tasks: List<dev.dsh.miuixbrowser.download.DownloadTask>): Int {
+        if (tasks.isEmpty() || !tasks.all { it.total > 0 }) return -1
+        val total = tasks.sumOf { it.total }
+        val bytes = tasks.sumOf { it.bytes }
+        return ((bytes.toDouble() / total) * 100).toInt().coerceIn(0, 100)
+    }
+
+    // 只认本次进程里真正启动 / 继续过的任务；冷启动从数据库恢复的旧任务（已完成 / 失败 / 暂停）一律不算，
+    // 避免每次打开应用都再次显示完成圆点。数据库加载是异步的，不能靠「第一次快照里有没有」来区分。
+    private fun fresh(id: Long) = id in watched || id in Downloader.sessionIds
+
+    private fun recompute(now: Long) {
+        val s = last ?: return
+        running = s.runningIds.isNotEmpty()
+        paused = pausedSince.any { now - it.value < PAUSED_HIDE_MS }
+        progressPct = if (running) s.runPct else s.pausedPct
+        unseenFailed = failedSince.any { it.key !in acked && now - it.value < FAILED_HIDE_MS }
+        unseenDone = doneSince.any { it.key !in acked && now - it.value < DONE_HIDE_MS }
+    }
+
+    /** 在 LaunchedEffect 里调用。进度按 1% 量化，避免每个数据块都触发重组。 */
+    suspend fun track() = kotlinx.coroutines.coroutineScope {
+        // 暂停 / 失败的自动隐藏靠定时重算
+        launch {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                if (pausedSince.isNotEmpty() || failedSince.isNotEmpty() || doneSince.isNotEmpty()) recompute(System.currentTimeMillis())
+            }
+        }
+        snapshotFlow {
+            val tasks = Downloader.tasks.toList()
+            val run = tasks.filter { it.state == DownloadState.RUNNING }
+            val pau = tasks.filter { it.state == DownloadState.PAUSED }
+            Snapshot(
+                runningIds = run.map { it.id }.toSet(),
+                pausedIds = pau.map { it.id }.toSet(),
+                failedIds = tasks.filter { it.state == DownloadState.FAILED }.map { it.id }.toSet(),
+                doneIds = tasks.filter { it.state == DownloadState.DONE }.map { it.id }.toSet(),
+                runPct = pctOf(run),
+                pausedPct = pctOf(pau),
+            )
+        }.collect { s ->
+            val now = System.currentTimeMillis()
+            watched = watched + s.runningIds
+            // 重新开始下载的任务：之前的「已查看」作废，再失败 / 完成时重新提示
+            acked = acked - s.runningIds
+            pausedSince.keys.retainAll(s.pausedIds)
+            s.pausedIds.forEach { id -> if (fresh(id) && id !in pausedSince) pausedSince[id] = now }
+            failedSince.keys.retainAll(s.failedIds)
+            s.failedIds.forEach { id -> if (fresh(id) && id !in failedSince) failedSince[id] = Downloader.finishedAt[id] ?: now }
+            doneSince.keys.retainAll(s.doneIds)
+            s.doneIds.forEach { id -> if (fresh(id) && id !in doneSince) doneSince[id] = Downloader.finishedAt[id] ?: now }
+            last = s
+            recompute(now)
+        }
+    }
+
+    private companion object {
+        const val PAUSED_HIDE_MS = 3 * 60 * 1000L
+        const val FAILED_HIDE_MS = 60 * 1000L
+        const val DONE_HIDE_MS = 60 * 1000L
+    }
+}
+
+/**
+ * 地址栏最左侧的下载按钮，位置和大小与阅读 / 脚本图标一致：
+ * 下载中 = 主题色图标 + 进度环；暂停 = 灰色图标 + 灰色进度环；失败 = 右上角红点；完成 = 右上角绿点。
+ * 任何时候点击都进入下载页。
+ */
+@Composable
+internal fun AddressDownloadButton(state: AddressDownloadState, onClick: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    val primary = MiuixTheme.colorScheme.primary
+    val gray = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    val ringStroke = with(LocalDensity.current) { 2.dp.toPx() }
+    val dotRadius = with(LocalDensity.current) { 3.5.dp.toPx() }
+    val dotBorder = with(LocalDensity.current) { 1.dp.toPx() }
+    val surface = MiuixTheme.colorScheme.surface
+    val running = state.running
+    val showRing = running || state.paused
+    val ringColor = if (running) primary else gray
+    val pct = state.progressPct
+    val determinate = pct >= 0
+    val sweep by animateFloatAsState(
+        targetValue = if (determinate) pct / 100f * 360f else 90f,
+        animationSpec = tween(200),
+        label = "dlSweep",
+    )
+    // 总大小未知：弧段匀速旋转（仅在下载中且不定进度时才创建动画）
+    val spin = if (running && !determinate) {
+        val t = rememberInfiniteTransition(label = "dlSpin")
+        t.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(1000, easing = androidx.compose.animation.core.LinearEasing)),
+            label = "dlSpinAngle",
+        ).value
+    } else {
+        0f
+    }
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            if (showRing) {
+                val inset = ringStroke / 2f
+                val arcSize = Size(size.width - ringStroke, size.height - ringStroke)
+                val topLeft = Offset(inset, inset)
+                // 底环：淡色轨道
+                drawArc(
+                    color = ringColor.copy(alpha = 0.22f),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = ringStroke),
+                )
+                // 进度弧：从 12 点钟方向顺时针；暂停且总大小未知时只画轨道
+                if (running || determinate) {
+                    drawArc(
+                        color = ringColor,
+                        startAngle = -90f + spin,
+                        sweepAngle = sweep.coerceAtLeast(4f),
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = ringStroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                    )
+                }
+            }
+            // 右上角小圆点：失败（红）优先于完成（绿）
+            if (state.unseenFailed || state.unseenDone) {
+                val c = Offset(size.width - dotRadius, dotRadius)
+                // 外圈用面板底色描边，把圆点和图标 / 进度环分开
+                drawCircle(color = surface, radius = dotRadius + dotBorder, center = c)
+                drawCircle(
+                    color = if (state.unseenFailed) Color(0xFFFF3B30) else Color(0xFF34C759),
+                    radius = dotRadius,
+                    center = c,
+                )
+            }
+        }
+        val iconSize = with(LocalDensity.current) { 13.sp.toDp() }
+        Icon(
+            imageVector = MiuixIcons.Glass.Download,
+            contentDescription = tr("下载"),
+            // 只有暂停（没有进行中的任务）时图标变灰
+            tint = if (!running && state.paused) gray else primary,
+            modifier = Modifier.size(iconSize),
+        )
+    }
+}
 
 /** 地址栏最左侧的阅读模式按钮：未进入时是灰色线条，进入后图标点亮（主题色 + 淡色底）。 */
 @Composable
@@ -683,6 +954,38 @@ internal fun AddressScriptButton(onClick: () -> Unit) {
             tint = MiuixTheme.colorScheme.primary,
             // 视觉上略微下移（只移图标，点击区域不变）
             modifier = Modifier.offset(y = 1.dp).size(iconSize),
+        )
+    }
+}
+
+/**
+ * 地址栏最左侧的翻译按钮：位置和大小与 [AddressReaderButton] / [AddressScriptButton] 一致。
+ * 译文显示中是主题色，切到原文时变灰色；点击在原文与译文之间切换。
+ */
+@Composable
+internal fun AddressTranslateButton(original: Boolean, onClick: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    val tint = if (original) MiuixTheme.colorScheme.onSurfaceVariantSummary else MiuixTheme.colorScheme.primary
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .clip(CircleShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        val iconSize = with(LocalDensity.current) { 15.sp.toDp() }
+        Icon(
+            imageVector = MiuixIcons.Glass.Translate,
+            contentDescription = if (original) tr("显示译文") else tr("显示原文"),
+            tint = tint,
+            modifier = Modifier.size(iconSize),
         )
     }
 }
@@ -899,10 +1202,10 @@ internal fun SheetRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .squircleClip(16.dp)
             .then(
                 if (highlight) {
-                    Modifier.border(2.dp, MiuixTheme.colorScheme.primary, RoundedCornerShape(16.dp))
+                    Modifier.squircleBorder(2.dp, MiuixTheme.colorScheme.primary, 16.dp)
                 } else {
                     Modifier
                 },

@@ -47,12 +47,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import org.mozilla.geckoview.GeckoView
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.Backdrop
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private val RunningGreen = Color(0xFF34C759)
 
 /**
- * 拓展快捷菜单（底部 Sheet，对应 WebView 下的「脚本快捷菜单」）。
+ * Gecko 拓展快捷菜单（底部 Sheet）；WebView 内核由 WebViewExtMenuSheet 提供对应实现。
  * 列出正在运行（已启用）的拓展；点某一项会点击它的工具栏按钮，拓展的弹出页（功能菜单）
  * 随即在第二层 sheet 里显示。
  */
@@ -212,7 +213,7 @@ fun GeckoExtMenuSheet(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
+                                .squircleClip(14.dp)
                                 .alpha(if (item.enabled) 1f else 0.45f)
                                 .clickable(enabled = item.enabled) {
                                     if (store.clickAction(item.id)) {
@@ -226,14 +227,13 @@ fun GeckoExtMenuSheet(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             val bmp = store.icons[item.id]
-                            val shape = RoundedCornerShape(8.dp)
                             if (bmp != null) {
-                                Image(bitmap = bmp, contentDescription = null, modifier = Modifier.size(30.dp).clip(shape))
+                                Image(bitmap = bmp, contentDescription = null, modifier = Modifier.size(30.dp).squircleClip(8.dp))
                             } else {
                                 Box(
                                     modifier = Modifier
                                         .size(30.dp)
-                                        .clip(shape)
+                                        .squircleClip(8.dp)
                                         .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.14f)),
                                 )
                             }

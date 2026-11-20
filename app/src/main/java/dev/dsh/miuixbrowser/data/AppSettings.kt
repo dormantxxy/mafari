@@ -11,6 +11,9 @@ import dev.dsh.miuixbrowser.browser.MenuAction
 import dev.dsh.miuixbrowser.browser.parseQuickMenu
 import dev.dsh.miuixbrowser.engine.EngineSupport
 import dev.dsh.miuixbrowser.net.WebViewProxy
+import dev.dsh.miuixbrowser.translate.TranslateConfig
+import dev.dsh.miuixbrowser.translate.TranslateLangs
+import dev.dsh.miuixbrowser.translate.TranslateSourceId
 import dev.dsh.miuixbrowser.ui.UpdateChannel
 import dev.dsh.miuixbrowser.ui.WallpaperBlurCache
 import android.content.Context
@@ -210,6 +213,14 @@ class AppSettings(context: Context) {
     fun updateHomeFavRows(rows: Int) {
         homeFavRows = rows.coerceIn(0, HOME_FAV_ROWS_MAX)
         prefs.edit().putInt(KEY_HOME_FAV_ROWS, homeFavRows).apply()
+    }
+    /** 个人收藏的排列方式：false = 图标在左标题在右（每行 3 个，默认）；true = 图标在上标题在下（每行个数随宽度自适应）。 */
+    var homeFavGrid by mutableStateOf(prefs.getBoolean(KEY_HOME_FAV_GRID, false))
+        private set
+
+    fun updateHomeFavGrid(grid: Boolean) {
+        homeFavGrid = grid
+        prefs.edit().putBoolean(KEY_HOME_FAV_GRID, grid).apply()
     }
     /** 首页顶部的 Mafari LOGO 标识：显示 / 隐藏（定制主页里设置） */
     var homeShowLogo by mutableStateOf(prefs.getBoolean(KEY_HOME_LOGO, true))
@@ -665,6 +676,15 @@ class AppSettings(context: Context) {
         prefs.edit().putBoolean(KEY_ENHANCE, enabled).apply()
     }
 
+    /** 手动标记广告：长按网页元素时是否出现「标记为广告」（需要网页增强开启，WebView 内核） */
+    var adMarkLongPress by mutableStateOf(prefs.getBoolean(KEY_AD_MARK_LONG_PRESS, true))
+        private set
+
+    fun updateAdMarkLongPress(enabled: Boolean) {
+        adMarkLongPress = enabled
+        prefs.edit().putBoolean(KEY_AD_MARK_LONG_PRESS, enabled).apply()
+    }
+
     /** 启用范围：油猴脚本是否在无痕浏览 / 轻应用（桌面快捷方式）中运行 */
     var scriptsInIncognito by mutableStateOf(prefs.getBoolean(KEY_SCRIPTS_INCOGNITO, true))
         private set
@@ -702,6 +722,79 @@ class AppSettings(context: Context) {
     /** 脚本一键启停：只影响油猴脚本，不影响去广告 / 长按标记 */
     var scriptsEnabled by mutableStateOf(prefs.getBoolean(KEY_SCRIPTS, true))
         private set
+
+    // ---- 页内翻译 ----
+
+    /** 翻译源（[TranslateSourceId]）；不认识的值按默认源处理 */
+    var translateSource by mutableStateOf(
+        prefs.getString(KEY_TR_SOURCE, null)?.takeIf { it in TranslateSourceId.ALL } ?: TranslateSourceId.DEFAULT,
+    )
+        private set
+
+    /** 目标语言；第一次使用时按系统语言挑 */
+    var translateTarget by mutableStateOf(
+        prefs.getString(KEY_TR_TARGET, null)?.let { TranslateLangs.normalize(it) }
+            ?: java.util.Locale.getDefault().let { TranslateLangs.fromLocale(it.language, it.country) },
+    )
+        private set
+
+    /** 自定义翻译源（LibreTranslate 兼容）的服务地址 / Key */
+    var translateCustomUrl by mutableStateOf(prefs.getString(KEY_TR_URL, "").orEmpty())
+        private set
+    var translateCustomKey by mutableStateOf(prefs.getString(KEY_TR_KEY, "").orEmpty())
+        private set
+
+    fun updateTranslate(
+        source: String = translateSource,
+        target: String = translateTarget,
+        customUrl: String = translateCustomUrl,
+        customKey: String = translateCustomKey,
+    ) {
+        translateSource = source.takeIf { it in TranslateSourceId.ALL } ?: TranslateSourceId.DEFAULT
+        translateTarget = TranslateLangs.normalize(target)
+        translateCustomUrl = customUrl.trim()
+        translateCustomKey = customKey.trim()
+        prefs.edit()
+            .putString(KEY_TR_SOURCE, translateSource)
+            .putString(KEY_TR_TARGET, translateTarget)
+            .putString(KEY_TR_URL, translateCustomUrl)
+            .putString(KEY_TR_KEY, translateCustomKey)
+            .apply()
+    }
+
+    /** 「始终翻译此页面」：勾选过的页面键（见 [translatePageKey]），在这些页面加载完成后自动翻译 */
+    var alwaysTranslatePages by mutableStateOf(prefs.getStringSet(KEY_TR_ALWAYS, null)?.toSet().orEmpty())
+        private set
+
+    /**
+     * 「始终翻译此页面」的页面键：http(s) 地址去掉 #片段 和 ?查询，主机名小写，末尾斜杠忽略。
+     * 想改成按整个网站（主机名）生效，只需把这里改成返回 host。
+     */
+    fun translatePageKey(url: String): String? {
+        val u = runCatching { android.net.Uri.parse(url.trim()) }.getOrNull() ?: return null
+        val scheme = u.scheme?.lowercase() ?: return null
+        if (scheme != "http" && scheme != "https") return null
+        val host = u.host?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
+        val port = if (u.port > 0) ":${u.port}" else ""
+        val path = (u.encodedPath ?: "").trimEnd('/')
+        return "$scheme://$host$port$path"
+    }
+
+    fun isAlwaysTranslate(url: String): Boolean {
+        val key = translatePageKey(url) ?: return false
+        return key in alwaysTranslatePages
+    }
+
+    fun setAlwaysTranslate(url: String, on: Boolean) {
+        val key = translatePageKey(url) ?: return
+        val next = if (on) alwaysTranslatePages + key else alwaysTranslatePages - key
+        if (next == alwaysTranslatePages) return
+        alwaysTranslatePages = next
+        prefs.edit().putStringSet(KEY_TR_ALWAYS, next).apply()
+    }
+
+    /** 当前设置的快照：一次翻译进行中改设置不影响它 */
+    fun translateConfig() = TranslateConfig(translateSource, translateTarget, translateCustomUrl, translateCustomKey)
 
     fun updateScriptsEnabled(enabled: Boolean) {
         scriptsEnabled = enabled
@@ -906,6 +999,7 @@ class AppSettings(context: Context) {
         const val KEY_GLASS_PRESET_VER = "glass_preset_ver"
         const val KEY_HOME_FAV = "home_show_favorites"
         const val KEY_HOME_FAV_ROWS = "home_fav_rows"
+        const val KEY_HOME_FAV_GRID = "home_fav_grid"
         const val KEY_HOME_LOGO = "home_show_logo"
         const val KEY_HOME_PRIVACY = "home_show_privacy"
         const val KEY_HOME_RECENT = "home_show_recent"
@@ -940,6 +1034,7 @@ class AppSettings(context: Context) {
         const val KEY_DEFAULT_BROWSER_PROMPTED = "default_browser_prompted"
         const val KEY_ONBOARDING = "onboarding_version"
         const val KEY_ENHANCE = "page_enhancements"
+        const val KEY_AD_MARK_LONG_PRESS = "ad_mark_long_press"
         const val KEY_SCRIPTS = "scripts_enabled"
         const val KEY_SCRIPTS_INCOGNITO = "scripts_in_incognito"
         const val KEY_SCRIPTS_WEBAPP = "scripts_in_webapp"
@@ -966,6 +1061,11 @@ class AppSettings(context: Context) {
         const val KEY_PROXY_AUTH = "proxy_auth"
         const val KEY_PROXY_USER = "proxy_user"
         const val KEY_PROXY_PASS = "proxy_pass"
+        const val KEY_TR_SOURCE = "translate_source"
+        const val KEY_TR_TARGET = "translate_target"
+        const val KEY_TR_URL = "translate_custom_url"
+        const val KEY_TR_KEY = "translate_custom_key"
+        const val KEY_TR_ALWAYS = "translate_always_pages"
     }
 }
 

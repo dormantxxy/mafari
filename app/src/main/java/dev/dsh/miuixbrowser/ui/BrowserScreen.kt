@@ -1,331 +1,87 @@
 package dev.dsh.miuixbrowser.ui
 
-import dev.dsh.miuixbrowser.i18n.tr
-
-import dev.dsh.miuixbrowser.browser.UpdateDownload
-import dev.dsh.miuixbrowser.browser.UpdatePhase
-import dev.dsh.miuixbrowser.browser.UpdateSheet
-import dev.dsh.miuixbrowser.browser.HOME_QUICK_COLS
-import dev.dsh.miuixbrowser.browser.MenuSyncState
-import dev.dsh.miuixbrowser.browser.quickMenuCandidates
-import dev.dsh.miuixbrowser.RefreshSpinnerView
-import dev.dsh.miuixbrowser.adblock.AdBlock
+import dev.dsh.miuixbrowser.ext.ExtensionPermissionPrompt
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import android.app.AlertDialog
 import dev.dsh.miuixbrowser.appContainer
-import dev.dsh.miuixbrowser.backup.BackupAuto
 import dev.dsh.miuixbrowser.browser.AppRoute
 import dev.dsh.miuixbrowser.browser.BrowserState
+import dev.dsh.miuixbrowser.browser.BrowserStateTabBridge
 import dev.dsh.miuixbrowser.browser.BrowserTab
 import dev.dsh.miuixbrowser.browser.DefaultBrowser
-import dev.dsh.miuixbrowser.download.DownloadState
-import dev.dsh.miuixbrowser.download.Downloader
-import dev.dsh.miuixbrowser.browser.EngineKind
-import dev.dsh.miuixbrowser.browser.LoginPrompt
 import dev.dsh.miuixbrowser.browser.MenuAction
 import dev.dsh.miuixbrowser.browser.MenuOrderStore
-import dev.dsh.miuixbrowser.browser.ScanHelper
-import dev.dsh.miuixbrowser.browser.ScriptMenuCommand
-import dev.dsh.miuixbrowser.browser.ShortcutHelper
-import dev.dsh.miuixbrowser.browser.UpdateChecker
 import dev.dsh.miuixbrowser.data.AppSettings
-import dev.dsh.miuixbrowser.data.BAR_POS_BOTTOM
 import dev.dsh.miuixbrowser.data.BAR_POS_FIXED_BOTTOM
 import dev.dsh.miuixbrowser.data.BAR_POS_FIXED_TOP
 import dev.dsh.miuixbrowser.data.BAR_POS_MINIMIZED
 import dev.dsh.miuixbrowser.data.BAR_POS_TOP
-import dev.dsh.miuixbrowser.data.Favorite
-import dev.dsh.miuixbrowser.data.UA_PRESETS
-import dev.dsh.miuixbrowser.data.rememberFirstIcon
 import dev.dsh.miuixbrowser.engine.EngineSupport
 import dev.dsh.miuixbrowser.engine.gecko.GeckoDebug
-import dev.dsh.miuixbrowser.engine.gecko.GeckoNetLog
-import dev.dsh.miuixbrowser.engine.gecko.GeckoExtensionStore
-import dev.dsh.miuixbrowser.engine.gecko.GeckoSitePerms
-import dev.dsh.miuixbrowser.engine.gecko.showWebViewUnsupportedToast
-import dev.dsh.miuixbrowser.net.HttpFetcher
-import dev.dsh.miuixbrowser.net.WebViewProxy
-import dev.dsh.miuixbrowser.script.UserscriptEngine
 import dev.dsh.miuixbrowser.sync.fxa.FxaSync
 import dev.dsh.miuixbrowser.util.Diag
 import dev.dsh.miuixbrowser.util.hostOf
 import android.app.Activity
-import android.os.Build
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
-import android.provider.MediaStore
-import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
-import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.ui.draw.blur
-
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateIntOffsetAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import kotlinx.coroutines.flow.first
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.layer.CompositingStrategy as LayerCompositingStrategy
-import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.TileMode
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
-import androidx.compose.foundation.gestures.drag
-import kotlinx.coroutines.withTimeoutOrNull
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalViewConfiguration
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur as backdropBlur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationVector1D
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.ui.layout.positionInParent
-import androidx.compose.ui.layout.positionInWindow
-import kotlinx.coroutines.CoroutineStart
-
-import androidx.compose.ui.unit.IntSize
-import kotlin.math.max
-import androidx.compose.ui.text.drawText
-import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.ColorMatrix
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.foundation.Canvas
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.viewinterop.AndroidView
-import kotlin.math.roundToInt
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.layout.LocalBottomSheetInsets
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Home
-import top.yukonga.miuix.kmp.icon.basic.Check
 import dev.dsh.miuixbrowser.ui.icons.Settings
-import top.yukonga.miuix.kmp.icon.glass.Search
-import top.yukonga.miuix.kmp.icon.glass.Refresh
-import top.yukonga.miuix.kmp.icon.glass.Phone
-import top.yukonga.miuix.kmp.icon.glass.More
-import top.yukonga.miuix.kmp.icon.glass.Info
-import top.yukonga.miuix.kmp.icon.glass.HorizontalSplit
-import top.yukonga.miuix.kmp.icon.glass.Hide
-import top.yukonga.miuix.kmp.icon.glass.Delete
-import top.yukonga.miuix.kmp.icon.glass.Close
-import top.yukonga.miuix.kmp.icon.glass.Back
-import top.yukonga.miuix.kmp.icon.glass.Add
-import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.nav.core.NavDisplay
 import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
 import top.yukonga.miuix.kmp.nav.core.navBackStackOf
 import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
-import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop as kyantLayerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop as rememberKyantBackdrop
-import top.yukonga.miuix.kmp.glass.GlassBottomSheet
-import top.yukonga.miuix.kmp.material.GlassDefaults
-import top.yukonga.miuix.kmp.glass.GlassDialog
-import top.yukonga.miuix.kmp.glass.GlassDialogButton
-import top.yukonga.miuix.kmp.glass.GlassDialogButtonRole
-import top.yukonga.miuix.kmp.glass.GlassIconButton
-import top.yukonga.miuix.kmp.material.GlassMaterials
-import top.yukonga.miuix.kmp.glass.GlassPopup
-import top.yukonga.miuix.kmp.glass.GlassPopupItem
-import top.yukonga.miuix.kmp.material.GlassShape
-import top.yukonga.miuix.kmp.material.GlassEdgeStrokes
-import top.yukonga.miuix.kmp.glass.glassPanel
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import dev.dsh.miuixbrowser.download.DownloadsScreen
-
-internal enum class Sheet { None, Tabs, Menu, Link, Image, Element }
-
-internal class WebPermPrompt(val origin: String, val what: String, val permKey: String?, val decide: (Boolean) -> Unit)
-
-internal data class DownloadRequest(
-    val url: String,
-    val userAgent: String?,
-    val fileName: String,
-    val mime: String?,
-    /** 来源页（Referer）与是否带 WebView 的 Cookie：登录态 / 防盗链站点 */
-    val referer: String? = null,
-    val withCookies: Boolean = false,
-    val geckoCookies: Boolean = false,
-    /** blob / data URL 已抽成 data URI，确认后直接落盘，不再走 HTTP 下载器 */
-    val dataUri: String? = null,
-    /** 大 blob 分片写入的缓存临时文件路径，确认后拷到 Download/mafari */
-    val tempPath: String? = null,
-    /** GM_download 要结果：取消 / 被顶替 → (false, ...)；确认后交给 Downloader 在终态回调 */
-    val onResult: ((ok: Boolean, error: String?) -> Unit)? = null,
-)
-
-/**
- * 把网页 accept 里的类型（MIME / 通配 / 扩展名）整理成系统选择器能用的 MIME 列表。
- * 返回空列表 = 不加类型过滤（任意类型）。
- * 此前把未知扩展名直接去掉点当 MIME（如 ".zip" → "zip"），非法 MIME 会让部分机型的
- * 文件选择器把所有文件灰掉、无法选择。
- */
-internal fun resolvePickerMimeTypes(types: List<String>): List<String> {
-    if (types.isEmpty()) return emptyList()
-    val extra = mapOf(
-        "heic" to "image/heic", "heif" to "image/heif", "avif" to "image/avif",
-        "mkv" to "video/x-matroska", "md" to "text/markdown", "7z" to "application/x-7z-compressed",
-        "rar" to "application/vnd.rar", "apk" to "application/vnd.android.package-archive",
-        "epub" to "application/epub+zip", "json" to "application/json", "zip" to "application/zip",
-    )
-    val mimeRe = Regex("^[a-z0-9!#$&^_.+-]+/([a-z0-9!#$&^_.+-]+|\\*)$")
-    val out = LinkedHashSet<String>()
-    for (raw in types) {
-        val t = raw.lowercase()
-        val mime = if (t.startsWith(".")) {
-            val ext = t.removePrefix(".")
-            android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: extra[ext]
-        } else t
-        // 解析不了 / 不合法 / 本身就是全通配：整体不过滤
-        if (mime == null || mime == "*/*" || !mimeRe.matches(mime)) return emptyList()
-        out.add(mime)
-    }
-    return out.toList()
-}
-
-/** 网页 <input type=file capture>：文件 / 拍照 / 录像 选择 */
-internal class FileChooserChoice(
-    val params: WebChromeClient.FileChooserParams,
-    val callback: ValueCallback<Array<Uri>>,
-)
-
 
 @Composable
 fun BrowserScreen(
@@ -352,6 +108,38 @@ fun BrowserScreen(
             kotlinx.coroutines.delay(800)
         }
     }
+    // WebView 拓展的 tabs / scripting 要操作真实标签：界面建好后把标签桥接接到拓展系统上，界面销毁时摘掉。
+    // 摘桥接时按身份比对：界面重建时旧界面晚到的 onDispose 不会把新界面刚接上的桥接摘掉
+    DisposableEffect(state, context) {
+        val bridge = BrowserStateTabBridge(state)
+        val extSystem = context.appContainer.webExtensions
+        extSystem.attachTabs(bridge)
+        val permissionPrompt = ExtensionPermissionPrompt { ext, permissions, origins ->
+            withContext(Dispatchers.Main.immediate) {
+                suspendCancellableCoroutine { continuation ->
+                    val details = buildList {
+                        permissions.sorted().forEach { add("• $it") }
+                        origins.map { it.raw }.sorted().forEach { add("• $it") }
+                    }.joinToString("\n")
+                    val dialog = AlertDialog.Builder(context)
+                        .setTitle("请求拓展权限")
+                        .setMessage("${ext.spec.name} 请求以下可选权限：\n\n$details\n\n仅在你确认后才会授予。")
+                        .setNegativeButton("拒绝") { _, _ -> if (continuation.isActive) continuation.resume(false) }
+                        .setPositiveButton("允许") { _, _ -> if (continuation.isActive) continuation.resume(true) }
+                        .create()
+                    dialog.setOnCancelListener { if (continuation.isActive) continuation.resume(false) }
+                    continuation.invokeOnCancellation { dialog.dismiss() }
+                    dialog.show()
+                }
+            }
+        }
+        extSystem.permissionPrompt = permissionPrompt
+        onDispose {
+            if (extSystem.permissionPrompt === permissionPrompt) extSystem.permissionPrompt = null
+            extSystem.detachTabs(bridge)
+            bridge.close()
+        }
+    }
     val favorites = remember { context.appContainer.favorites }
     // 首页收藏栏：只取「个人收藏」分组（读取 items 让列表变化时自动重组）
     val homeFavEntries = favorites.homeEntries()
@@ -373,15 +161,6 @@ fun BrowserScreen(
     var onboardingReplay by rememberSaveable { mutableStateOf(false) }
     // 首页「快捷菜单」点击功能时转发给下面的 runMenuAction（它要等脚本菜单等函数声明之后才能定义）
     val quickRunner = remember { MenuActionRunner() }
-    // Gecko 拓展定期检查更新：应用在前台、Gecko 模式下，启动后稍等一会儿检查一次，之后每 6 小时看一次是否到点
-    LaunchedEffect(settings.geckoMode) {
-        if (!settings.geckoMode) return@LaunchedEffect
-        kotlinx.coroutines.delay(15_000)
-        while (true) {
-            runCatching { GeckoExtensionStore.maybeAutoUpdate(context) }
-            kotlinx.coroutines.delay(6 * 3_600_000L)
-        }
-    }
     // 模糊壁纸：读/写磁盘缓存里已模糊好的小图，不再实时渲染模糊（首帧同步读缓存，命中时没有未模糊→模糊的闪动）
     val blurredWallpaper = rememberBlurredWallpaper(settings.wallpaper, settings.wallpaperBlur, settings.wallpaperVersion)
     // 模糊图已就绪时屏幕上只会用到它：不再解一份屏幕分辨率的整图（约 10MB），「有壁纸」的判断也直接用模糊图
@@ -425,16 +204,11 @@ fun BrowserScreen(
     // 从其他应用点进来的链接：回到浏览页并新开标签（须在 popToBrowser 定义之后）
     // 由 MainActivity 传入；这里只负责导航与加载
     val extensions = remember { context.appContainer.extensions }
-    // 旧版本放在脚本列表里的去广告订阅 → 迁移到「去广告」页；之后按设置的间隔在后台更新订阅
-    remember {
-        AdBlock.init(context)
-        AdBlock.migrateLegacy(extensions.legacyAdSubs.toList())
-        extensions.commitLegacyMigration()
-        true
-    }
-    LaunchedEffect(Unit) { AdBlock.autoUpdateIfDue() }
+    BrowserStartupJobs(settings, context, extensions)
     // 首次打开：询问是否设为系统默认浏览器。无论选了设置、取消还是点外面关掉都只问这一次；已经是默认就不问
-    var showDefaultBrowserPrompt by remember { mutableStateOf(false) }
+    // 共享界面状态（弹层 / 对话框 / 文件选择等）放在 BrowserUiState（BrowserUiState.kt），这里按原名委托访问
+    val ui = remember { BrowserUiState() }
+    var showDefaultBrowserPrompt by ui::showDefaultBrowserPrompt
     val defaultBrowserLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
     LaunchedEffect(Unit) {
         if (settings.defaultBrowserPrompted) return@LaunchedEffect
@@ -447,13 +221,6 @@ fun BrowserScreen(
             showDefaultBrowserPrompt = true
         }
     }
-    // 首次打开 app：自动拉取并安装推荐脚本（每个只自动装一次，失败的下次启动重试）；之后按设置的间隔后台自动更新脚本
-    LaunchedEffect(Unit) {
-        runCatching { extensions.bootstrapRecommended() }
-        runCatching { extensions.autoUpdateIfDue() }
-    }
-    // 按设置的间隔把加密备份自动推送到已配置的云同步目标（需已设默认口令）
-    LaunchedEffect(Unit) { runCatching { BackupAuto.runIfDue(context) } }
     val history = remember { context.appContainer.history }
     val tab = state.activeTab
     // 页面加载期间也禁用 MIUIX 采集，避免 URL 尚未更新时误把 WebView 帧送进 RuntimeShader。
@@ -475,33 +242,27 @@ fun BrowserScreen(
     val clipboard = LocalClipboardManager.current
     val focus = LocalFocusManager.current
 
-    var sheet by remember { mutableStateOf(Sheet.None) }
-    var linkUrl by remember { mutableStateOf("") }
-    var imageUrl by remember { mutableStateOf("") }
-    var elementHit by remember { mutableStateOf<BrowserTab.ElementHit?>(null) }
-    var address by remember { mutableStateOf("") }
-    var editing by remember { mutableStateOf(false) }
-    var barHidden by remember { mutableStateOf(false) }
+    var sheet by ui::sheet
+    var linkUrl by ui::linkUrl
+    var imageUrl by ui::imageUrl
+    var elementHit by ui::elementHit
+    var address by ui::address
+    var editing by ui::editing
+    var barHidden by ui::barHidden
     /** 底栏被左右滑动缩小为圆形搜索钮 */
-    var barMinimized by remember { mutableStateOf(settings.barPosition == BAR_POS_MINIMIZED) }
+    val barMinimizedState = remember { mutableStateOf(settings.barPosition == BAR_POS_MINIMIZED) }
+    var barMinimized by barMinimizedState
     // 「布局 → 导航栏位置」：顶部 / 底部 / 始终最小化（圆钮是常态，展开后一段时间无操作自动缩回）
     val barOnTop = settings.barPosition == BAR_POS_TOP || settings.barPosition == BAR_POS_FIXED_TOP
     val alwaysMin = settings.barPosition == BAR_POS_MINIMIZED
     // 固定在顶部 / 底部：不随滚动自动隐藏，也不响应滑动收起 / 缩成圆钮 / 换边
     val barFixed = settings.barPosition == BAR_POS_FIXED_TOP || settings.barPosition == BAR_POS_FIXED_BOTTOM
-    var favEditing by remember { mutableStateOf(false) }
-    var groupEditing by remember { mutableStateOf(false) }
-    var quickEditing by remember { mutableStateOf(false) }
-    var showQuickPicker by remember { mutableStateOf(false) }
-    var showGroupPicker by remember { mutableStateOf(false) }
+    var showQuickPicker by ui::showQuickPicker
+    var showGroupPicker by ui::showGroupPicker
     // 书签分组弹窗：显示开关与路径 / 锚点分开存，关闭动画期间内容不会突然消失
-    var showGroupPopup by remember { mutableStateOf(false) }
-    var groupPopupPath by remember { mutableStateOf("") }
-    var groupPopupAnchor by remember { mutableStateOf(Rect.Zero) }
-    var showFavEditor by remember { mutableStateOf(false) }
-    var showBookmarkCreate by remember { mutableStateOf(false) }
-    var bookmarkPrefillName by remember { mutableStateOf("") }
-    var bookmarkPrefillUrl by remember { mutableStateOf("") }
+    var showGroupPopup by ui::showGroupPopup
+    var showFavEditor by ui::showFavEditor
+    var showBookmarkCreate by ui::showBookmarkCreate
     // 二级页面返回栈：官方 miuix-nav NavDisplay。栈底是浏览主界面。
     val backStack = remember { navBackStackOf(AppRoute.Browser) }
     fun pushPage(route: AppRoute) {
@@ -529,64 +290,23 @@ fun BrowserScreen(
         }
     }
 
-    var pendingScript by remember { mutableStateOf<String?>(null) }
-    var scriptSheetShow by remember { mutableStateOf(false) }
-    var geckoExtSheetShow by remember { mutableStateOf(false) }
-    var requestSheetShow by remember { mutableStateOf(false) }
-    var scriptMenuItems by remember { mutableStateOf<List<ScriptMenuCommand>>(emptyList()) }
-    var runningScripts by remember { mutableStateOf<List<RunningScript>>(emptyList()) }
     // 菜单面板右上角蓝标：当前页面运行的脚本数
-    var scriptRunCount by remember { mutableIntStateOf(0) }
     // 菜单「同步」进行中：图标变主题色、文字变「同步中」，防止重复点击
     // 地址栏左侧脚本图标：当前标签页面运行的脚本数（加载完成后查询，见下方 LaunchedEffect）
-    var addressScriptCount by remember { mutableIntStateOf(0) }
-    var pendingDownload by remember { mutableStateOf<DownloadRequest?>(null) }
-    var showFind by remember { mutableStateOf(false) }
-    var editingFavIndex by remember { mutableStateOf(-1) }
+    // 地址栏左侧下载图标：进行中显示进度环，完成后右上角绿点（点开下载页后清除）
+    val addressDownload = SharedAddressDownloadState
+    LaunchedEffect(addressDownload) { addressDownload.track() }
+    var showFind by ui::showFind
     // 离场动画期间保留最近一次打开的弹层内容
-    var lastActiveSheet by remember { mutableStateOf(Sheet.None) }
     // 弹层从打开到离场动画结束的整段时间为 true：期间把（主页）整页冻结成一张纹理
-    var sheetHostActive by remember { mutableStateOf(false) }
-    var showClearTabsConfirm by remember { mutableStateOf(false) }
-    var showShareDialog by remember { mutableStateOf(false) }
+    var sheetHostActive by ui::sheetHostActive
     // 标签列表当前栏：0 = 标签页，1 = 无痕浏览页
-    var tabsPage by remember { mutableIntStateOf(0) }
+    var tabsPage by ui::tabsPage
     // 文件选择 + 视频全屏 + 网页权限询问
-    var fileChooserChoice by remember { mutableStateOf<FileChooserChoice?>(null) }
-    var customView by remember { mutableStateOf<android.view.View?>(null) }
-    var cameraOutputUri by remember { mutableStateOf<Uri?>(null) }
-    var webPermPrompt by remember { mutableStateOf<WebPermPrompt?>(null) }
-    var loginPrompt by remember { mutableStateOf<LoginPrompt?>(null) }
-    var androidPermDone by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var fileChooserChoice by ui::fileChooserChoice
+    var customView by ui::customView
 
-    // 启动自动检查更新：每个进程只查一次；有新版本且未被忽略时弹底部提示
-    var updateRelease by remember { mutableStateOf<AppRelease?>(null) }
-    var lastUpdateRelease by remember { mutableStateOf<AppRelease?>(null) }
-    LaunchedEffect(Unit) {
-        if (UpdateChecker.checkedThisProcess) return@LaunchedEffect
-        UpdateChecker.checkedThisProcess = true
-        // 稍等首屏稳定再请求，避免和启动渲染抢资源
-        kotlinx.coroutines.delay(1500)
-        val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            UpdateChecker.findPending(context, settings.ignoredUpdate, settings.updateChannel)
-        }
-        if (found != null) {
-            // 引导页还在时先不弹更新提示，免得盖在引导上
-            androidx.compose.runtime.snapshotFlow { settings.onboardingPending }.first { !it }
-            lastUpdateRelease = found
-            updateRelease = found
-        }
-    }
-
-    // 弹窗收起后下载完成：把更新弹窗重新弹出，方便直接点「安装」（只处理从启动提示发起的下载）
-    LaunchedEffect(UpdateDownload.phase) {
-        val pending = lastUpdateRelease
-        if (UpdateDownload.phase == UpdatePhase.DONE && UpdateDownload.origin == "launch" &&
-            pending != null && pending.version == UpdateDownload.version && updateRelease == null
-        ) {
-            updateRelease = pending
-        }
-    }
+    ui.AppUpdateEffects(settings, context)
 
     LaunchedEffect(openDownloads) {
         if (openDownloads) {
@@ -601,14 +321,45 @@ fun BrowserScreen(
         state.tabs.forEach { it.pageEnhancements = settings.pageEnhancements }
     }
 
+    // 手动标记广告开关 → 所有标签页
+    LaunchedEffect(settings.adMarkLongPress, state.tabs.size) {
+        state.tabs.forEach { it.adMarkLongPress = settings.adMarkLongPress }
+    }
+
     LaunchedEffect(tab.id) {
         tab.onLongPressLink = { link ->
-            linkUrl = link
-            sheet = Sheet.Link
+            val extSystem = context.appContainer.webExtensions
+            val matches = runCatching { extSystem.contextMenuItems("link", tab.url, link) }.getOrDefault(emptyList())
+            if (matches.isNotEmpty()) {
+                val flat = matches.flatMap { (ext, items) -> items.map { ext to it } }
+                AlertDialog.Builder(context)
+                    .setItems(flat.map { (_, item) -> item.title }.toTypedArray()) { _, which ->
+                        val (ext, item) = flat[which]
+                        extSystem.onContextMenuClicked(ext.spec.id, item.id,
+                            org.json.JSONObject().put("linkUrl", link).put("pageUrl", tab.url).put("frameUrl", tab.url),
+                            org.json.JSONObject().put("id", tab.id).put("url", tab.url))
+                    }.show()
+            } else {
+                linkUrl = link
+                sheet = Sheet.Link
+            }
         }
         tab.onLongPressImage = { url ->
-            imageUrl = url
-            sheet = Sheet.Image
+            val extSystem = context.appContainer.webExtensions
+            val matches = runCatching { extSystem.contextMenuItems("image", tab.url, url) }.getOrDefault(emptyList())
+            if (matches.isNotEmpty()) {
+                val flat = matches.flatMap { (ext, items) -> items.map { ext to it } }
+                AlertDialog.Builder(context)
+                    .setItems(flat.map { (_, item) -> item.title }.toTypedArray()) { _, which ->
+                        val (ext, item) = flat[which]
+                        extSystem.onContextMenuClicked(ext.spec.id, item.id,
+                            org.json.JSONObject().put("srcUrl", url).put("pageUrl", tab.url).put("frameUrl", tab.url),
+                            org.json.JSONObject().put("id", tab.id).put("url", tab.url))
+                    }.show()
+            } else {
+                imageUrl = url
+                sheet = Sheet.Image
+            }
         }
         tab.onElementLongPress = { hit ->
             elementHit = hit
@@ -650,7 +401,8 @@ fun BrowserScreen(
         }
     }
     // 用户是否真的改过输入框里的文字
-    var addressDirty by remember(tab.id) { mutableStateOf(false) }
+    val addressDirtyState = remember(tab.id) { mutableStateOf(false) }
+    var addressDirty by addressDirtyState
     LaunchedEffect(editing) { if (!editing) addressDirty = false }
 
     // 页面导航导致 URL 变化时：若用户没有在输入，退出编辑态让地址栏跟随网页
@@ -693,503 +445,22 @@ fun BrowserScreen(
         // WebView 已经隐藏，主页现在才允许采集
         if (onHome) webViewHidden = true
     }
-    DisposableEffect(tab.id) {
-        onDispose {
-            tab.onLongPressLink = null
-            tab.onShowFileChooser = { _, callback -> callback.onReceiveValue(null) }
-            tab.onShowCustomView = null
-            tab.onHideCustomView = null
-            tab.onPermissionPrompt = null
-            tab.requestAndroidPermissions = null
-            tab.onBlobReady = null
-            tab.onBlobError = null
-            tab.onBlobStart = null
-            fileChooserChoice = null
-            customView = null
-            // 未决的权限请求按拒绝收尾，否则 WebView 回调 / 重定向待决标记会一直悬空
-            webPermPrompt?.decide?.invoke(false)
-            webPermPrompt = null
-            // 登录弹窗同理：按「不保存 / 不填」收尾，Gecko 的 prompt 才不会悬空
-            tab.onLoginPrompt = null
-            loginPrompt?.onDismiss?.invoke()
-            loginPrompt = null
-        }
-    }
 
-    // Android 运行时权限申请结果
-    val androidPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) {
-        val done = androidPermDone
-        androidPermDone = null
-        done?.invoke()
-    }
+    // 文件选择 / 拍照 / 扫码 / 权限申请的启动器（BrowserLaunchers.kt）
+    val launchers = ui.rememberBrowserLaunchers(settings, context, state, clipboard)
 
-    // 系统文件选择器（含多选）
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        val choice = fileChooserChoice
-        fileChooserChoice = null
-        val cb = choice?.callback ?: return@rememberLauncherForActivityResult
-        if (result.resultCode == Activity.RESULT_OK) {
-            val data = result.data
-            val clip = data?.clipData
-            val uris = when {
-                clip != null && clip.itemCount > 0 -> Array(clip.itemCount) { clip.getItemAt(it).uri }
-                data?.data != null -> arrayOf(data.data!!)
-                else -> null
-            }
-            cb.onReceiveValue(uris)
-        } else {
-            cb.onReceiveValue(null)
-        }
-    }
+    ui.BindTabCallbacks(
+        settings = settings,
+        context = context,
+        tab = tab,
+        launchers = launchers,
+        scope = scope,
+        haptic = haptic,
+        extensions = extensions,
+        history = history,
+    )
 
-    // 拍照 / 录像
-    val cameraLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        val choice = fileChooserChoice
-        fileChooserChoice = null
-        val cb = choice?.callback
-        val out = cameraOutputUri
-        cameraOutputUri = null
-        if (result.resultCode == Activity.RESULT_OK && out != null) {
-            cb?.onReceiveValue(arrayOf(out))
-        } else {
-            out?.let { uri ->
-                runCatching {
-                    context.contentResolver.update(
-                        uri,
-                        android.content.ContentValues().apply {
-                            put(MediaStore.Images.Media.IS_PENDING, 0)
-                            put(MediaStore.Video.Media.IS_PENDING, 0)
-                        },
-                        null,
-                        null,
-                    )
-                }
-            }
-            cb?.onReceiveValue(null)
-        }
-    }
-
-    // 扫一扫：应用内扫码页回传结果
-    val scanLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
-        val text = ScanHelper.extractText(result.data) ?: return@rememberLauncherForActivityResult
-        when (val target = ScanHelper.resolve(text, settings.searchTemplate)) {
-            is ScanHelper.Target.Open -> state.newTab(target.url)
-            is ScanHelper.Target.CopyOnly -> {
-                clipboard.setText(AnnotatedString(target.text))
-                android.widget.Toast.makeText(context, tr("已复制扫描内容"), android.widget.Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    /** 打开应用内扫码页 */
-    fun launchScan() {
-        val started = runCatching { scanLauncher.launch(ScanHelper.intent(context)) }.isSuccess
-        if (!started) {
-            android.widget.Toast.makeText(context, tr("无法打开扫一扫"), android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    /** 拉起系统文件选择器（按 acceptTypes / 多选） */
-    fun launchFilePicker(choice: FileChooserChoice) {
-        val params = choice.params
-        // showSaveFilePicker()（File System Access API，WebView 132+）：新建文件并把 Uri 交还给网页，
-        // 网页用 createWritable() 边下边写，不经 blob、不占内存；文件名用页面给的原名，不改名
-        if (params.mode == WebChromeClient.FileChooserParams.MODE_SAVE) {
-            val hint = params.filenameHint?.takeIf { it.isNotBlank() }
-            val ext = hint?.substringAfterLast('.', "")?.lowercase().orEmpty()
-            // MIME 按原文件名的扩展名取，避免系统因类型不符在文件名后再追加扩展名
-            val mimeByName = ext.takeIf { it.isNotEmpty() }
-                ?.let { android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
-            val saveIntent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
-                type = mimeByName ?: "application/octet-stream"
-                if (hint != null) putExtra(Intent.EXTRA_TITLE, hint)
-            }
-            runCatching { filePickerLauncher.launch(saveIntent) }.onFailure {
-                Diag.log("save picker launch failed: ${it}")
-                choice.callback.onReceiveValue(null)
-                fileChooserChoice = null
-            }
-            return
-        }
-        val types = params.acceptTypes
-            ?.mapNotNull { it?.trim()?.takeIf { t -> t.isNotEmpty() } }
-            .orEmpty()
-        // 只在能确定全部类型都合法时才给系统选择器加类型过滤；任何一项解析不了就不过滤，
-        // 宁可多显示文件，也不能让用户想选的文件被灰掉、点不动
-        val mimes = resolvePickerMimeTypes(types)
-        fun buildIntent(action: String) = Intent(action).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            if (mimes.size == 1) {
-                type = mimes[0]
-            } else {
-                type = "*/*"
-                if (mimes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, mimes.toTypedArray())
-            }
-            if (params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
-                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-            }
-        }
-        // 部分机型（定制文档应用）的 GET_CONTENT 不认 EXTRA_MIME_TYPES 或根本没有对应界面：
-        // 依次尝试 GET_CONTENT → OPEN_DOCUMENT → 系统 chooser。不再依赖 resolveActivity
-        // （Android 11+ 没声明 <queries> 时它会误返回 null）
-        val attempts = listOf(
-            buildIntent(Intent.ACTION_GET_CONTENT),
-            buildIntent(Intent.ACTION_OPEN_DOCUMENT),
-            Intent.createChooser(buildIntent(Intent.ACTION_GET_CONTENT), tr("选择文件")),
-        )
-        for (intent in attempts) {
-            val launched = runCatching { filePickerLauncher.launch(intent) }
-                .onFailure { Diag.log("file picker launch failed: ${intent.action} $it") }
-                .isSuccess
-            if (launched) return
-        }
-        choice.callback.onReceiveValue(null)
-        fileChooserChoice = null
-        android.widget.Toast.makeText(context, tr("未找到可用的文件选择器"), android.widget.Toast.LENGTH_SHORT).show()
-    }
-
-    /** 拍照或录像：MediaStore pending 输出 + 相机 Intent */
-    fun launchCamera(choice: FileChooserChoice, video: Boolean) {
-        val resolver = context.contentResolver
-        val uri = runCatching {
-            if (video) {
-                val values = android.content.ContentValues().apply {
-                    put(MediaStore.Video.Media.DISPLAY_NAME, "rec_${System.currentTimeMillis()}.mp4")
-                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Mafari")
-                        put(MediaStore.Video.Media.IS_PENDING, 1)
-                    }
-                }
-                resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-            } else {
-                val values = android.content.ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, "photo_${System.currentTimeMillis()}.jpg")
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Mafari")
-                        put(MediaStore.Images.Media.IS_PENDING, 1)
-                    }
-                }
-                resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-            }
-        }.getOrNull()
-        if (uri == null) {
-            choice.callback.onReceiveValue(null)
-            fileChooserChoice = null
-            return
-        }
-        cameraOutputUri = uri
-        val intent = if (video) {
-            Intent(MediaStore.ACTION_VIDEO_CAPTURE).apply { putExtra(MediaStore.EXTRA_OUTPUT, uri) }
-        } else {
-            Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply { putExtra(MediaStore.EXTRA_OUTPUT, uri) }
-        }.apply {
-            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        runCatching {
-            val resInfo = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-            for (info in resInfo) {
-                context.grantUriPermission(
-                    info.activityInfo.packageName,
-                    uri,
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            }
-        }
-        val canResolve = intent.resolveActivity(context.packageManager) != null
-        if (canResolve) {
-            cameraLauncher.launch(intent)
-        } else {
-            cameraOutputUri = null
-            runCatching { resolver.delete(uri, null, null) }
-            choice.callback.onReceiveValue(null)
-            fileChooserChoice = null
-            android.widget.Toast.makeText(context, tr("未找到相机应用"), android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    LaunchedEffect(tab.id) {
-        tab.onLoginPrompt = { req ->
-            // 同一时刻只显示一个：被顶掉的按取消处理
-            loginPrompt?.onDismiss?.invoke()
-            loginPrompt = req
-        }
-        tab.onPermissionPrompt = { origin, what, permKey, decide ->
-            // 同一时刻只显示一个弹窗：被顶掉的请求按拒绝处理，避免 WebView 回调悬空
-            webPermPrompt?.decide?.invoke(false)
-            webPermPrompt = WebPermPrompt(origin, what, permKey, decide)
-        }
-        tab.requestAndroidPermissions = { perms, done ->
-            androidPermDone = done
-            androidPermLauncher.launch(perms)
-        }
-    }
-
-    LaunchedEffect(
-        tab.id,
-        tab.incognito,
-        settings.cookieMode,
-        settings.sendDnt,
-        settings.webrtcDisabled,
-        settings.clipboardPermission,
-        settings.mediaAutoplay,
-        settings.cameraPermission,
-        settings.micPermission,
-        settings.locationPermission,
-        settings.notificationPermission,
-        settings.redirectPermission,
-        settings.externalAppPermission,
-        settings.blockTrackingScripts,
-        AdBlock.fpCanvas,
-        AdBlock.fpWebgl,
-        AdBlock.fpAudio,
-        AdBlock.fpFonts,
-        GeckoSitePerms.exceptions.toMap(), // 例外网站变化 → 重新生成 WebView 的隐私脚本
-    ) {
-        tab.applyPrivacy(
-            cookieMode = settings.cookieMode,
-            sendDnt = settings.sendDnt,
-            webrtcDisabled = settings.webrtcDisabled,
-            clipboardMode = settings.clipboardPermission,
-            mediaMode = settings.mediaAutoplay,
-            cameraMode = settings.cameraPermission,
-            micMode = settings.micPermission,
-            locationMode = settings.locationPermission,
-            notificationMode = settings.notificationPermission,
-            redirectMode = settings.redirectPermission,
-            externalAppMode = settings.externalAppPermission,
-            blockTrackers = settings.blockTrackingScripts,
-            fingerprintProtect = AdBlock.fpCanvas || AdBlock.fpWebgl || AdBlock.fpAudio || AdBlock.fpFonts,
-        )
-    }
-
-    // 显示模式深浅色 → WebView 背景 + 官方 algorithmic darkening（跟随设置/系统）
-    val appDark = isAppDarkTheme()
-    LaunchedEffect(tab.id, appDark) {
-        tab.applyDisplayTheme(appDark)
-    }
-
-    // 代理（ProxyController）：设置变化或进入浏览页时应用到全部 WebView
-    LaunchedEffect(
-        settings.proxyEnabled,
-        settings.proxyType,
-        settings.proxyHost,
-        settings.proxyPort,
-    ) {
-        WebViewProxy.applyFrom(settings)
-    }
-
-    // WebView 不会把滚动事件抛给 Compose，这里轻量轮询页面滚动位置：
-    // 向下滚超过一小段 → 收起底栏；向上滚或回到顶部 → 展开。
-    LaunchedEffect(tab.id, extensions.items.toList()) {
-        tab.userScripts = extensions.items.toList()
-        tab.onVisited = { url, title -> if (!tab.incognito) history.record(url, title) }
-    }
-
-    // 文件选择：非 capture 直接拉系统选择器；单一类型 capture 直接开相机；
-    // 混合类型 capture 由下方 GlassDialog 让用户选。
-    LaunchedEffect(fileChooserChoice) {
-        val choice = fileChooserChoice ?: return@LaunchedEffect
-        val params = choice.params
-        val accepts = params.acceptTypes?.joinToString(",")?.lowercase().orEmpty()
-        val wantsImage = accepts.contains("image") || accepts.isBlank()
-        val wantsVideo = accepts.contains("video")
-        val capture = params.isCaptureEnabled
-        when {
-            !capture -> launchFilePicker(choice)
-            wantsImage && !wantsVideo -> launchCamera(choice, video = false)
-            wantsVideo && !wantsImage -> launchCamera(choice, video = true)
-            // 混合 + capture：等用户在弹层里选
-        }
-    }
-
-    LaunchedEffect(tab.id, settings.searchTemplate) {
-        tab.searchTemplate = settings.searchTemplate
-        tab.onPullRefresh = {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            tab.refresh()
-        }
-        tab.onUserScriptLink = { url -> pendingScript = url }
-        tab.onExtensionLink = { link ->
-            // 拓展只属于 Gecko：WebView 标签不识别、不安装拓展链接（无内核版里连 GeckoExtensionStore 都不碰）
-            val store = if (EngineSupport.GECKO_BUNDLED && tab.isGecko) GeckoExtensionStore else null
-            if (store != null && store.beginLinkInstall(link)) {
-                android.widget.Toast.makeText(context, tr("正在安装拓展…"), android.widget.Toast.LENGTH_SHORT).show()
-                scope.launch {
-                    try {
-                        store.install(context, link)
-                            .onSuccess {
-                                android.widget.Toast.makeText(context, tr("已添加 {0}", it.name), android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                            .onFailure {
-                                if (it.message != tr("已取消安装")) {
-                                    android.widget.Toast.makeText(context, it.message ?: tr("安装失败"), android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                    } finally {
-                        store.endLinkInstall(link)
-                    }
-                }
-            }
-        }
-        tab.onDownload = { url, ua, disposition, mime ->
-            // blob/data 由 BrowserState 抽取后走 onBlobReady
-            if (!url.startsWith("blob:", ignoreCase = true) && !url.startsWith("data:", ignoreCase = true)) {
-                pendingDownload = DownloadRequest(
-                    url = url,
-                    userAgent = ua,
-                    fileName = Downloader.fileNameFrom(url, disposition),
-                    mime = mime,
-                    referer = tab.url,
-                    // 无痕标签不带 Cookie（WebView 共用 CookieManager、Gecko 扩展读不到私有 Cookie 罐，带了就是串号）
-                    withCookies = !tab.incognito,
-                    geckoCookies = tab.engineKind == EngineKind.GECKO,
-                )
-            }
-        }
-        tab.onGmDownload = { url, name, onResult ->
-            pendingDownload?.onResult?.invoke(false, "superseded")
-            pendingDownload = DownloadRequest(
-                url = url,
-                userAgent = if (tab.engineKind == EngineKind.WEBVIEW) {
-                    runCatching { tab.webView.settings.userAgentString }.getOrNull()
-                } else {
-                    null
-                },
-                fileName = Downloader.fileNameFrom(url, if (name.isBlank()) null else "attachment; filename=\"$name\""),
-                mime = null,
-                referer = tab.url,
-                withCookies = !tab.incognito,
-                geckoCookies = tab.engineKind == EngineKind.GECKO,
-                onResult = onResult,
-            )
-        }
-        tab.onBlobStart = {
-            android.widget.Toast.makeText(context, tr("正在读取文件…"), android.widget.Toast.LENGTH_SHORT).show()
-        }
-        tab.onBlobReady = { dataUri, fileName, mime, tempPath ->
-            // 上一个还没确认的 blob 被新的顶替：先删它的缓存文件，避免泄漏
-            pendingDownload?.tempPath?.let { p -> runCatching { java.io.File(p).delete() } }
-            pendingDownload = DownloadRequest(
-                url = "",
-                userAgent = null,
-                fileName = fileName,
-                mime = mime,
-                dataUri = dataUri,
-                tempPath = tempPath,
-            )
-        }
-        tab.onBlobError = { message ->
-            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
-        }
-        tab.onShowFileChooser = { params, callback ->
-            fileChooserChoice = FileChooserChoice(params, callback)
-        }
-        tab.onShowCustomView = { view, _ ->
-            customView = view
-            // 横屏在 BrowserTab.lockLandscape 已处理；这里确保容器铺满
-        }
-        tab.onHideCustomView = {
-            customView = null
-        }
-    }
-
-    // Gecko 视频全屏：应用自己的顶栏 / 底栏一并收起，退出全屏后恢复
-    LaunchedEffect(tab.id, tab.geckoFullscreen) {
-        barHidden = tab.geckoFullscreen
-    }
-
-    // 回到主页（页面被盖住 / 没有页面）时底栏必须显示：主页自己没有滚动采样，
-    // 之前页面滑动收起底栏后的 barHidden 会一直残留，导致主页上唤不出底栏
-    LaunchedEffect(tab.id, tab.url.isEmpty()) {
-        if (tab.url.isEmpty()) barHidden = false
-    }
-
-    // 切到「固定」立即把已收起的底栏显示出来（视频全屏除外）
-    LaunchedEffect(barFixed) {
-        if (barFixed) barHidden = tab.geckoFullscreen
-    }
-
-    LaunchedEffect(tab.id, barFixed) {
-        var last = 0
-        var lastShow = 0
-        var scrollDownAccum = 0f
-        var scrollUpAccum = 0f
-        while (true) {
-            runCatching {
-                if (tab.geckoFullscreen) {
-                    barHidden = true
-                    return@runCatching
-                }
-                // 固定模式：不做滚动隐藏
-                if (barFixed) {
-                    barHidden = false
-                    return@runCatching
-                }
-                // 主页（页面被盖住）上：引擎里的页面可能还在惯性滚动 / 回调滚动事件，
-                // 不能让它把底栏重新收起，否则主页上没有任何手势能唤出底栏
-                if (tab.url.isEmpty()) {
-                    barHidden = false
-                    last = tab.scrollOffsetY.coerceAtLeast(0)
-                    lastShow = last
-                    scrollDownAccum = 0f
-                    scrollUpAccum = 0f
-                    return@runCatching
-                }
-                val offset = tab.scrollOffsetY.coerceAtLeast(0)
-                val dy = offset - last
-                when {
-                    offset <= 12 -> {
-                        barHidden = false
-                        lastShow = offset
-                        scrollDownAccum = 0f
-                        scrollUpAccum = 0f
-                    }
-                    dy > 0 -> {
-                        scrollUpAccum = 0f
-                        scrollDownAccum += dy
-                        // 向下累计约 100px 且离开顶部足够远才隐藏，降低误触
-                        if (scrollDownAccum >= 100f && offset - lastShow >= 96f) {
-                            barHidden = true
-                            scrollDownAccum = 0f
-                            scrollUpAccum = 0f
-                        }
-                    }
-                    dy < 0 -> {
-                        scrollDownAccum = 0f
-                        // 隐藏后须向上累计约 120px 才恢复，避免轻微回弹就弹出
-                        scrollUpAccum += -dy
-                        if (barHidden && scrollUpAccum >= 120f) {
-                            barHidden = false
-                            lastShow = offset
-                            scrollUpAccum = 0f
-                        } else if (!barHidden) {
-                            lastShow = offset
-                        }
-                    }
-                }
-                last = offset
-            }
-            // 纯事件驱动：只在引擎滚动事件（CONFLATED 合并，只取最新位置）或下面补发的信号到来时处理一次。
-            // 底栏阈值按 dy 累计，与采样间隔无关，所以不再需要 80ms 定时采样，也不再有静止时的超时唤醒。
-            tab.scrollSignal.receive()
-        }
-    }
-    // 没有滚动事件、但偏移 / 状态可能已变的时刻补发一次信号：全屏切换、换页、加载状态变化（导航后偏移被重置）
-    LaunchedEffect(tab.id, tab.geckoFullscreen, tab.url, tab.loading) {
-        tab.scrollSignal.trySend(Unit)
-    }
+    ui.BarAutoHideEffects(tab, barFixed)
 
     val statusBarHeight = with(androidx.compose.ui.platform.LocalDensity.current) {
         WindowInsets.statusBars.getTop(this).toDp()
@@ -1261,6 +532,24 @@ fun BrowserScreen(
         }
     }
 
+    // 二级页面（设置 / 关于 / 下载 / 书签历史等）共用的依赖，页面内容在 BrowserPages.kt
+    val nav = BrowserNav(
+        settings = settings,
+        state = state,
+        favorites = favorites,
+        history = history,
+        extensions = extensions,
+        pushPage = ::pushPage,
+        popPage = ::popPage,
+        popToBrowser = ::popToBrowser,
+        openInBrowser = ::openInBrowser,
+        onOpenGuide = {
+            // 先退回浏览主界面（引导只在 backStack 只剩主界面时摆放），再从第一步开始
+            popToBrowser()
+            onboardingStep = 0
+            onboardingReplay = true
+        },
+    )
     Box(modifier = Modifier.fillMaxSize()) {
     NavDisplay(
         backStack = backStack,
@@ -1318,232 +607,37 @@ fun BrowserScreen(
         ) {
 
         // ---- 首页壁纸：铺满全屏，盖住状态栏 ----
-BrowserChunk {
-            if (tab.url.isEmpty() && wallpaperBitmap != null) {
-                val wallpaperImage = wallpaperBitmap
-                if (wallpaperImage != null) {
-                    // 取样层就是用户看到的那张壁纸（+压暗）：开启「壁纸模糊」时直接画磁盘缓存里已模糊好的图，
-                    // 所有材质（柔光 / 液态玻璃）的首页卡片、底栏、弹层都从这一层取色，取色与所见一致，
-                    // 不再另盖一层显示用的模糊图。缓存还没读出来时先显示未模糊原图，不做实时模糊，避免卡片闪动。
-                    val shownWallpaper = if (wallpaperFromCache && blurredWallpaper != null) blurredWallpaper else wallpaperImage
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .onGloballyPositioned {
-                                wallpaperLayout.origin = it.positionInRoot()
-                                wallpaperLayout.size = androidx.compose.ui.geometry.Size(it.size.width.toFloat(), it.size.height.toFloat())
-                            }
-                            .layerBackdrop(wallpaperBackdrop)
-                            // Kyant 取样层只在液态玻璃 + 模糊开启时才有人读（见 StartPage 的 liquidBackdrop 与 homeGlass），否则不录制
-                            .then(
-                                if (settings.liquidGlass && settings.blurEnabled) Modifier.kyantLayerBackdrop(wallpaperLiquidBackdrop)
-                                else Modifier,
-                            ),
-                    ) {
-                        Image(
-                            bitmap = shownWallpaper,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            filterQuality = androidx.compose.ui.graphics.FilterQuality.Medium,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                        // 压暗层：缓存图里已烘进，只有显示未模糊原图（模糊关闭 / 缓存未就绪）时才另盖
-                        if (!wallpaperFromCache) {
-                            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = WallpaperBlurCache.SCRIM_ALPHA)))
-                        }
-                    }
-                }
-            }
-}
+        BrowserWallpaperLayer(
+            tab = tab,
+            wallpaperBitmap = wallpaperBitmap,
+            wallpaperFromCache = wallpaperFromCache,
+            blurredWallpaper = blurredWallpaper,
+            wallpaperLayout = wallpaperLayout,
+            wallpaperBackdrop = wallpaperBackdrop,
+            liquidRecord = if (settings.liquidGlass && settings.blurEnabled) Modifier.kyantLayerBackdrop(wallpaperLiquidBackdrop) else Modifier,
+        )
 
         // ---- 网页内容：从状态栏下面开始，不再压到状态栏 ----
-BrowserChunk {
-            Box(modifier = Modifier.fillMaxSize()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        // 全屏沉浸（decorFitsSystemWindows=false）下系统不会替 WebView / GeckoView 缩小窗口，
-                        // 键盘会直接盖住屏幕底部的网页输入框。这里让网页区域避开键盘：
-                        // 区域变矮后页面会把获得焦点的输入框滚到可见处。
-                        // 地址栏输入时不收缩，避免每次唤起键盘都让网页整体重排。
-                        .then(if (editing) Modifier else Modifier.imePadding())
-                        .topInsetPx { if (nativeInset) 0 else contentTopPx() },
-                ) {
-                    key(tab.id) {
-                        AndroidView(
-                            factory = { _ ->
-                                // AndroidView.factory 接收的是 Context，而不是 View。
-                                // 这里返回已经由 BrowserTab 持有的内容视图（WebView 或 GeckoView）。
-                                tab.contentView.apply {
-                                    layoutParams = android.view.ViewGroup.LayoutParams(
-                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                    )
-                                    // Insets 只在 View 首次附着时请求一次。不要在每次 Compose
-                                    // factory/update 中重复 requestLayout，避免打断 Gecko 的帧提交。
-                                    if (isAttachedToWindow) {
-                                        androidx.core.view.ViewCompat.requestApplyInsets(this)
-                                    } else {
-                                        val target = this
-                                        addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
-                                            override fun onViewAttachedToWindow(v: android.view.View) {
-                                                v.removeOnAttachStateChangeListener(this)
-                                                androidx.core.view.ViewCompat.requestApplyInsets(target)
-                                            }
-                                            override fun onViewDetachedFromWindow(v: android.view.View) = Unit
-                                        })
-                                    }
-                                }
-                            },
-                            update = { view ->
-                                // 主页盖在 WebView 上面，但 WebView 仍保留着刚才网页的画面。
-                                // 主页开启 MIUIX 背景采集后，这帧会被录进 layerBackdrop 再送进 RuntimeShader，
-                                // 点主页按钮时会原生崩溃。主页状态下把 WebView 设为 INVISIBLE（不销毁，
-                                // 返回时仍能还原网页），这样采集层里只有 Compose 内容。
-                                // 这里读取了 tab.url，主页/网页切换时 update 会重新执行。
-                                val wantedVisibility = if (tab.url.isEmpty()) {
-                                    android.view.View.INVISIBLE
-                                } else {
-                                    android.view.View.VISIBLE
-                                }
-                                if (view.visibility != wantedVisibility) view.visibility = wantedVisibility
-                                // AndroidView 自己负责尺寸/布局同步。这里仅同步可见性，禁止每次
-                                // Compose 重组都 post requestApplyInsets + requestLayout。
-                            },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .then(
-                                    if (nativeInset) {
-                                        Modifier.offset {
-                                            IntOffset(0, animatedTopPadding.coerceAtLeast(0.dp).roundToPx())
-                                        }
-                                    } else {
-                                        Modifier
-                                    },
-                                )
-                                .onSizeChanged { size ->
-                                    // Compose 的尺寸才是当前沉浸式内容区域的真实可用尺寸。
-                                    // 尺寸有效后让 WebView 重新布局，再通知页面重新计算响应式布局。
-                                    if (size.width > 0 && size.height > 0) tab.onViewportChanged()
-                                },
-                        )
-                    }
-                    if (tab.url.isEmpty()) {
-                        if (wallpaperBitmap == null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(MiuixTheme.colorScheme.surface),
-                            )
-                        }
-                        StartPage(
-                            scrollState = startScroll,
-                            wallpaper = wallpaperBitmap,
-                            wallpaperBackdrop = wallpaperBackdrop,
-                            blurEnabled = settings.blurEnabled,
-                            favorites = homeFavEntries.map { it.second },
-                            showLogo = settings.homeShowLogo,
-                            barOnTop = barOnTop,
-                            showFavorites = settings.homeShowFavorites,
-                            favRows = settings.homeFavRows,
-                            onOpenBookmarks = { pushPage(AppRoute.Library(0)) },
-                            showPrivacy = settings.homeShowPrivacy,
-                            geckoMode = tab.isGecko,
-                            showRecent = settings.homeShowRecent && !tab.incognito,
-                            showDownloads = settings.homeShowDownloads,
-                            liquidBackdrop = if (settings.liquidGlass && wallpaperBitmap != null) wallpaperLiquidBackdrop else null,
-                            order = settings.homeOrder,
-                            onReorder = { settings.updateHomeOrder(it) },
-                            recent = history.recent,
-                            onOpenDownloads = { pushPage(AppRoute.Downloads) },
-                            onHide = { kind ->
-                                settings.updateHomeShow(kind, false)
-                                android.widget.Toast.makeText(
-                                    context, tr("已隐藏，可在 设置 → 布局 → 定制主页 中恢复"), android.widget.Toast.LENGTH_SHORT,
-                                ).show()
-                            },
-                            editing = favEditing,
-                            onOpen = { state.openOrReuse(it, tab.incognito, fromStartPage = true) },
-                            onToggleEdit = { favEditing = !favEditing },
-                            // 首页只显示「个人收藏」分组：回调里的下标是首页列表里的位置，要换算回总列表的下标
-                            onRemove = { pos -> homeFavEntries.getOrNull(pos)?.let { favorites.remove(it.first) } },
-                            onMove = { from, to ->
-                                val a = homeFavEntries.getOrNull(from)?.first
-                                val b = homeFavEntries.getOrNull(to)?.first
-                                if (a != null && b != null) favorites.move(a, b)
-                            },
-                            onEdit = { pos ->
-                                editingFavIndex = homeFavEntries.getOrNull(pos)?.first ?: -1
-                                showFavEditor = editingFavIndex >= 0
-                            },
-                            onAdd = {
-                                editingFavIndex = -1
-                                showFavEditor = true
-                            },
-                            showGroups = settings.homeShowGroups,
-                            groups = homeGroups,
-                            groupRows = settings.homeGroupRows,
-                            groupEditing = groupEditing,
-                            // 点击分组磁贴：不再跳转，在图标下方弹出书签窗口
-                            onGroupOpen = { path, anchor ->
-                                groupPopupPath = path
-                                groupPopupAnchor = anchor
-                                showGroupPopup = true
-                            },
-                            onGroupToggleEdit = { groupEditing = !groupEditing },
-                            // 写回时只保留还存在的分组（顺带清掉已失效的 id）
-                            onGroupRemove = { pos ->
-                                favorites.updateHomeGroupIds(homeGroups.filterIndexed { i, _ -> i != pos }.map { it.id })
-                            },
-                            onGroupMove = { from, to ->
-                                val ids = homeGroups.map { it.id }.toMutableList()
-                                if (from in ids.indices && to in ids.indices) {
-                                    ids.add(to, ids.removeAt(from))
-                                    favorites.updateHomeGroupIds(ids)
-                                }
-                            },
-                            onGroupAdd = { showGroupPicker = true },
-                            showQuick = settings.homeShowQuick,
-                            quickActions = settings.homeQuickItems,
-                            quickRows = settings.homeQuickRows,
-                            quickEditing = quickEditing,
-                            onQuickAction = { action ->
-                                // 拓展只在 Gecko 内核可用：WebView 下只提示
-                                if (action == MenuAction.GeckoExtensions && !settings.geckoMode) {
-                                    showWebViewUnsupportedToast(context)
-                                } else {
-                                    quickRunner.run(action)
-                                }
-                            },
-                            onQuickToggleEdit = { quickEditing = !quickEditing },
-                            // 回调里的下标是可见部分的位置，与完整列表的前缀一致
-                            onQuickRemove = { pos ->
-                                settings.updateHomeQuickItems(settings.homeQuickItems.filterIndexed { i, _ -> i != pos })
-                            },
-                            onQuickMove = { from, to ->
-                                val list = settings.homeQuickItems.toMutableList()
-                                if (from in list.indices && to in list.indices) {
-                                    list.add(to, list.removeAt(from))
-                                    settings.updateHomeQuickItems(list)
-                                }
-                            },
-                            onQuickAdd = { showQuickPicker = true },
-                            pinBottom = settings.homePinBottom,
-                            onPinBottomChange = { settings.updateHomePinBottom(it) },
-                        )
-                    }
-                }
-                PullSpinnerHost(tab)
-                if (tab.loading) {
-                    ProgressLine(
-                        progress = { tab.progress },
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .topInsetPx(contentTopPx),
-                    )
-                }
-            }
-}
+        ui.BrowserContentLayer(
+            settings = settings,
+            state = state,
+            tab = tab,
+            context = context,
+            favorites = favorites,
+            history = history,
+            homeFavEntries = homeFavEntries,
+            homeGroups = homeGroups,
+            wallpaperBitmap = wallpaperBitmap,
+            wallpaperBackdrop = wallpaperBackdrop,
+            wallpaperLiquidBackdrop = wallpaperLiquidBackdrop,
+            startScroll = startScroll,
+            barOnTop = barOnTop,
+            quickRunner = quickRunner,
+            nativeInset = nativeInset,
+            contentTopPx = contentTopPx,
+            animatedTopPadding = { animatedTopPadding },
+            pushPage = ::pushPage,
+        )
         } // backdrop capture layer ends before the floating toolbar
 
         // ---- 新建标签页：顶部渐进模糊（与子页面顶栏同款 miuix 渐进模糊）----
@@ -1568,1475 +662,87 @@ BrowserChunk {
         // ---- 地址栏输入中：底栏以外的区域是「收键盘」热区 ----
         // 透明遮罩盖在网页之上、底栏之下：点击只退出编辑并收起键盘，不会落到网页上
         // （避免误触链接 / 按钮）；同时吞掉拖动，输入时不让网页跟着滚动。
-        if (editing && tab.url.isNotEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = {
-                            editing = false
-                            focus.clearFocus()
-                        })
-                    },
-            )
-        }
-
-        // ---- 底部：地址栏 + 工具栏 ----
-        // 根据地址文本长度动态调整宽度，并使用弹簧动画平滑过渡。
-        BoxWithConstraints(
-            modifier = Modifier
-                .align(if (barOnTop) Alignment.TopCenter else Alignment.BottomCenter)
-                .fillMaxWidth()
-                .then(
-                    // 靠上：状态栏下方留 12dp，键盘弹出时不跟着动；靠下：避开键盘 / 导航栏
-                    if (barOnTop) Modifier.statusBarsPadding().padding(top = 12.dp)
-                    else Modifier.imePadding().navigationBarsPadding().padding(bottom = 8.dp),
-                )
-                .padding(horizontal = 8.dp),
-        ) {
-            // 收起 / 弹出动画的方向：靠下向下沉，靠上向上缩
-            val barEdgeSign = if (barOnTop) -1f else 1f
-            // 按实际字体宽度计算地址栏所需空间：固定按钮区 + 地址文字 + 地址栏内边距。
-            // 不设置人为最小宽度，短文字不会留下空白；只有屏幕可用宽度作为上限。
-            val textMeasurer = rememberTextMeasurer()
-            // 编辑地址时宽度至少是「搜索或输入网址」占位文字的宽度；输入内容比它长时随输入自动延长（上限仍是屏幕可用宽度），
-            // 否则超出的部分被地址栏裁掉，看不见也点不到。
-            val addressStyle = TextStyle(fontSize = 15.sp)
-            val placeholderPx = textMeasurer.measure(
-                text = AnnotatedString(tr("搜索或输入网址")),
-                style = addressStyle,
-                maxLines = 1,
-            ).size.width
-            val measuredAddressPx = if (editing) {
-                val typedPx = if (address.isEmpty()) 0 else textMeasurer.measure(
-                    text = AnnotatedString(address),
-                    style = addressStyle,
-                    maxLines = 1,
-                ).size.width
-                kotlin.math.max(placeholderPx, typedPx)
-            } else if (displayAddress.isBlank()) {
-                placeholderPx
-            } else {
-                textMeasurer.measure(
-                    text = AnnotatedString(displayAddress),
-                    style = addressStyle,
-                    maxLines = 1,
-                ).size.width
-            }
-            // 编辑时给光标留一点余量：光标在行尾时正好贴着文字右缘，会被裁掉
-            val cursorSlack = if (editing) 4.dp else 0.dp
-            val measuredAddressWidth = with(LocalDensity.current) { measuredAddressPx.toDp() } + cursorSlack
-            val fixedToolbarWidth = 44.dp * 4 + 12.dp + 24.dp
-            val loadingIndicatorWidth = if (tab.loading) 15.dp else 0.dp
-            val refreshWidth = if (shouldShowAddressRefresh(displayAddress, tab.loading, editing)) AddressRefreshWidth else 0.dp
-            // 阅读模式图标（地址栏最左侧）：可进入 / 正在阅读，且有页面（主页 url 为空不显示）
-            val readerShown = tab.url.isNotEmpty() && (tab.readerable || tab.readerActive)
-            // 阅读层按当前应用主题配色：用 surface 亮度判断深浅（MiuixTheme 的取值只能在组合里读，不能放进点击回调）
-            val readerSurface = MiuixTheme.colorScheme.surface
-            val readerDark = (0.299f * readerSurface.red + 0.587f * readerSurface.green + 0.114f * readerSurface.blue) < 0.5f
-            // 脚本图标与阅读图标共用这一个位置（宽度相同）：阅读优先，没有阅读图标时才可能显示脚本图标
-            val scriptsShown = shouldShowAddressScripts(readerShown, addressScriptCount > 0, editing)
-            val readerWidth = if (shouldShowAddressReader(readerShown, editing) || scriptsShown) AddressReaderWidth else 0.dp
-            val requestedBarWidth = fixedToolbarWidth + measuredAddressWidth + loadingIndicatorWidth + refreshWidth + readerWidth
-            // 显式比较 Dp，避免当前 Kotlin/Compose 版本对 coerceAtMost 的错误重载推断。
-            val targetBarWidth = if (requestedBarWidth < maxWidth) requestedBarWidth else maxWidth
-            val animatedBarWidth by animateDpAsState(
-                targetValue = targetBarWidth,
-                animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
-                label = "dynamicBottomBarWidth",
-            )
-            var dragDistance by remember(tab.id) { mutableFloatStateOf(0f) }
-            var hDragDistance by remember(tab.id) { mutableFloatStateOf(0f) }
-
-            // 退出动画播放期间仍保留底栏；动画结束后直接从组合树移除，
-            // 不留下透明/平移后的 Compose 节点拦截 WebView 的触摸事件。
-            if (barVisible) {
-                // 缩小后的圆形搜索钮（弹性缩放入场）
-                if (barMinimized) {
-                    val circleScale by animateFloatAsState(
-                        targetValue = 1f,
-                        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow),
-                        label = "barCircleIn",
-                    )
-                    Box(
-                        modifier = Modifier
-                            .align(if (barOnTop) Alignment.TopCenter else Alignment.BottomCenter)
-                            .padding(top = if (barOnTop) 4.dp else 0.dp, bottom = if (barOnTop) 0.dp else 4.dp)
-                            .size(48.dp)
-                            .pointerInput(tab.id, barOnTop) {
-                                detectDragGestures(
-                                    onDrag = { change, dragAmount ->
-                                        hDragDistance += dragAmount.x
-                                        // 再次左右滑，或朝屏幕中间滑（靠下上滑 / 靠上下滑）可展开
-                                        if (kotlin.math.abs(hDragDistance) > 72f || dragAmount.y * barEdgeSign < -40f) {
-                                            barMinimized = false
-                                            hDragDistance = 0f
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            change.consume()
-                                        }
-                                    },
-                                    onDragEnd = { hDragDistance = 0f },
-                                    onDragCancel = { hDragDistance = 0f },
-                                )
-                            }
-                            .graphicsLayer {
-                                translationY = barEdgeSign * hide * 210.dp.toPx()
-                                alpha = (1f - hide) * circleScale
-                                scaleX = circleScale
-                                scaleY = circleScale
-                                transformOrigin = TransformOrigin(0.5f, if (barOnTop) 0f else 1f)
-                            }
-                            .clickable {
-                                barMinimized = false
-                                if (!editing) {
-                                    editing = true
-                                    address = tab.url
-                                }
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .glassBar(
-                                    backdrop = glassBackdrop,
-                                    corner = 24.dp,
-                                    blurEnabled = settings.blurEnabled,
-                                    textureBlurEnabled = glassAvailable,
-                                    liquid = if (settings.liquidGlass) barLiquidBackdrop else null,
-                                ),
-                        )
-                        Icon(
-                            imageVector = MiuixIcons.Glass.Search,
-                            contentDescription = tr("搜索或输入网址"),
-                            tint = MiuixTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                } else {
-                Column(
-                    modifier = Modifier
-                        .align(if (barOnTop) Alignment.TopCenter else Alignment.BottomCenter)
-                        .width(animatedBarWidth)
-                        // 在底栏上朝屏幕边缘滑动（靠下向下 / 靠上向上）主动收起；左右滑动缩小为搜索圆钮；
-                        // 朝屏幕中间快速一扫（靠下快速上扫 / 靠上快速下扫）把底栏换到另一侧并记进设置。
-                        // 编辑地址时不挂这组手势：横向拖动要留给输入框（移动光标 / 滚动文字），
-                        // 否则累计 72px 就会把底栏缩成圆钮，向下拖还会收起底栏
-                        .pointerInput(tab.id, barHidden, editing, barOnTop, alwaysMin, barFixed) {
-                            if (editing || barFixed) return@pointerInput
-                            val tracker = VelocityTracker()
-                            val flingPx = 1_200.dp.toPx()
-                            detectDragGestures(
-                                onDragStart = { tracker.resetTracking() },
-                                onDrag = { change, dragAmount ->
-                                    tracker.addPosition(change.uptimeMillis, change.position)
-                                    if (kotlin.math.abs(dragAmount.x) > kotlin.math.abs(dragAmount.y)) {
-                                        hDragDistance += dragAmount.x
-                                        if (kotlin.math.abs(hDragDistance) > 72f) {
-                                            barMinimized = true
-                                            hDragDistance = 0f
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            change.consume()
-                                        }
-                                    } else {
-                                        // 统一成「朝屏幕边缘为正」，靠上时方向取反
-                                        dragDistance += dragAmount.y * barEdgeSign
-                                        // 提高竖向隐藏阈值，降低误触
-                                        if (dragDistance > 56f && !barHidden) {
-                                            barHidden = true
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            change.consume()
-                                        } else if (dragDistance < -56f && barHidden) {
-                                            barHidden = false
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            change.consume()
-                                        }
-                                    }
-                                },
-                                onDragEnd = {
-                                    // 快速朝屏幕中间一扫：换到另一侧（「始终最小化」下不换，位置由设置决定）
-                                    if (!alwaysMin) {
-                                        val v = tracker.calculateVelocity()
-                                        val towardCenter = v.y * barEdgeSign < -flingPx &&
-                                            kotlin.math.abs(v.y) > kotlin.math.abs(v.x) * 1.5f
-                                        if (towardCenter) {
-                                            settings.updateBarPosition(if (barOnTop) BAR_POS_BOTTOM else BAR_POS_TOP)
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        }
-                                    }
-                                    dragDistance = 0f
-                                    hDragDistance = 0f
-                                },
-                                onDragCancel = {
-                                    dragDistance = 0f
-                                    hDragDistance = 0f
-                                },
-                            )
-                        }
-                        .graphicsLayer {
-                            translationY = barEdgeSign * hide * 210.dp.toPx()
-                            alpha = 1f - hide
-                            val s = 1f - 0.08f * hide
-                            scaleX = s
-                            scaleY = s
-                            transformOrigin = TransformOrigin(0.5f, 0.5f)
-                        },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-            BottomBar(
-                blurEnabled = settings.blurEnabled,
-                liquid = if (settings.liquidGlass) barLiquidBackdrop else null,
-                textureBlurEnabled = glassAvailable,
-                backdrop = glassBackdrop,
-                address = displayAddress,
-                loading = tab.loading,
-                // 阅读模式中「后退」= 退出阅读模式，所以即使没有历史也可点
-                canGoBack = tab.canGoBack || tab.readerActive,
-                canGoForward = tab.canGoForward,
-                tabCount = state.tabs.size,
-                onChange = {
-                    address = it
-                    addressDirty = true
-                    editing = true
-                },
-                onFocusLost = {
-                    if (editing) editing = false
-                },
-                onGo = {
-                    if (address.isNotBlank()) {
-                        editing = false
-                        focus.clearFocus()
-                        tab.load(address)
-                    }
-                },
-                onBack = { tab.goBack() },
-                onForward = { tab.goForward() },
-                onHome = { state.goHome(tab) },
-                onCopyAddress = {
-                    if (tab.url.isNotBlank()) {
-                        clipboard.setText(AnnotatedString(tab.url))
-                        // Android 13+ 系统会自己弹「已复制」，旧版本补一个提示
-                        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
-                            android.widget.Toast.makeText(context, tr("已复制网址"), android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                onAddressTap = {
-                    if (!editing) {
-                        editing = true
-                        address = tab.url
-                    }
-                },
-                editing = editing,
-                readerVisible = readerShown,
-                readerActive = tab.readerActive,
-                onReader = { tab.toggleReader(readerDark) },
-                scriptsRunning = addressScriptCount > 0,
-                onScripts = { quickRunner.run(MenuAction.ScriptMenu) },
-                onShare = {
-                    if (tab.url.isNotBlank()) {
-                        runCatching {
-                            context.startActivity(
-                                Intent.createChooser(
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_TEXT, tab.url)
-                                    },
-                                    tr("分享链接"),
-                                ),
-                            )
-                        }
-                    }
-                },
-                onTabs = {
-                    tabsPage = if (tab.incognito) 1 else 0
-                    // 打开标签页面板前刷新当前标签的缩略图
-                    tab.captureThumbnailNow()
-                    sheet = Sheet.Tabs
-                },
-                onNewTab = { state.newTab(incognito = tab.incognito) },
-                onMore = { sheet = Sheet.Menu },
-                onRefresh = { tab.reload() },
-            )
-                }
-                } // end else (!barMinimized)
-            }
-        }
+        BrowserFloatingBar(
+            ui = ui,
+            settings = settings,
+            state = state,
+            tab = tab,
+            context = context,
+            clipboard = clipboard,
+            focus = focus,
+            haptic = haptic,
+            barOnTop = barOnTop,
+            alwaysMin = alwaysMin,
+            barFixed = barFixed,
+            displayAddress = displayAddress,
+            glassAvailable = glassAvailable,
+            glassBackdrop = glassBackdrop,
+            barLiquidBackdrop = barLiquidBackdrop,
+            barMinimizedState = barMinimizedState,
+            addressDirtyState = addressDirtyState,
+            hide = { hide },
+            barVisible = { barVisible },
+            quickRunner = quickRunner,
+            pushPage = ::pushPage,
+        )
 
         // 隐藏状态不放置透明热区：底部网页区域完全交给 WebView 处理点击、长按和滚动。
         // 通过 WebView 的 scrollY 方向判断下拉恢复，不通过点击底部区域恢复。
 
-    // 脚本快捷菜单：查询当前页面运行的脚本 + 它们注册的快捷命令
-    fun refreshScriptSheet() {
-        val t = state.activeTab
-        t.queryRunningScriptIds { ids ->
-            val byId = t.userScripts.associateBy { it.id }
-            runningScripts = ids.map { id ->
-                val us = byId[id]
-                RunningScript(
-                    id = id,
-                    name = us?.name?.ifBlank { null } ?: tr("未命名脚本"),
-                    icon = us?.icon.orEmpty(),
-                    iconBase = us?.sourceUrl.orEmpty(),
-                    iconFallbackHost = us?.let { UserscriptEngine.fallbackIconHost(UserscriptEngine.parse(it.code)) }.orEmpty(),
-                )
-            }
-        }
-        t.queryMenuCommands { scriptMenuItems = it }
-    }
-
-    // 菜单功能的执行：底部「更多」菜单和首页「快捷菜单」共用
+    // 菜单功能的执行：底部「更多」菜单和首页「快捷菜单」共用（实现在 BrowserMenuActions.kt）
     fun runMenuAction(action: MenuAction) {
-        when (action) {
-            MenuAction.NewTab -> state.newTab(incognito = false)
-            MenuAction.Incognito -> state.toggleIncognito()
-            MenuAction.Desktop -> tab.toggleDesktopMode(!tab.desktopMode)
-            MenuAction.Find -> showFind = true
-            MenuAction.Translate -> if (tab.url.isNotBlank()) {
-                state.newTab(
-                    "https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" +
-                        java.net.URLEncoder.encode(tab.url, "UTF-8"),
-                )
-            }
-            MenuAction.Favorite -> if (tab.url.isNotBlank()) {
-                val favName = tab.title.ifBlank { hostOf(tab.url) }
-                val msg = if (favorites.exists(favName, tab.url)) {
-                    tr("已添加此书签")
-                } else {
-                    favorites.add(favName, tab.url)
-                    tr("添加书签成功")
-                }
-                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-            }
-            MenuAction.Bookmarks -> pushPage(AppRoute.Library(0))
-            MenuAction.Share -> if (tab.url.isNotBlank()) {
-                if (needsInAppShareDialog()) showShareDialog = true else shareUrlSystem(context, tab.url, tab.title)
-            }
-            MenuAction.Refresh -> tab.reload()
-            MenuAction.CopyLink -> if (tab.url.isNotBlank()) {
-                clipboard.setText(AnnotatedString(tab.url))
-            }
-            MenuAction.External -> if (tab.url.isNotBlank()) {
-                runCatching {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(tab.url)))
-                }
-            }
-            MenuAction.AddToDesktop -> ShortcutHelper.addToDesktop(context, scope, tab)
-            MenuAction.Home -> state.goHome(tab)
-            MenuAction.Downloads -> pushPage(AppRoute.Downloads)
-            MenuAction.Scan -> launchScan()
-            // 单击：拓展快捷菜单；长按（见 onLongPressAction）：进入拓展页
-            MenuAction.GeckoExtensions -> geckoExtSheetShow = true
-            MenuAction.ScriptMenu -> {
-                scriptSheetShow = true
-                refreshScriptSheet()
-            }
-            MenuAction.History -> pushPage(AppRoute.Library(1))
-            MenuAction.Requests -> requestSheetShow = true
-            MenuAction.Settings -> pushPage(AppRoute.Settings)
-            MenuAction.Account -> if (EngineSupport.SYNC_BUNDLED) pushPage(AppRoute.FxaPage)
-            MenuAction.CloseTab -> state.closeTab(state.activeIndex)
-            MenuAction.CleanCache -> scope.launch {
-                val freed = runCatching { dev.dsh.miuixbrowser.browser.CacheCleaner.cleanAll(context) }.getOrDefault(0L)
-                android.widget.Toast.makeText(
-                    context,
-                    if (freed > 0) tr("已清理 ") + android.text.format.Formatter.formatFileSize(context, freed) else tr("没有可清理的缓存"),
-                    android.widget.Toast.LENGTH_SHORT,
-                ).show()
-            }
-            MenuAction.Sync -> if (!MenuSyncState.syncing) {
-                MenuSyncState.syncing = true
-                scope.launch {
-                    val r = runCatching { BackupAuto.pushAllNow(context) }.getOrNull()
-                    MenuSyncState.syncing = false
-                    val msg = when {
-                        r == null -> tr("同步失败")
-                        r.error != null -> r.error ?: ""
-                        r.failed == 0 -> tr("同步完成，已上传到 {0} 个目标", r.ok)
-                        r.ok == 0 -> tr("同步失败（{0} 个目标上传失败）", r.failed)
-                        else -> tr("同步完成：{0} 个成功，{1} 个失败", r.ok, r.failed)
-                    }
-                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                }
-            }
-            // 去广告开关：只有 WebView 内核有（Gecko 标签下菜单里是置灰的）
-            MenuAction.AdBlock -> if (!tab.isGecko) {
-                AdBlock.updateEnabled(!AdBlock.enabled)
-                android.widget.Toast.makeText(context, if (AdBlock.enabled) tr("去广告已开启") else tr("去广告已关闭"), android.widget.Toast.LENGTH_SHORT).show()
-            } else {
-                dev.dsh.miuixbrowser.engine.gecko.showGeckoUnsupportedToast(context)
-            }
-        }
+        ui.performMenuAction(action, state, favorites, context, scope, clipboard, launchers, ::pushPage)
     }
     quickRunner.run = { runMenuAction(it) }
 
-    // 脚本总开关 → 所有标签页
-    LaunchedEffect(settings.scriptsEnabled, state.tabs.size) {
-        state.tabs.forEach { it.scriptsEnabled = settings.scriptsEnabled }
-    }
+    // 脚本总开关 / 启用范围 / 脚本菜单与地址栏脚本图标的状态同步（BrowserMenuActions.kt）
+    ui.ScriptStateEffects(settings, state, context)
 
-    // 启用范围（无痕）→ 所有标签页
-    LaunchedEffect(settings.scriptsInIncognito, settings.adblockInIncognito, state.tabs.size) {
-        state.tabs.forEach {
-            it.scriptsInIncognito = settings.scriptsInIncognito
-            it.adblockInIncognito = settings.adblockInIncognito
-        }
-    }
-
-    LaunchedEffect(settings.sameSiteNewTab, state.tabs.size) {
-        state.tabs.forEach { it.sameSiteNewTab = settings.sameSiteNewTab }
-    }
-
-    // Sheet 打开期间，页面（重新）加载完成后刷新脚本列表；停用时保留旧列表（仅置灰）
-    // 页面加载完成后先等一下再取，之后每 1.5 秒复查一次（document-idle 的脚本、延迟注册的菜单命令可能比首次查询晚出现）；
-    // 脚本被停用时刷新后页面里不会再有运行中的脚本，列表同步清空
-    LaunchedEffect(scriptSheetShow, tab.loading, settings.scriptsEnabled) {
-        if (!scriptSheetShow) return@LaunchedEffect
-        if (!settings.scriptsEnabled) {
-            runningScripts = emptyList()
-            scriptMenuItems = emptyList()
-        } else if (!tab.loading) {
-            kotlinx.coroutines.delay(500)
-            // 脚本菜单命令没有「注册完成」事件可订阅，不能纯事件驱动；改成递增退避：
-            // 刚加载完 document-idle 脚本 / 延迟注册命令最容易出现，先密后疏（0.5s → 1.5s → 3s → 5s），
-            // 之后保持 5 秒一次，菜单关闭或页面重新加载时本协程被取消。
-            var gap = 500L
-            while (true) {
-                refreshScriptSheet()
-                kotlinx.coroutines.delay(gap)
-                gap = when {
-                    gap < 1500L -> 1500L
-                    gap < 3000L -> 3000L
-                    else -> 5000L
-                }
-            }
-        }
-    }
-
-    // 地址栏脚本图标：页面加载完成后查询当前页运行的脚本数。document-idle 的脚本比首次查询出现得晚，
-    // 所以加载完后只在 0.6s / 2.6s 各查一次（事件驱动，不轮询）；开始加载就先清掉，避免上一页的图标留在新页面上
-    val scriptIconTab = state.activeTab
-    LaunchedEffect(scriptIconTab.id, scriptIconTab.url, scriptIconTab.loading, settings.scriptsEnabled) {
-        if (!settings.scriptsEnabled || scriptIconTab.url.isEmpty() || scriptIconTab.loading) {
-            addressScriptCount = 0
-            return@LaunchedEffect
-        }
-        for (gap in longArrayOf(600L, 2000L)) {
-            kotlinx.coroutines.delay(gap)
-            scriptIconTab.queryRunningScripts { n -> if (state.activeTab === scriptIconTab) addressScriptCount = n }
-        }
-    }
-
-    // 打开更多菜单时刷新「当前页面运行的脚本数」
-    LaunchedEffect(sheet, state.activeIndex) {
-        if (sheet == Sheet.Menu) {
-            scriptRunCount = 0
-            state.activeTab.queryRunningScripts { scriptRunCount = it }
-            // 「拓展」角标：刷新已启用的拓展数
-            if (settings.geckoMode) runCatching { GeckoExtensionStore.refresh(context) }
-        }
-    }
-
-    // 标签页列表：打开时自动滚到当前标签并高亮
+    // 标签页列表：打开时自动滚到当前标签并高亮（逻辑在 BrowserTabsSheet.kt）
     val tabsListState = rememberLazyListState()
-    var tabsOpenScrolled by remember { mutableStateOf(false) }
-    LaunchedEffect(sheet, tabsPage, state.activeIndex, settings.tabsStyle) {
-        if (sheet != Sheet.Tabs) {
-            tabsOpenScrolled = false
-            return@LaunchedEffect
-        }
-        val pageIncognito = tabsPage == 1
-        val visible = state.tabs.withIndex().filter { it.value.incognito == pageIncognito }
-        val pos = visible.indexOfFirst { it.index == state.activeIndex }
-        if (pos >= 0) {
-            val row = if (settings.tabsStyle == 1) pos / 2 else pos
-            if (!tabsOpenScrolled) {
-                // 刚打开：弹层还在滑入，直接定位，不在动画期间再跑一段滚动动画
-                tabsOpenScrolled = true
-                runCatching { tabsListState.scrollToItem(row) }
-            } else {
-                runCatching { tabsListState.animateScrollToItem(row) }
-            }
-        }
-    }
+    TabsAutoScroll(
+        sheetOpen = sheet == Sheet.Tabs,
+        tabsPage = tabsPage,
+        state = state,
+        tabsStyle = settings.tabsStyle,
+        listState = tabsListState,
+    )
 
-    // ---- 弹层：GlassBottomSheet（保持组合直到离场动画结束）----
-        val activeSheet = sheet
-        if (activeSheet != Sheet.None) {
-            lastActiveSheet = activeSheet
-        }
-        LaunchedEffect(activeSheet) {
-            if (activeSheet != Sheet.None) sheetHostActive = true
-        }
-BrowserChunk {
-            AppBottomSheet(
-                show = activeSheet != Sheet.None,
-                title = when (lastActiveSheet) {
-                    Sheet.Link -> hostOf(linkUrl)
-                    Sheet.Image -> tr("图片")
-                    Sheet.Element -> tr("页面元素")
-                    Sheet.Menu -> null // 更多菜单不显示标题
-                    Sheet.Tabs -> null // 标签页自定义头部（渐进模糊 + 添加/删除）
-                    else -> null
-                },
-                // 头部同一行：新建 | 标签页/无痕浏览页 切换 | 删除（整行放在 startAction，自己铺满宽度）
-                startAction = if (lastActiveSheet == Sheet.Tabs) {
-                    {
-                        val pageCount = state.tabs.count { it.incognito == (tabsPage == 1) }
-                        // Row 而不是叠放的 Box：中间的分段切换占两侧按钮之外的剩余宽度（最宽 236dp 并居中），
-                        // 窄屏上只会收缩，不会再和两侧按钮重叠
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            val liquid = if (glassAvailable && settings.blurEnabled) liquidBackdrop else null
-                            TabAddButton(
-                                canAdd = state.tabs.size < 99,
-                                backdrop = liquid,
-                                onClick = {
-                                    state.newTab(incognito = tabsPage == 1)
-                                    sheet = Sheet.None
-                                },
-                            )
-                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                TabsSegmented(
-                                    labels = listOf(tr("标签页"), tr("无痕浏览页")),
-                                    selected = tabsPage,
-                                    onSelect = { tabsPage = it },
-                                )
-                            }
-                            LiquidGlassButton(
-                                onClick = { showClearTabsConfirm = true },
-                                backdrop = liquid,
-                                enabled = pageCount > 0,
-                            ) {
-                                Icon(
-                                    imageVector = MiuixIcons.Glass.Delete,
-                                    contentDescription = tr("全部删除"),
-                                    modifier = Modifier.size(22.dp),
-                                    tint = MiuixTheme.colorScheme.onSurface,
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    null
-                },
-                endAction = null,
-                // 标签列表 / 更多菜单自带滚动容器，自己把头部和导航栏高度做成内边距（铺到头部和导航栏下面再渐隐）
-                scrollContent = true,
-                // 所有弹层统一采样页面模糊。卡顿的根因不在弹层自己的模糊，而在页面每帧被重复回放，
-                // 已由上方的离屏缓存 / 整页冻结解决，所以更多菜单、标签列表可以恢复模糊。
-                backdrop = if (glassAvailable && settings.blurEnabled) glassBackdrop else null,
-                // 更多菜单 / 标签列表在有模糊采样时不压暗；Gecko 网页态（无法采样）没有模糊，必须压暗以区分层次
-                enableWindowDim = (lastActiveSheet != Sheet.Menu && lastActiveSheet != Sheet.Tabs) ||
-                    !(glassAvailable && settings.blurEnabled),
-                onDismissRequest = { sheet = Sheet.None },
-                onDismissFinished = { if (sheet == Sheet.None) sheetHostActive = false },
-            ) {
-                val sheetInsets = LocalBottomSheetInsets.current
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .then(
-                            // 链接 / 图片 / 元素菜单不滚动：整体推到头部下方、导航栏上方；标签列表和更多菜单在各自的滚动容器里处理
-                            if (lastActiveSheet == Sheet.Tabs || lastActiveSheet == Sheet.Menu) {
-                                Modifier
-                            } else {
-                                Modifier.padding(top = sheetInsets.top, bottom = sheetInsets.bottom + 8.dp)
-                            },
-                        ),
-                ) {
-                when (lastActiveSheet) {
-                Sheet.Tabs -> {
-                    val screenH = LocalConfiguration.current.screenHeightDp.dp
-                    // 只显示当前栏的标签；index 仍是全局下标，选中/关闭时用
-                    val pageIncognito = tabsPage == 1
-                    val visibleTabs = state.tabs.withIndex().filter { it.value.incognito == pageIncognito }
-                    val cardStyle = settings.tabsStyle == 1
-                    // 懒加载：只组合/绘制可见行（最多 99 个标签时不再一次性全部组合）
-                    LazyColumn(
-                        state = tabsListState,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = screenH * 0.68f + sheetInsets.top + sheetInsets.bottom),
-                        contentPadding = PaddingValues(
-                            top = sheetInsets.top + 4.dp,
-                            bottom = sheetInsets.bottom + 8.dp,
-                        ),
-                        verticalArrangement = if (cardStyle) Arrangement.spacedBy(10.dp) else Arrangement.Top,
-                    ) {
-                        if (cardStyle) {
-                            items(
-                                items = visibleTabs.chunked(2),
-                                key = { row -> row.first().value.id },
-                                contentType = { "tabCardRow" },
-                            ) { rowItems ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                ) {
-                                    rowItems.forEach { indexed ->
-                                        TabCard(
-                                            item = indexed.value,
-                                            highlight = indexed.index == state.activeIndex,
-                                            blurBackdrop = if (settings.blurEnabled && glassAvailable) glassBackdrop else null,
-                                            modifier = Modifier.weight(1f),
-                                            onSelect = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                state.select(indexed.index)
-                                                sheet = Sheet.None
-                                            },
-                                            onClose = {
-                                                // 关掉最后一个标签：BrowserState 会按「自定义起始页」补一个新标签，收起列表直接回到它
-                                                val last = state.tabs.size == 1
-                                                state.closeTab(indexed.index)
-                                                if (last) sheet = Sheet.None
-                                            },
-                                        )
-                                    }
-                                    repeat(2 - rowItems.size) { Spacer(Modifier.weight(1f)) }
-                                }
-                            }
-                        } else {
-                            items(
-                                items = visibleTabs,
-                                key = { it.value.id },
-                                contentType = { "tabRow" },
-                            ) { (index, item) ->
-                                SheetRow(
-                                    title = buildString {
-                                        if (item.incognito) append(tr("无痕 · "))
-                                        append(item.title.ifBlank { tr("新标签页") })
-                                    },
-                                    subtitle = item.url.ifBlank { null },
-                                    highlight = index == state.activeIndex,
-                                    trailing = {
-                                        BarButton(
-                                            icon = MiuixIcons.Glass.Close,
-                                            description = tr("关闭"),
-                                            // 只剩一个标签时也能清除：清掉后按「自定义起始页」新建一个，并收起列表回到它
-                                            onClick = {
-                                                val last = state.tabs.size == 1
-                                                state.closeTab(index)
-                                                if (last) sheet = Sheet.None
-                                            },
-                                        )
-                                    },
-                                    onClick = {
-                                        state.select(index)
-                                        sheet = Sheet.None
-                                    },
-                                )
-                            }
-                        }
-                        if (visibleTabs.isEmpty()) {
-                            item(key = "empty") {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth().height(160.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        text = if (pageIncognito) tr("没有无痕浏览页") else tr("没有标签页"),
-                                        fontSize = 14.sp,
-                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+    // ---- 底部弹层（BrowserSheetHost.kt）----
+    ui.BrowserSheetHost(
+        settings = settings,
+        context = context,
+        state = state,
+        menuOrder = menuOrder,
+        liquidBackdrop = liquidBackdrop,
+        glassAvailable = glassAvailable,
+        glassBackdrop = glassBackdrop,
+        clipboard = clipboard,
+        tab = tab,
+        tabsListState = tabsListState,
+        pushPage = ::pushPage,
+        runMenuAction = ::runMenuAction,
+    )
 
-
-                Sheet.Menu -> {
-                    // 「更多」菜单最高占屏幕 44%，超出（如编辑排序时展开隐藏区）可滚动
-                    val menuMaxH = (LocalConfiguration.current.screenHeightDp * 0.44f).dp
-                    Box(
-                        modifier = Modifier
-                            .heightIn(max = menuMaxH + sheetInsets.top + sheetInsets.bottom)
-                            .verticalScroll(rememberScrollState())
-                            // 先滚动后加内边距：内边距在滚动内容里面，菜单能滚到头部和导航栏下面
-                            .padding(top = sheetInsets.top, bottom = sheetInsets.bottom + 8.dp),
-                    ) {
-                    MenuGrid(
-                        labelFor = { action ->
-                            if (action == MenuAction.Desktop) {
-                                if (tab.desktopMode) tr("移动版") else tr("桌面版")
-                            } else if (action == MenuAction.Sync && MenuSyncState.syncing) {
-                                tr("同步中")
-                            } else {
-                                action.label
-                            }
-                        },
-                        badgeFor = { action ->
-                            when (action) {
-                                MenuAction.Downloads ->
-                                    Downloader.tasks.count { it.state == DownloadState.RUNNING }
-                                MenuAction.ScriptMenu -> scriptRunCount
-                                // 本页拦截数：菜单打开 / 重组时读一次计数器，不轮询
-                                MenuAction.AdBlock -> if (AdBlock.enabled && !tab.isGecko) tab.pageAdBlocked.get() else 0
-                                MenuAction.GeckoExtensions -> if (settings.geckoMode) {
-                                    GeckoExtensionStore.items.count {
-                                        it.enabled && (!tab.incognito || it.allowedInPrivate)
-                                    }
-                                } else {
-                                    0
-                                }
-                                else -> 0
-                            }
-                        },
-                        // 置灰：仅 Gecko 专属功能在 WebView 下不可用（脚本在两种内核下都可用）
-                        lockedFor = { action ->
-                            when (action) {
-                                // 拓展只在 Gecko 内核可用：WebView 下置灰，点击提示不可用
-                                MenuAction.GeckoExtensions -> !settings.geckoMode
-                                // 去广告依赖 WebView 的请求拦截：Gecko 标签下置灰
-                                MenuAction.AdBlock -> tab.isGecko
-                                else -> false
-                            }
-                        },
-                        order = menuOrder.order,
-                        hidden = menuOrder.hidden,
-                        onAction = { action ->
-                            // 同步 / 去广告 / 清理缓存：菜单保持打开，图标和文字就地变化
-                            if (action != MenuAction.Sync && action != MenuAction.AdBlock && action != MenuAction.CleanCache) sheet = Sheet.None
-                            runMenuAction(action)
-                        },
-                        onMove = { action, toHidden, toIndex -> menuOrder.place(action, toHidden, toIndex) },
-                        // 长按 0.65 秒（图标不动）：直接进入管理页；单击保持原有操作
-                        longPressActions = setOf(MenuAction.ScriptMenu, MenuAction.Favorite, MenuAction.Bookmarks, MenuAction.GeckoExtensions),
-                        onLongPressAction = { action ->
-                            when (action) {
-                                MenuAction.ScriptMenu -> {
-                                    sheet = Sheet.None
-                                    pushPage(AppRoute.Extensions)
-                                }
-                                MenuAction.Favorite -> {
-                                    sheet = Sheet.None
-                                    pushPage(AppRoute.Library(0))
-                                }
-                                // 长按「书签」：弹出新建书签弹窗，自动填入当前页标题和网址
-                                MenuAction.Bookmarks -> {
-                                    sheet = Sheet.None
-                                    bookmarkPrefillName = tab.title.ifBlank { hostOf(tab.url) }
-                                    bookmarkPrefillUrl = tab.url
-                                    showBookmarkCreate = true
-                                }
-                                MenuAction.GeckoExtensions ->
-                                    if (!settings.geckoMode) {
-                                        showWebViewUnsupportedToast(context)
-                                    } else {
-                                        sheet = Sheet.None
-                                        pushPage(AppRoute.GeckoExtensions)
-                                    }
-                                else -> Unit
-                            }
-                        },
-                        incognitoActive = tab.incognito,
-                        requestsActive = AdBlock.requestLogEnabled,
-                        adBlockActive = AdBlock.enabled && !tab.isGecko,
-                        syncActive = MenuSyncState.syncing,
-                        scriptsActive = settings.scriptsEnabled,
-                        extensionsActive = settings.geckoMode &&
-                            GeckoExtensionStore.items.any { it.enabled && (!tab.incognito || it.allowedInPrivate) },
-                    )
-                    }
-                }
-
-                Sheet.Link -> {
-                    SheetRow(title = tr("打开链接")) {
-                        sheet = Sheet.None
-                        tab.loadUrl(linkUrl)
-                    }
-                    SheetRow(title = tr("在新标签页打开")) {
-                        sheet = Sheet.None
-                        state.newTab(linkUrl, tab.incognito, fromLink = true)
-                    }
-                    SheetRow(title = tr("复制链接")) {
-                        sheet = Sheet.None
-                        clipboard.setText(AnnotatedString(linkUrl))
-                    }
-                    SheetRow(title = tr("在外部浏览器打开")) {
-                        sheet = Sheet.None
-                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(linkUrl))) }
-                    }
-                    // 标记广告依赖 WebView 的页面内 JS 取元素：Gecko 下不提供
-                    if (settings.pageEnhancements && !tab.isGecko) {
-                        SheetRow(
-                            title = tr("标记为广告"),
-                            subtitle = tr("选中这个广告位，可记住规则下次自动隐藏"),
-                        ) {
-                            sheet = Sheet.None
-                            tab.markAdAtTouch {
-                                android.widget.Toast.makeText(context, tr("没找到可标记的元素"), android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-                }
-
-                Sheet.Image -> {
-                    val inlineImage = imageUrl.startsWith("data:", ignoreCase = true)
-                    val blobImage = imageUrl.startsWith("blob:", ignoreCase = true)
-                    SheetRow(
-                        title = tr("保存图片"),
-                        subtitle = when {
-                            inlineImage -> tr("内嵌图片")
-                            blobImage -> tr("页面内图片")
-                            else -> hostOf(imageUrl)
-                        },
-                    ) {
-                        sheet = Sheet.None
-                        when {
-                            inlineImage -> {
-                                val name = "image_" + System.currentTimeMillis() + ".png"
-                                val ok = Downloader.saveDataUri(context, imageUrl, name)
-                                android.widget.Toast.makeText(
-                                    context,
-                                    if (ok) tr("已保存到 Download/mafari") else tr("保存失败"),
-                                    android.widget.Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                            blobImage -> tab.extractBlob(imageUrl, null, null, "image/*")
-                            else -> pendingDownload = DownloadRequest(
-                                url = imageUrl,
-                                userAgent = if (tab.engineKind == EngineKind.WEBVIEW) {
-                                    runCatching { tab.webView.settings.userAgentString }.getOrNull()
-                                } else {
-                                    null
-                                },
-                                fileName = Downloader.fileNameFrom(imageUrl, null),
-                                mime = null,
-                                referer = tab.url,
-                                withCookies = !tab.incognito,
-                                geckoCookies = tab.engineKind == EngineKind.GECKO,
-                            )
-                        }
-                    }
-                    if (!inlineImage && !blobImage) {
-                        SheetRow(title = tr("复制图片地址")) {
-                            sheet = Sheet.None
-                            clipboard.setText(AnnotatedString(imageUrl))
-                        }
-                        SheetRow(title = tr("在新标签页打开")) {
-                            sheet = Sheet.None
-                            state.newTab(imageUrl, tab.incognito, fromLink = true)
-                        }
-                    }
-                    // 标记广告依赖 WebView 的页面内 JS 取元素：Gecko 下不提供
-                    if (settings.pageEnhancements && !tab.isGecko) {
-                        SheetRow(
-                            title = tr("标记为广告"),
-                            subtitle = tr("选中这个广告位，可记住规则下次自动隐藏"),
-                        ) {
-                            sheet = Sheet.None
-                            tab.markAdAtTouch {
-                                android.widget.Toast.makeText(context, tr("没找到可标记的元素"), android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-                }
-
-                Sheet.Element -> {
-                    val hit = elementHit
-                    if (hit != null) {
-                        if (hit.imageUrl.isNotBlank()) {
-                            SheetRow(title = tr("保存图片"), subtitle = hostOf(hit.imageUrl)) {
-                                sheet = Sheet.None
-                                pendingDownload = DownloadRequest(
-                                    url = hit.imageUrl,
-                                    userAgent = if (tab.engineKind == EngineKind.WEBVIEW) {
-                                        runCatching { tab.webView.settings.userAgentString }.getOrNull()
-                                    } else {
-                                        null
-                                    },
-                                    fileName = Downloader.fileNameFrom(hit.imageUrl, null),
-                                    mime = null,
-                                    referer = tab.url,
-                                    withCookies = !tab.incognito,
-                                    geckoCookies = tab.engineKind == EngineKind.GECKO,
-                                )
-                            }
-                        }
-                        SheetRow(
-                            title = tr("标记为广告并移除"),
-                            subtitle = tr("记住这条规则，下次访问该站点自动隐藏"),
-                        ) {
-                            sheet = Sheet.None
-                            if (!AdBlock.addUserCosmetic(hostOf(tab.url), hit.selector)) {
-                                // 选择器不安全 / 站点名不合法时规则没有保存，不能让人以为下次会自动隐藏
-                                android.widget.Toast.makeText(context, tr("这个元素无法生成规则，本次仅移除"), android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                            tab.evaluateJs(removeElementJs(hit.selector))
-                        }
-                        SheetRow(title = tr("仅移除该元素")) {
-                            sheet = Sheet.None
-                            tab.evaluateJs(removeElementJs(hit.selector))
-                        }
-                    }
-                }
-
-                Sheet.None -> Unit
-                }
-                }
-            }
-}
-
-
-BrowserChunk {
-            AppGlassDialog(
-                show = showDefaultBrowserPrompt,
-                title = tr("设为默认浏览器"),
-                summary = tr("设为系统默认浏览器后，其他应用里的网页链接会直接用 Mafari 打开。之后也可以在 设置 → 高级 里设置。"),
-                backdrop = if (glassAvailable && settings.blurEnabled) glassBackdrop else null,
-                onDismissRequest = {
-                    showDefaultBrowserPrompt = false
-                    settings.markDefaultBrowserPrompted()
-                },
-            ) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AppDialogButton(
-                        onClick = {
-                            showDefaultBrowserPrompt = false
-                            settings.markDefaultBrowserPrompted()
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(text = tr("取消"), style = MiuixTheme.textStyles.button)
-                    }
-                    AppDialogButton(
-                        onClick = {
-                            showDefaultBrowserPrompt = false
-                            settings.markDefaultBrowserPrompted()
-                            runCatching { defaultBrowserLauncher.launch(DefaultBrowser.requestIntent(context)) }
-                        },
-                        modifier = Modifier.weight(1f),
-                        role = GlassDialogButtonRole.Primary,
-                    ) {
-                        Text(text = tr("设为默认"), style = MiuixTheme.textStyles.button)
-                    }
-                }
-            }
-
-            UpdateSheet(
-                show = updateRelease != null,
-                release = updateRelease ?: lastUpdateRelease,
-                backdrop = if (glassAvailable && settings.blurEnabled) glassBackdrop else null,
-                origin = "launch",
-                onDismiss = { updateRelease = null },
-                onIgnore = {
-                    settings.updateIgnoredUpdate(it.version)
-                    updateRelease = null
-                },
-                openInApp = { openInBrowser(it) },
-            )
-}
-
-        val downloadRequest = pendingDownload
-BrowserChunk {
-            AppGlassDialog(
-                show = downloadRequest != null,
-                title = tr("下载文件"),
-                summary = downloadRequest?.let {
-                    it.fileName + "\n" +
-                        when {
-                            it.tempPath != null -> tr("页面内文件（blob）")
-                            it.dataUri != null -> tr("页面内文件（data）")
-                            else -> tr("保存到 /sdcard/Download/mafari")
-                        }
-                },
-                backdrop = if (glassAvailable) glassBackdrop else null,
-                onDismissRequest = {
-                    pendingDownload?.tempPath?.let { p -> runCatching { java.io.File(p).delete() } }
-                    pendingDownload?.onResult?.invoke(false, "cancelled")
-                    pendingDownload = null
-                },
-            ) {
-                if (downloadRequest != null) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            AppDialogButton(
-                                onClick = {
-                                    downloadRequest.tempPath?.let { p -> runCatching { java.io.File(p).delete() } }
-                                    downloadRequest.onResult?.invoke(false, "cancelled")
-                                    pendingDownload = null
-                                },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(text = tr("取消"), style = MiuixTheme.textStyles.button)
-                            }
-                            AppDialogButton(
-                                onClick = {
-                                    val req = downloadRequest
-                                    pendingDownload = null
-                                    scope.launch {
-                                        val saved = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                            when {
-                                                req.tempPath != null -> {
-                                                    val f = java.io.File(req.tempPath)
-                                                    val ok = f.exists() && Downloader.saveFile(
-                                                        context,
-                                                        f,
-                                                        req.fileName,
-                                                        req.mime,
-                                                    )
-                                                    runCatching { f.delete() }
-                                                    ok
-                                                }
-                                                req.dataUri != null ->
-                                                    Downloader.saveDataUri(context, req.dataUri, req.fileName)
-                                                else -> {
-                                                    Downloader.start(
-                                                        context = context,
-                                                        url = req.url,
-                                                        userAgent = req.userAgent,
-                                                        fileName = req.fileName,
-                                                        mimeType = req.mime,
-                                                        onComplete = req.onResult,
-                                                        referer = req.referer,
-                                                        withCookies = req.withCookies,
-                                                        geckoCookies = req.geckoCookies,
-                                                    )
-                                                    true
-                                                }
-                                            }
-                                        }
-                                        if (req.tempPath != null || req.dataUri != null) {
-                                            withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                                android.widget.Toast.makeText(
-                                                    context,
-                                                    if (saved) tr("已保存到 Download/mafari") else tr("保存失败"),
-                                                    android.widget.Toast.LENGTH_SHORT,
-                                                ).show()
-                                            }
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                role = GlassDialogButtonRole.Primary,
-                            ) {
-                                Text(text = tr("下载"), style = MiuixTheme.textStyles.button)
-                            }
-                        }
-                    }
-                }
-            }
-}
-
-        // capture 混合类型：让用户选拍照 / 录像 / 文件
-        // 注意：launchCamera / filePickerLauncher 依赖 fileChooserChoice 里的 callback，
-        // 弹层里不要先置 null，由 launcher 回调时再清。
-        val captureChoice = fileChooserChoice
-BrowserChunk {
-            AppGlassDialog(
-                show = captureChoice != null && captureChoice.params.isCaptureEnabled &&
-                    run {
-                        val a = captureChoice.params.acceptTypes?.joinToString(",")?.lowercase().orEmpty()
-                        a.contains("image") && a.contains("video")
-                    },
-                title = tr("选择来源"),
-                summary = tr("网页需要图片或视频"),
-                backdrop = if (glassAvailable) glassBackdrop else null,
-                onDismissRequest = {
-                    captureChoice?.callback?.onReceiveValue(null)
-                    fileChooserChoice = null
-                },
-            ) {
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AppDialogButton(
-                        onClick = {
-                            if (captureChoice != null) launchCamera(captureChoice, video = false)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        role = GlassDialogButtonRole.Primary,
-                    ) {
-                        Text(text = tr("拍照"), style = MiuixTheme.textStyles.button)
-                    }
-                    AppDialogButton(
-                        onClick = {
-                            if (captureChoice != null) launchCamera(captureChoice, video = true)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(text = tr("录像"), style = MiuixTheme.textStyles.button)
-                    }
-                    AppDialogButton(
-                        onClick = {
-                            if (captureChoice != null) launchFilePicker(captureChoice)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(text = tr("从文件选择"), style = MiuixTheme.textStyles.button)
-                    }
-                }
-            }
-}
-
-        // HTML5 视频全屏：沉浸播放，完全隐藏状态栏和底部导航条（边缘上滑可临时唤出），退出全屏时恢复
-        val videoFullscreen = customView != null
-BrowserChunk {
-            DisposableEffect(videoFullscreen) {
-                val window = (context as? Activity)?.window
-                val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
-                var oldCutout = -1
-                if (videoFullscreen && window != null && controller != null) {
-                    controller.systemBarsBehavior =
-                        androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    controller.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                        oldCutout = window.attributes.layoutInDisplayCutoutMode
-                        val attrs = window.attributes
-                        attrs.layoutInDisplayCutoutMode =
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R)
-                                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                            else android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                        window.attributes = attrs
-                    }
-                }
-                onDispose {
-                    if (videoFullscreen && window != null && controller != null) {
-                        controller.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-                        controller.systemBarsBehavior =
-                            androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
-                        if (oldCutout >= 0 && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                            val attrs = window.attributes
-                            attrs.layoutInDisplayCutoutMode = oldCutout
-                            window.attributes = attrs
-                        }
-                    }
-                }
-            }
-
-            // HTML5 视频全屏：把 WebView 给的 View 挂到全屏黑底容器
-            if (customView != null) {
-                AndroidView(
-                    factory = { ctx ->
-                        FrameLayout(ctx).apply {
-                            setBackgroundColor(android.graphics.Color.BLACK)
-                        }
-                    },
-                    update = { container ->
-                        val cv = customView
-                        if (cv != null) {
-                            if (cv.parent !== container) {
-                                (cv.parent as? android.view.ViewGroup)?.removeView(cv)
-                                container.removeAllViews()
-                                container.addView(
-                                    cv,
-                                    FrameLayout.LayoutParams(
-                                        FrameLayout.LayoutParams.MATCH_PARENT,
-                                        FrameLayout.LayoutParams.MATCH_PARENT,
-                                    ),
-                                )
-                            }
-                        } else {
-                            container.removeAllViews()
-                        }
-                    },
-                    onRelease = { container ->
-                        container.removeAllViews()
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .zIndex(100f)
-                        .background(Color.Black),
-                )
-            }
-
-            if (EngineSupport.GECKO_BUNDLED) {
-                GeckoExtMenuSheet(
-                    show = geckoExtSheetShow,
-                    backdrop = if (glassAvailable) glassBackdrop else null,
-                    activeSession = state.activeTab.geckoSession,
-                    onOpenUrl = { url -> state.newTab(url, tab.incognito) },
-                    onDismiss = { geckoExtSheetShow = false },
-                )
-            }
-
-            ScriptMenuSheet(
-                show = scriptSheetShow,
-                backdrop = if (glassAvailable) glassBackdrop else null,
-                scripts = runningScripts,
-                commands = scriptMenuItems,
-                scriptsEnabled = settings.scriptsEnabled,
-                onScriptsEnabledChange = { on ->
-                    settings.updateScriptsEnabled(on)
-                    state.tabs.forEach { it.scriptsEnabled = on }
-                    // 旧列表对应的是切换前的页面，先清空，页面重载完成后由上面的刷新逻辑重新填充
-                    runningScripts = emptyList()
-                    scriptMenuItems = emptyList()
-                    // 已注入的脚本无法撤销，刷新页面使开关生效（直接 reload：页面正在加载时 tab.reload() 只会停止加载）
-                    runCatching { tab.refresh() }
-                },
-                onRunCommand = { cmd ->
-                    scriptSheetShow = false
-                    tab.runMenuCommand(cmd.id)
-                },
-                onDismiss = { scriptSheetShow = false },
-            )
-}
-
-        // 网络请求（Sheet）：WebView 用标签自己的统计；Gecko 用内置扩展按页面 URL 上报的统计
-        val reqTab = state.activeTab
-        RequestLogSheet(
-            show = requestSheetShow,
-            backdrop = if (glassAvailable) glassBackdrop else null,
-            log = if (reqTab.isGecko) remember(reqTab, reqTab.url) { GeckoNetLog.logFor(reqTab.url) } else reqTab.requestLog,
-            isGecko = reqTab.isGecko,
-            onDismiss = { requestSheetShow = false },
-        )
-
-        val permPrompt = webPermPrompt
-        // 「记住此网站的选择」：只有 Gecko 的网站权限带 permKey，选了之后写进例外网站
-        var rememberChoice by remember(permPrompt) { mutableStateOf(false) }
-        val answerPrompt = { allow: Boolean ->
-            val p = permPrompt
-            webPermPrompt = null
-            if (p != null) {
-                if (rememberChoice && p.permKey != null) GeckoSitePerms.remember(p.origin, p.permKey, allow)
-                p.decide(allow)
-            }
-        }
-BrowserChunk {
-            AppGlassDialog(
-                show = permPrompt != null,
-                title = tr("允许网站{0}？", permPrompt?.what ?: ""),
-                summary = permPrompt?.origin,
-                backdrop = if (glassAvailable) glassBackdrop else null,
-                onDismissRequest = {
-                    webPermPrompt = null
-                    permPrompt?.decide?.invoke(false)
-                },
-            ) {
-                if (permPrompt?.permKey != null) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { rememberChoice = !rememberChoice }
-                            .padding(bottom = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = tr("记住此网站的选择"),
-                            modifier = Modifier.weight(1f),
-                            color = MiuixTheme.colorScheme.onSurface,
-                        )
-                        AppSwitch(checked = rememberChoice, onCheckedChange = { rememberChoice = it })
-                    }
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AppDialogButton(
-                        onClick = { answerPrompt(false) },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(text = tr("拒绝"), style = MiuixTheme.textStyles.button)
-                    }
-                    AppDialogButton(
-                        onClick = { answerPrompt(true) },
-                        modifier = Modifier.weight(1f),
-                        role = GlassDialogButtonRole.Primary,
-                    ) {
-                        Text(text = tr("允许"), style = MiuixTheme.textStyles.button)
-                    }
-                }
-            }
-
-            // 脚本悬浮播放器的「投屏到」面板（状态在 MediaHost.pickerUi）
-            CastPickerDialog(
-                ui = dev.dsh.miuixbrowser.script.MediaHost.pickerUi,
-                backdrop = if (glassAvailable) glassBackdrop else null,
-            )
-
-            LoginPromptDialog(
-                prompt = loginPrompt,
-                backdrop = if (glassAvailable) glassBackdrop else null,
-                onClear = { loginPrompt = null },
-            )
-}
-
-        val scriptImportUrl = pendingScript
-BrowserChunk {
-            AppGlassDialog(
-                show = scriptImportUrl != null,
-                title = tr("导入脚本？"),
-                summary = scriptImportUrl,
-                backdrop = if (glassAvailable) glassBackdrop else null,
-                onDismissRequest = { pendingScript = null },
-            ) {
-                if (scriptImportUrl != null) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            AppDialogButton(
-                                onClick = { pendingScript = null },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(text = tr("取消"), style = MiuixTheme.textStyles.button)
-                            }
-                            AppDialogButton(
-                                onClick = {
-                                    val target = scriptImportUrl
-                                    pendingScript = null
-                                    scope.launch {
-                                        val code = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                            fetchRemoteScript(target)
-                                        }
-                                        if (code != null) {
-                                            extensions.add("", code, sourceUrl = target)
-                                            pushPage(AppRoute.Extensions)
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                role = GlassDialogButtonRole.Primary,
-                            ) {
-                                Text(text = tr("导入"), style = MiuixTheme.textStyles.button)
-                            }
-                        }
-                    }
-                }
-            }
-
-            AppGlassDialog(
-                show = showClearTabsConfirm,
-                title = if (tabsPage == 1) tr("删除全部无痕浏览页？") else tr("删除全部标签页？"),
-                summary = if (tabsPage == 1) {
-                    tr("将关闭所有无痕浏览页，普通标签页不受影响。")
-                } else {
-                    tr("将关闭所有标签页，无痕浏览页不受影响，并新建一个空白标签。")
-                },
-                backdrop = if (glassAvailable && settings.blurEnabled) glassBackdrop else null,
-                onDismissRequest = { showClearTabsConfirm = false },
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    AppDialogButton(
-                        onClick = { showClearTabsConfirm = false },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(text = tr("取消"), style = MiuixTheme.textStyles.button)
-                    }
-                    AppDialogButton(
-                        onClick = {
-                            state.closeAllOf(incognito = tabsPage == 1)
-                            showClearTabsConfirm = false
-                            sheet = Sheet.None
-                        },
-                        modifier = Modifier.weight(1f),
-                        role = GlassDialogButtonRole.Destructive,
-                    ) {
-                        Text(text = tr("全部删除"), style = MiuixTheme.textStyles.button)
-                    }
-                }
-            }
-
-            ShareDialog(
-                show = showShareDialog,
-                title = tab.title,
-                url = tab.url,
-                backdrop = if (glassAvailable && settings.blurEnabled) glassBackdrop else null,
-                onDismiss = { showShareDialog = false },
-            )
-
-            FindDialog(
-                show = showFind,
-                backdrop = if (glassAvailable) glassBackdrop else null,
-                onDismiss = {
-                    tab.clearFind()
-                    showFind = false
-                },
-                onQuery = { tab.findAll(it) },
-                onPrev = { tab.findNext(false) },
-                onNext = { tab.findNext(true) },
-            )
-
-            FavoriteEditorDialog(
-                show = showBookmarkCreate,
-                initial = null,
-                groups = favorites.groups(),
-                backdrop = if (glassAvailable) glassBackdrop else null,
-                liquidBackdrop = if (glassAvailable && settings.blurEnabled) liquidBackdrop else null,
-                prefillName = bookmarkPrefillName,
-                prefillUrl = bookmarkPrefillUrl,
-                onDismiss = { showBookmarkCreate = false },
-                onConfirm = { name, url, group, pinned ->
-                    favorites.add(name, url, group, pinned)
-                    showBookmarkCreate = false
-                    android.widget.Toast.makeText(context, tr("添加书签成功"), android.widget.Toast.LENGTH_SHORT).show()
-                },
-            )
-}
-
-BrowserChunk {
-            FavoriteEditor(
-                show = showFavEditor,
-                initial = favorites.items.getOrNull(editingFavIndex),
-                backdrop = if (glassAvailable) glassBackdrop else null,
-                onDismiss = { showFavEditor = false },
-                onConfirm = { name, url ->
-                    if (editingFavIndex >= 0) {
-                        favorites.update(editingFavIndex, name, url)
-                    } else {
-                        favorites.add(name, url)
-                    }
-                    showFavEditor = false
-                },
-            )
-
-            GroupBookmarkPopup(
-                show = showGroupPopup,
-                rootPath = groupPopupPath,
-                anchorBounds = groupPopupAnchor,
-                favorites = favorites,
-                // 排列方式存在加密库里：切换后立即落盘，重启后保持
-                gridMode = favorites.groupPopupGrid,
-                onGridModeChange = { favorites.updateGroupPopupGrid(it) },
-                backdrop = if (glassAvailable && settings.blurEnabled) glassBackdrop else null,
-                onDismiss = { showGroupPopup = false },
-                onOpenUrl = { url ->
-                    showGroupPopup = false
-                    state.openOrReuse(url, tab.incognito, fromStartPage = true)
-                },
-            )
-
-            run {
-                val cap = settings.homeQuickRows.coerceAtLeast(1) * HOME_QUICK_COLS
-                val all = settings.homeQuickItems
-                QuickMenuPickerDialog(
-                    show = showQuickPicker,
-                    candidates = quickMenuCandidates(),
-                    pickedActions = all.take(cap).toSet(),
-                    backdrop = if (glassAvailable) glassBackdrop else null,
-                    onDismiss = { showQuickPicker = false },
-                    onPick = { action ->
-                        // 追加到可见部分的末尾；被行数挡住的旧项排在后面（去重）
-                        settings.updateHomeQuickItems(all.take(cap) + action + all.drop(cap).filter { it != action })
-                        showQuickPicker = false
-                    },
-                )
-            }
-
-            GroupPickerDialog(
-                show = showGroupPicker,
-                favorites = favorites,
-                pickedIds = homeGroups.map { it.id },
-                backdrop = if (glassAvailable) glassBackdrop else null,
-                onDismiss = { showGroupPicker = false },
-                onPick = { path ->
-                    // 登记（已登记则返回原 id）拿到稳定 id，追加到末尾
-                    val id = favorites.registerFolder(path)
-                    favorites.updateHomeGroupIds(homeGroups.map { it.id } + id)
-                    showGroupPicker = false
-                },
-            )
-}
+    // ---- 对话框 / 弹窗（BrowserDialogHost.kt）----
+    ui.BrowserDialogHost(
+        settings = settings,
+        context = context,
+        state = state,
+        favorites = favorites,
+        homeGroups = homeGroups,
+        scope = scope,
+        liquidBackdrop = liquidBackdrop,
+        extensions = extensions,
+        defaultBrowserLauncher = defaultBrowserLauncher,
+        tab = tab,
+        glassAvailable = glassAvailable,
+        glassBackdrop = glassBackdrop,
+        pushPage = ::pushPage,
+        openInBrowser = ::openInBrowser,
+        launchers = launchers,
+        box = this@Box,
+    )
     }
     // 引导进行中进入二级页面（备份 / Firefox 同步）：浏览主页被推到下面，转场里不能露出首页，用纯色盖住
     if (settings.onboardingPending || onboardingReplay) {
@@ -3045,161 +751,23 @@ BrowserChunk {
     }
     }
     }
-    entry<AppRoute.Settings> {
-        SettingsScreen(
-            settings = settings,
-            onBack = { popPage() },
-            onApplyUserAgent = { state.applyUserAgent(it) },
-            onOpenDownloads = { pushPage(AppRoute.Downloads) },
-            onOpenScripts = { pushPage(AppRoute.Extensions) },
-            onOpenGeckoExtensions = { pushPage(AppRoute.GeckoExtensions) },
-            onOpenGeckoProtection = { pushPage(AppRoute.GeckoProtectionPage) },
-            onOpenGeckoDebug = { pushPage(AppRoute.GeckoDebugPage) },
-            onOpenWebViewDebug = { pushPage(AppRoute.WebViewDebugPage) },
-            onOpenAdBlock = { pushPage(AppRoute.AdBlockPage) },
-            onOpenCookies = { pushPage(AppRoute.CookiePage) },
-            onOpenPasswords = { pushPage(AppRoute.PasswordPage) },
-            onOpenPrivacyEnhance = { pushPage(AppRoute.PrivacyEnhancePage) },
-            onOpenBookmarks = { pushPage(AppRoute.Library(0)) },
-            onOpenBackup = { pushPage(AppRoute.BackupPage) },
-            onOpenAbout = { pushPage(AppRoute.About) },
-            onOpenGuide = {
-                // 先退回浏览主界面（引导只在 backStack 只剩主界面时摆放），再从第一步开始
-                popToBrowser()
-                onboardingStep = 0
-                onboardingReplay = true
-            },
-            onPageEnhancementsChange = { extensions.setAllEnabled(it) },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.About> {
-        AboutScreen(
-            onBack = { popPage() },
-            onOpenUrl = { openInBrowser(it) },
-            blurEnabled = settings.blurEnabled,
-            updateChannel = settings.updateChannel,
-            onUpdateChannelChange = { settings.updateUpdateChannel(it) },
-            onOpenPrivacyPolicy = { pushPage(AppRoute.PrivacyPolicyPage) },
-        )
-    }
-    entry<AppRoute.PrivacyPolicyPage> {
-        PrivacyPolicyScreen(
-            onBack = { popPage() },
-            onOpenUrl = { openInBrowser(it) },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.Downloads> {
-        DownloadsScreen(
-            onBack = { popPage() },
-            blurEnabled = settings.blurEnabled,
-            multiThread = settings.downloadMultiThread,
-            onMultiThreadChange = { settings.updateDownloadMultiThread(it) },
-            threads = settings.downloadThreads,
-            onThreadsChange = { settings.updateDownloadThreads(it) },
-            multiThreadMinMb = settings.downloadMultiThreadMinMb,
-            onMultiThreadMinMbChange = { settings.updateDownloadMultiThreadMinMb(it) },
-            externalDownloader = settings.externalDownloader,
-            onExternalDownloaderChange = { settings.updateExternalDownloader(it) },
-        )
-    }
-    entry<AppRoute.AdBlockPage> {
-        AdBlockScreen(
-            settings = settings,
-            onBack = { popPage() },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.CookiePage> {
-        CookieScreen(
-            settings = settings,
-            currentUrl = tab.url,
-            onBack = { popPage() },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.PasswordPage> {
-        PasswordScreen(
-            onBack = { popPage() },
-            onOpenFxa = { pushPage(AppRoute.FxaPage) },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.FxaPage> {
-        FxaScreen(
-            onBack = { popPage() },
-            currentTitle = tab.title,
-            currentUrl = tab.url,
-            onOpenUrl = { u -> state.newTab(u); popToBrowser() },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.BackupPage> {
-        BackupScreen(
-            onBack = { popPage() },
-            onOpenFxa = { pushPage(AppRoute.FxaPage) },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.PrivacyEnhancePage> {
-        PrivacyEnhanceScreen(
-            settings = settings,
-            onBack = { popPage() },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.Extensions> {
-        ExtensionsScreen(
-            store = extensions,
-            settings = settings,
-            onBack = { popPage() },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.GeckoProtectionPage> {
-        GeckoProtectionScreen(
-            onBack = { popPage() },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.WebViewDebugPage> {
-        WebViewDebugScreen(
-            onBack = { popPage() },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.GeckoDebugPage> {
-        GeckoDebugScreen(
-            onBack = { popPage() },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.GeckoExtensions> {
-        GeckoExtensionsScreen(
-            onBack = { popPage() },
-            // 拓展的「选项」页（moz-extension://…）在新标签里打开
-            onOpenUrl = { url ->
-                popToBrowser()
-                state.newTab(target = url, incognito = false)
-            },
-            blurEnabled = settings.blurEnabled,
-        )
-    }
-    entry<AppRoute.Library> { route ->
-        LibraryScreen(
-            favorites = favorites,
-            store = history,
-            onBack = { popPage() },
-            onOpen = { url ->
-                popToBrowser()
-                state.openOrReuse(url, tab.incognito, navigateIfDeepLink = true)
-            },
-            initialTab = route.tab,
-            blurEnabled = settings.blurEnabled,
-            initialGroup = route.group,
-        )
-    }
+    entry<AppRoute.Settings> { nav.SubPage(AppRoute.Settings) }
+    entry<AppRoute.About> { nav.SubPage(AppRoute.About) }
+    entry<AppRoute.PrivacyPolicyPage> { nav.SubPage(AppRoute.PrivacyPolicyPage) }
+    entry<AppRoute.Downloads> { nav.SubPage(AppRoute.Downloads) }
+    entry<AppRoute.AdBlockPage> { nav.SubPage(AppRoute.AdBlockPage) }
+    entry<AppRoute.CookiePage> { nav.SubPage(AppRoute.CookiePage) }
+    entry<AppRoute.PasswordPage> { nav.SubPage(AppRoute.PasswordPage) }
+    entry<AppRoute.FxaPage> { nav.SubPage(AppRoute.FxaPage) }
+    entry<AppRoute.BackupPage> { nav.SubPage(AppRoute.BackupPage) }
+    entry<AppRoute.PrivacyEnhancePage> { nav.SubPage(AppRoute.PrivacyEnhancePage) }
+    entry<AppRoute.Extensions> { nav.SubPage(AppRoute.Extensions) }
+    entry<AppRoute.GeckoProtectionPage> { nav.SubPage(AppRoute.GeckoProtectionPage) }
+    entry<AppRoute.WebViewDebugPage> { nav.SubPage(AppRoute.WebViewDebugPage) }
+    entry<AppRoute.GeckoDebugPage> { nav.SubPage(AppRoute.GeckoDebugPage) }
+    entry<AppRoute.GeckoExtensions> { nav.SubPage(AppRoute.GeckoExtensions) }
+    entry<AppRoute.WebViewExtensions> { nav.SubPage(AppRoute.WebViewExtensions) }
+    entry<AppRoute.Library> { route -> nav.SubPage(route) }
     }
     // 用户引导：盖在最上层。进入二级页面（备份 / Firefox 同步）时只是「不摆放」（visible = false），并不撤出组合：
     // 当前步骤、滚动位置和背景动画都留着，返回时第一帧就是完整的引导页，不会再闪出下面的浏览器首页
@@ -3220,425 +788,4 @@ BrowserChunk {
         )
     }
     }
-}
-
-/* ------------------------------ 玻璃 ------------------------------ */
-
-
-/** UA 选择：GlassBottomSheet 预设 + 自定义 */
-@Composable
-internal fun UaDialog(
-    show: Boolean,
-    initial: String,
-    backdrop: top.yukonga.miuix.kmp.blur.Backdrop?,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    var custom by remember(show) { mutableStateOf(initial) }
-    AppBottomSheet(
-        show = show,
-        title = tr("UA 标识管理"),
-        backdrop = backdrop,
-        onDismissRequest = onDismiss,
-    ) {
-        // 导航栏留白由 AppBottomSheet 统一处理（沉浸 sheet），这里不再自己加
-        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-            UA_PRESETS.forEach { preset ->
-                val presetIcon = when (preset.name) {
-                    tr("跟随系统") -> MiuixIcons.Glass.Settings
-                    "Android Chrome" -> MiuixIcons.Glass.Phone
-                    tr("桌面 Chrome") -> MiuixIcons.Glass.HorizontalSplit
-                    "iPhone Safari" -> MiuixIcons.Glass.Phone
-                    else -> MiuixIcons.Glass.Info
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onConfirm(preset.value) }
-                        .padding(horizontal = 10.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val netIcon = rememberFirstIcon(preset.iconUrls)
-                    if (netIcon != null) {
-                        Image(
-                            bitmap = netIcon,
-                            contentDescription = null,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)),
-                        )
-                    } else {
-                        Icon(
-                            imageVector = presetIcon,
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp).padding(1.dp),
-                            tint = MiuixTheme.colorScheme.primary,
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        text = preset.name,
-                        fontSize = 15.sp,
-                        color = if (preset.value == initial) {
-                            MiuixTheme.colorScheme.primary
-                        } else {
-                            MiuixTheme.colorScheme.onSurface
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (preset.value == initial) {
-                        Spacer(Modifier.width(8.dp))
-                        Icon(
-                            imageVector = MiuixIcons.Basic.Check,
-                            contentDescription = tr("已选中"),
-                            tint = MiuixTheme.colorScheme.primary,
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            TextField(
-                value = custom,
-                onValueChange = { custom = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = tr("UA 字符串"),
-                singleLine = true,
-            )
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                AppDialogButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                    Text(text = tr("取消"), style = MiuixTheme.textStyles.button)
-                }
-                AppDialogButton(
-                    onClick = { onConfirm(custom) },
-                    modifier = Modifier.weight(1f),
-                    role = GlassDialogButtonRole.Primary,
-                ) {
-                    Text(text = tr("使用"), style = MiuixTheme.textStyles.button)
-                }
-            }
-        }
-    }
-}
-
-/** 页内查找：GlassDialog */
-@Composable
-internal fun FindDialog(
-    show: Boolean,
-    backdrop: top.yukonga.miuix.kmp.blur.Backdrop?,
-    onDismiss: () -> Unit,
-    onQuery: (String) -> Unit,
-    onPrev: () -> Unit,
-    onNext: () -> Unit,
-) {
-    var text by remember { mutableStateOf("") }
-    AppGlassDialog(
-        show = show,
-        title = tr("查找页内"),
-        backdrop = backdrop,
-        onDismissRequest = onDismiss,
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            TextField(
-                value = text,
-                onValueChange = {
-                    text = it
-                    onQuery(it)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = tr("查找内容"),
-                useLabelAsPlaceholder = true,
-                singleLine = true,
-            )
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                AppDialogButton(onClick = onPrev, modifier = Modifier.weight(1f)) {
-                    Text(text = tr("上一个"), style = MiuixTheme.textStyles.button)
-                }
-                AppDialogButton(onClick = onNext, modifier = Modifier.weight(1f)) {
-                    Text(text = tr("下一个"), style = MiuixTheme.textStyles.button)
-                }
-                AppDialogButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    role = GlassDialogButtonRole.Primary,
-                ) {
-                    Text(text = tr("关闭"), style = MiuixTheme.textStyles.button)
-                }
-            }
-        }
-    }
-}
-
-
-
-
-/**
- * 首页 Mafari 标志：液态玻璃字。
- * - 有壁纸：字形内部显示字后面的那一块壁纸（轻微放大模拟折射、提亮加饱和），颜色随背景变化；
- * - 无壁纸：退回主题色的半透明玻璃渐变；
- * - 再叠：内侧左上高光 / 右下暗边、对角渐变镜面描边、字下柔和投影。
- * 字形遮罩用 saveLayer + BlendMode（SrcIn / DstOut）实现，不依赖 RuntimeShader。
- */
-@Composable
-internal fun GlassLogoText(text: String, fontSize: Int, wallpaper: ImageBitmap?) {
-    val dark = isAppDarkTheme()
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val style = remember(fontSize) {
-        TextStyle(fontSize = fontSize.sp, fontWeight = FontWeight.Black, color = Color.Black)
-    }
-    val layout = remember(text, style) { measurer.measure(text, style) }
-    val pad = with(density) { 14.dp.toPx() }
-    val widthDp = with(density) { (layout.size.width + pad * 2).toDp() }
-    val heightDp = with(density) { (layout.size.height + pad * 2).toDp() }
-    val windowSize = LocalWindowInfo.current.containerSize
-    var origin by remember { mutableStateOf(Offset.Zero) }
-
-    Canvas(
-        modifier = Modifier
-            .size(widthDp, heightDp)
-            .onGloballyPositioned { origin = it.positionInWindow() },
-    ) {
-        val textTopLeft = Offset(pad, pad)
-        val bounds = androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height)
-        val d = this.density
-        fun mask(offset: Offset = Offset.Zero) {
-            drawText(layout, color = Color.Black, topLeft = textTopLeft + offset)
-        }
-
-        val gTop = textTopLeft.y
-        val gBottom = textTopLeft.y + layout.size.height
-
-        // 1. 字外投影：先画模糊投影，再把字形本身挖掉，只留字外的柔和阴影（玻璃本体是透的，不能让阴影透进字里）
-        drawIntoCanvas { canvas ->
-            canvas.saveLayer(bounds, androidx.compose.ui.graphics.Paint())
-            val fw = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-            fw.maskFilter = android.graphics.BlurMaskFilter(9f * d, android.graphics.BlurMaskFilter.Blur.NORMAL)
-            fw.color = android.graphics.Color.argb(if (dark) 110 else 62, 0, 0, 0)
-            fw.textSize = fontSize.sp.toPx()
-            fw.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 900, false)
-            val baseline = textTopLeft.y - fw.fontMetrics.ascent
-            canvas.nativeCanvas.drawText(text, textTopLeft.x, baseline + 4f * d, fw)
-            drawText(layout, color = Color.Black, topLeft = textTopLeft, blendMode = BlendMode.DstOut)
-            canvas.restore()
-        }
-
-        // 2. 玻璃本体：字形内显示背后的壁纸——放大折射、提亮、加饱和，再叠一层上亮下淡的磨砂白
-        drawIntoCanvas { canvas ->
-            canvas.saveLayer(bounds, androidx.compose.ui.graphics.Paint())
-            mask()
-            if (wallpaper != null && windowSize.width > 0 && windowSize.height > 0) {
-                val bw = wallpaper.width.toFloat()
-                val bh = wallpaper.height.toFloat()
-                val scale = max(windowSize.width / bw, windowSize.height / bh)
-                val x0 = (windowSize.width - bw * scale) / 2f
-                val y0 = (windowSize.height - bh * scale) / 2f
-                val lens = 0.78f
-                val w = size.width / scale * lens
-                val h = size.height / scale * lens
-                val cx = (origin.x + size.width / 2f - x0) / scale
-                val cy = (origin.y + size.height / 2f - y0) / scale
-                val srcX = (cx - w / 2f).toInt().coerceIn(0, wallpaper.width - 1)
-                val srcY = (cy - h / 2f).toInt().coerceIn(0, wallpaper.height - 1)
-                val srcW = w.toInt().coerceIn(1, wallpaper.width - srcX)
-                val srcH = h.toInt().coerceIn(1, wallpaper.height - srcY)
-                val boost = ColorMatrix().apply {
-                    setToSaturation(1.7f)
-                    this[0, 4] = 46f
-                    this[1, 4] = 46f
-                    this[2, 4] = 46f
-                }
-                drawImage(
-                    image = wallpaper,
-                    srcOffset = IntOffset(srcX, srcY),
-                    srcSize = IntSize(srcW, srcH),
-                    dstOffset = IntOffset.Zero,
-                    dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-                    colorFilter = ColorFilter.colorMatrix(boost),
-                    filterQuality = androidx.compose.ui.graphics.FilterQuality.Medium,
-                    blendMode = BlendMode.SrcIn,
-                )
-            } else {
-                // 无壁纸：用主题色做底
-                drawRect(
-                    color = if (dark) Color(0xFF5A6578) else Color(0xFFA9B8CE),
-                    blendMode = BlendMode.SrcIn,
-                )
-            }
-            // 磨砂白：整体提亮，顶部更亮，像光从上面打进玻璃
-            drawRect(
-                brush = Brush.verticalGradient(
-                    listOf(
-                        Color.White.copy(alpha = if (dark) 0.40f else 0.52f),
-                        Color.White.copy(alpha = if (dark) 0.18f else 0.26f),
-                        Color.White.copy(alpha = if (dark) 0.28f else 0.36f),
-                    ),
-                    startY = gTop,
-                    endY = gBottom,
-                ),
-                blendMode = BlendMode.SrcAtop,
-            )
-            canvas.restore()
-        }
-
-        // 3. 内侧下缘暗影（玻璃厚度）：字形减去上移的字形，剩下底部窄带，渐变到透明
-        drawIntoCanvas { canvas ->
-            canvas.saveLayer(bounds, androidx.compose.ui.graphics.Paint())
-            mask()
-            drawText(layout, color = Color.Black, topLeft = textTopLeft + Offset(-1.5f * d, -4f * d), blendMode = BlendMode.DstOut)
-            drawRect(
-                brush = Brush.verticalGradient(
-                    listOf(Color.Transparent, Color.Black.copy(alpha = if (dark) 0.40f else 0.26f)),
-                    startY = gTop,
-                    endY = gBottom,
-                ),
-                blendMode = BlendMode.SrcIn,
-            )
-            canvas.restore()
-        }
-        // 4. 内侧上缘高光：字形减去下移的字形，剩下顶部亮带，向下淡出
-        drawIntoCanvas { canvas ->
-            canvas.saveLayer(bounds, androidx.compose.ui.graphics.Paint())
-            mask()
-            drawText(layout, color = Color.Black, topLeft = textTopLeft + Offset(1.5f * d, 3.5f * d), blendMode = BlendMode.DstOut)
-            drawRect(
-                brush = Brush.verticalGradient(
-                    listOf(Color.White.copy(alpha = 0.95f), Color.White.copy(alpha = 0.15f)),
-                    startY = gTop,
-                    endY = gBottom,
-                ),
-                blendMode = BlendMode.SrcIn,
-            )
-            canvas.restore()
-        }
-        // 5. 左右两侧的内侧边缘光：同样用「字形减去平移字形」得到，只在字形外缘，
-        //    不描轮廓线，所以字体自带的重叠笔画（a / f / r）内部不会出现线条
-        drawIntoCanvas { canvas ->
-            canvas.saveLayer(bounds, androidx.compose.ui.graphics.Paint())
-            mask()
-            drawText(layout, color = Color.Black, topLeft = textTopLeft + Offset(1.4f * d, 0f), blendMode = BlendMode.DstOut)
-            drawRect(Color.White.copy(alpha = 0.5f), blendMode = BlendMode.SrcIn)
-            canvas.restore()
-        }
-        drawIntoCanvas { canvas ->
-            canvas.saveLayer(bounds, androidx.compose.ui.graphics.Paint())
-            mask()
-            drawText(layout, color = Color.Black, topLeft = textTopLeft + Offset(-1.4f * d, 0f), blendMode = BlendMode.DstOut)
-            drawRect(Color.White.copy(alpha = 0.3f), blendMode = BlendMode.SrcIn)
-            canvas.restore()
-        }
-    }
-}
-
-/** 抓取远程脚本 */
-internal fun fetchRemoteScript(url: String): String? = runCatching {
-    HttpFetcher.getText(
-        url,
-        HttpFetcher.Options(connectTimeoutMs = 8000, readTimeoutMs = 8000, maxBytes = 8 * 1024 * 1024, userAgent = "Mozilla/5.0 mafari"),
-    )
-}.getOrNull()
-
-/** 下拉刷新指示器的宿主：pullProgress 每个触摸事件都在变，把读取隔离在这个小组合里，不让整个 BrowserScreen 跟着重组 */
-/**
- * 把一段 composable 内容放进独立的 lambda 方法里（不产生任何布局节点）。
- * 用来拆分 BrowserScreen 里过大的内容 lambda，避免 Kotlin 编译器生成超大方法而 OOM。
- */
-@Composable
-private fun BrowserChunk(content: @Composable () -> Unit) {
-    content()
-}
-
-@Composable
-private fun BoxScope.PullSpinnerHost(tab: BrowserTab) {
-    val p = tab.pullProgress
-    if (p > 0.05f) {
-        // 宿主铺满全屏（盖住状态栏）：从状态栏 / 居中摄像头挖孔的下沿再往下留 18dp，避免与摄像头重叠
-        val topInset = with(LocalDensity.current) {
-            maxOf(WindowInsets.statusBars.getTop(this), WindowInsets.displayCutout.getTop(this)).toDp()
-        }
-        RefreshSpinner(
-            progress = p,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = topInset + 18.dp),
-        )
-    }
-}
-
-/** 顶部下拉刷新指示器：直接复用轻应用（WebAppActivity）的 RefreshSpinnerView，观感与动效完全一致 */
-@Composable
-internal fun RefreshSpinner(progress: Float, modifier: Modifier = Modifier) {
-    val bg = MiuixTheme.colorScheme.surface.copy(alpha = 0.92f).toArgb()
-    AndroidView(
-        modifier = modifier
-            .size(34.dp)
-            .shadow(6.dp, CircleShape),
-        factory = { ctx ->
-            RefreshSpinnerView(ctx).apply {
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setColor(bg)
-                }
-            }
-        },
-        update = { v ->
-            (v.background as? android.graphics.drawable.GradientDrawable)?.setColor(bg)
-            v.progress = progress
-            v.alpha = 0.4f + 0.6f * progress
-            val scale = 0.7f + 0.3f * progress
-            v.scaleX = scale
-            v.scaleY = scale
-        },
-    )
-}
-
-/** 从 content:// 读壁纸 */
-@Composable
-internal fun rememberBlurredWallpaper(uri: String, enabled: Boolean, version: Int): ImageBitmap? {
-    val context = LocalContext.current
-    // 首帧同步读缓存（进程内命中免费，否则解码磁盘上那张 360px 小图）：命中时第一帧就是模糊图
-    val first = remember(uri, enabled, version) {
-        if (enabled && uri.isNotBlank()) WallpaperBlurCache.peek(context, uri)?.asImageBitmap() else null
-    }
-    val image by produceState<ImageBitmap?>(initialValue = first, uri, enabled, version) {
-        // 换壁纸 / 开关变化时先清掉上一张的旧图，缓存没命中才去 IO 线程生成
-        value = first
-        if (first == null && enabled && uri.isNotBlank()) {
-            value = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                WallpaperBlurCache.getOrCreate(context, uri)?.asImageBitmap()
-            }
-        }
-    }
-    return image
-}
-
-/** [enabled] 为 false 时不解码（模糊图已就绪、屏幕上用不到整图）。 */
-@Composable
-internal fun rememberWallpaper(uri: String, version: Int = 0, enabled: Boolean = true): ImageBitmap? {
-    val context = LocalContext.current
-    val image by produceState<ImageBitmap?>(initialValue = null, uri, version, enabled) {
-        value = if (!enabled || uri.isBlank()) {
-            null
-        } else {
-            withContext(kotlinx.coroutines.Dispatchers.IO) {
-                // 只解到屏幕所需的尺寸（原先是整张原图：4000×3000 的照片要占 ~48MB 并整张上传 GPU），并带进程内缓存
-                val dm = context.resources.displayMetrics
-                WallpaperImage.load(context, uri, version, dm.widthPixels, dm.heightPixels)?.asImageBitmap()
-            }
-        }
-    }
-    return image
-}
-
-/** 把「执行菜单功能」转发给稍后才定义的函数（首页快捷菜单要在它声明之前就引用到） */
-private class MenuActionRunner {
-    var run: (MenuAction) -> Unit = {}
 }

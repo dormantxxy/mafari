@@ -242,6 +242,8 @@ import top.yukonga.miuix.kmp.glass.GlassPopupItem
 import top.yukonga.miuix.kmp.material.GlassShape
 import top.yukonga.miuix.kmp.material.GlassEdgeStrokes
 import top.yukonga.miuix.kmp.glass.glassPanel
+import top.yukonga.miuix.kmp.squircle.squircleBorder
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /* ------------------------------ 主页 ------------------------------ */
@@ -402,6 +404,9 @@ internal fun StartPage(
     showFavorites: Boolean,
     /** 个人收藏在首页显示的行数（每行 3 个） */
     favRows: Int = HOME_FAV_ROWS_DEFAULT,
+    /** 个人收藏排列方式：false 图标在左（每行 3 个），true 图标在上标题在下（每行个数随宽度变化） */
+    favGrid: Boolean = false,
+    onFavGridChange: (Boolean) -> Unit = {},
     /** 点击「更多」：跳转书签页 */
     onOpenBookmarks: () -> Unit = {},
     showPrivacy: Boolean,
@@ -422,6 +427,8 @@ internal fun StartPage(
     onAdd: () -> Unit,
     /** 当前标签是 Gecko 内核：隐私报告改为显示 Gecko 高级保护清单 */
     geckoMode: Boolean = false,
+    /** 当前标签是无痕标签：快捷菜单里的「无痕浏览」高亮 */
+    incognito: Boolean = false,
     /** 首页顶部的 LOGO 标识 */
     showLogo: Boolean = true,
     /** 底部导航栏被设为靠上：首页内容顶部让出栏的位置，底部不再留栏的空间 */
@@ -593,6 +600,8 @@ internal fun StartPage(
                                 headerModifier = handle,
                                 favorites = favorites,
                                 rows = favRows,
+                                grid = favGrid,
+                                onGridChange = onFavGridChange,
                                 onOpenBookmarks = onOpenBookmarks,
                                 wallpaper = wallpaper,
                                 wallpaperBackdrop = wallpaperBackdrop,
@@ -608,6 +617,7 @@ internal fun StartPage(
                                 onAdd = onAdd,
                             )
                             HOME_QUICK -> QuickMenuBlock(
+                                incognito = incognito,
                                 modifier = itemMod,
                                 headerModifier = handle,
                                 actions = quickActions,
@@ -720,6 +730,8 @@ internal fun FavoritesBlock(
     headerModifier: Modifier,
     favorites: List<Favorite>,
     rows: Int,
+    grid: Boolean = false,
+    onGridChange: (Boolean) -> Unit = {},
     onOpenBookmarks: () -> Unit,
     wallpaper: ImageBitmap?,
     wallpaperBackdrop: LayerBackdrop?,
@@ -734,17 +746,33 @@ internal fun FavoritesBlock(
     onEdit: (Int) -> Unit,
     onAdd: () -> Unit,
 ) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        HomeBlockHeader(title = tr("收藏"), headerModifier = headerModifier, editing = editing, onDone = onToggleEdit)
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+    // 每行个数：默认排列固定 3 个；图标在上的排列按可用宽度自适应（至少 4 个，越宽越多）
+    val columns = if (grid) {
+        ((maxWidth + FAV_GAP) / (FAV_GRID_MIN_CELL + FAV_GAP)).toInt().coerceAtLeast(4)
+    } else {
+        3
+    }
+    val cellHeight = if (grid) FAV_GRID_CELL_H else FAV_LIST_CELL_H
+    Column(modifier = Modifier.fillMaxWidth()) {
+        HomeBlockHeader(
+            title = tr("收藏"),
+            headerModifier = headerModifier,
+            editing = editing,
+            onDone = onToggleEdit,
+            actions = { GroupLayoutToggle(showGridIcon = !grid, onClick = { onGridChange(!grid) }) },
+        )
 
         Spacer(Modifier.height(6.dp))
-        // 容量 = 行数 × 3；超出时最后一格让给「更多」
-        val capacity = rows.coerceIn(1, HOME_FAV_ROWS_MAX) * 3
+        // 容量 = 行数 × 每行个数；超出时最后一格让给「更多」
+        val capacity = rows.coerceIn(1, HOME_FAV_ROWS_MAX) * columns
         val overflow = favorites.size > capacity
         val visibleFavorites = if (overflow) favorites.take(capacity - 1) else favorites
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             FavoriteGrid(
                 favorites = visibleFavorites,
+                columns = columns,
+                vertical = grid,
                 showMore = overflow,
                 onMore = onOpenBookmarks,
                 wallpaper = wallpaper,
@@ -764,12 +792,12 @@ internal fun FavoritesBlock(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(58.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .border(
+                            .height(cellHeight)
+                            .squircleClip(16.dp)
+                            .squircleBorder(
                                 width = 1.dp,
                                 color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(16.dp),
+                                cornerRadius = 16.dp,
                             )
                             .clickable(onClick = onAdd),
                         contentAlignment = Alignment.Center,
@@ -780,12 +808,19 @@ internal fun FavoritesBlock(
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
-                    Spacer(Modifier.weight(2f))
+                    Spacer(Modifier.weight((columns - 1).toFloat()))
                 }
             }
         }
     }
+    }
 }
+
+/** 收藏磁贴之间的间距，以及两种排列的磁贴高度 / 图标在上排列的最小单格宽度。 */
+private val FAV_GAP = 10.dp
+private val FAV_LIST_CELL_H = 58.dp
+private val FAV_GRID_CELL_H = 74.dp
+private val FAV_GRID_MIN_CELL = 76.dp
 
 /**
  * 取样源（壁纸）是否已经是磁盘缓存里预模糊好的图。为 true 时首页卡片不再对它叠加第二次实时模糊：
@@ -1301,6 +1336,9 @@ internal fun <T> ReorderTileGrid(
 @Composable
 internal fun FavoriteGrid(
     favorites: List<Favorite>,
+    columns: Int = 3,
+    /** true：图标在上标题在下 */
+    vertical: Boolean = false,
     showMore: Boolean = false,
     onMore: () -> Unit = {},
     wallpaper: ImageBitmap?,
@@ -1318,9 +1356,9 @@ internal fun FavoriteGrid(
     val moreTap by rememberUpdatedState(guard { onMore() })
     ReorderTileGrid(
         items = favorites,
-        columns = 3,
-        gap = 10.dp,
-        cellHeight = { 58.dp },
+        columns = columns,
+        gap = FAV_GAP,
+        cellHeight = { if (vertical) FAV_GRID_CELL_H else FAV_LIST_CELL_H },
         editing = editing,
         guard = guard,
         onTap = { index, favorite, isEditing -> if (isEditing) onEdit(index) else onOpen(favorite.url) },
@@ -1329,6 +1367,7 @@ internal fun FavoriteGrid(
         hasTrailing = showMore,
         trailing = { mod ->
             FavoriteMoreTile(
+                height = if (vertical) FAV_GRID_CELL_H else FAV_LIST_CELL_H,
                 wallpaper = wallpaper,
                 wallpaperBackdrop = wallpaperBackdrop,
                 liquidBackdrop = liquidBackdrop,
@@ -1339,6 +1378,7 @@ internal fun FavoriteGrid(
     ) { favorite, index, mod ->
         FavoriteTile(
             favorite = favorite,
+            vertical = vertical,
             wallpaper = wallpaper,
             wallpaperBackdrop = wallpaperBackdrop,
             liquidBackdrop = liquidBackdrop,
@@ -1353,6 +1393,7 @@ internal fun FavoriteGrid(
 /** 「更多」磁贴：收藏数量超出所选行数时占据最后一格，点击进入书签页。 */
 @Composable
 internal fun FavoriteMoreTile(
+    height: Dp = FAV_LIST_CELL_H,
     wallpaper: ImageBitmap?,
     wallpaperBackdrop: LayerBackdrop?,
     liquidBackdrop: com.kyant.backdrop.Backdrop?,
@@ -1361,7 +1402,7 @@ internal fun FavoriteMoreTile(
 ) {
     Box(
         modifier = modifier
-            .height(58.dp)
+            .height(height)
             .homeGlass(wallpaperBackdrop, blurEnabled, wallpaper != null, liquidBackdrop),
         contentAlignment = Alignment.Center,
     ) {
@@ -1379,6 +1420,7 @@ internal fun FavoriteMoreTile(
 @Composable
 internal fun FavoriteTile(
     favorite: Favorite,
+    vertical: Boolean = false,
     wallpaper: ImageBitmap?,
     wallpaperBackdrop: LayerBackdrop?,
     liquidBackdrop: com.kyant.backdrop.Backdrop?,
@@ -1389,24 +1431,43 @@ internal fun FavoriteTile(
 ) {
     Box(
         modifier = modifier
-            .height(58.dp)
+            .height(if (vertical) FAV_GRID_CELL_H else FAV_LIST_CELL_H)
             .homeGlass(wallpaperBackdrop, blurEnabled, wallpaper != null, liquidBackdrop),
         contentAlignment = Alignment.Center,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            FaviconBadge(url = favorite.url, size = 16.dp, corner = 4.dp)
-            Text(
-                text = favorite.name,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                color = MiuixTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        if (vertical) {
+            // 图标在上、标题在下
+            Column(
+                modifier = Modifier.padding(horizontal = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+            ) {
+                FaviconBadge(url = favorite.url, size = 28.dp, corner = 7.dp)
+                Text(
+                    text = favorite.name,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                FaviconBadge(url = favorite.url, size = 16.dp, corner = 4.dp)
+                Text(
+                    text = favorite.name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         if (editing) TileRemoveBadge(onClick = onRemove)
         HomeOutlineOverlay(hasWallpaper = wallpaper != null, radius = 16.dp)
@@ -1457,6 +1518,8 @@ internal fun HomeBlockHeader(
     headerModifier: Modifier,
     editing: Boolean,
     onDone: () -> Unit,
+    /** 编辑态下「完成」左侧的附加操作（如排列方式切换） */
+    actions: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -1473,17 +1536,20 @@ internal fun HomeBlockHeader(
             color = MiuixTheme.colorScheme.onSurface,
         )
         if (editing) {
-            AppTextButton(
-                text = tr("完成"),
-                onClick = onDone,
-                primary = true,
-                inPage = true,
-                minHeight = 28.dp,
-                minWidth = 52.dp,
-                cornerRadius = 14.dp,
-                insideMargin = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                textStyle = TextStyle(fontSize = 12.sp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                actions?.invoke()
+                AppTextButton(
+                    text = tr("完成"),
+                    onClick = onDone,
+                    primary = true,
+                    inPage = true,
+                    minHeight = 28.dp,
+                    minWidth = 52.dp,
+                    cornerRadius = 14.dp,
+                    insideMargin = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                    textStyle = TextStyle(fontSize = 12.sp),
+                )
+            }
         }
     }
 }
@@ -1752,6 +1818,7 @@ private val QUICK_LABEL_BLOCK = 16.dp
  */
 @Composable
 internal fun QuickMenuBlock(
+    incognito: Boolean = false,
     modifier: Modifier,
     headerModifier: Modifier,
     actions: List<MenuAction>,
@@ -1846,6 +1913,7 @@ internal fun QuickMenuBlock(
                         action = action,
                         hasWallpaper = hasWallpaper,
                         editing = editing,
+                        incognito = incognito,
                         modifier = mod,
                         onRemove = { onRemove(index) },
                     )
@@ -1862,12 +1930,14 @@ private fun QuickMenuTile(
     action: MenuAction,
     hasWallpaper: Boolean,
     editing: Boolean,
+    incognito: Boolean = false,
     modifier: Modifier = Modifier,
     onRemove: () -> Unit,
 ) {
     // 状态型功能：去广告开着 → 红；同步进行中 → 主题色 + 「同步中」（与更多菜单一致）
     val syncing = action == MenuAction.Sync && dev.dsh.miuixbrowser.browser.MenuSyncState.syncing
     val tint = when {
+        action == MenuAction.Incognito && incognito -> MenuIncognitoPurple
         action == MenuAction.AdBlock && dev.dsh.miuixbrowser.adblock.AdBlock.enabled -> Color(0xFFE53935)
         syncing -> MiuixTheme.colorScheme.primary
         else -> MiuixTheme.colorScheme.onSurface
@@ -2122,7 +2192,7 @@ private fun isDirectChild(path: String, parent: String): Boolean =
 
 /** 排列方式切换图标：[showGridIcon] 为 true 画 2×2 方块（点击切到横排），否则画三条横线（点击切回竖排）。 */
 @Composable
-private fun GroupLayoutToggle(showGridIcon: Boolean, onClick: () -> Unit) {
+internal fun GroupLayoutToggle(showGridIcon: Boolean, onClick: () -> Unit) {
     val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
     Box(
         modifier = Modifier
@@ -2169,7 +2239,7 @@ private fun GroupPopupGridCell(title: String, onClick: () -> Unit, icon: @Compos
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .squircleClip(12.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

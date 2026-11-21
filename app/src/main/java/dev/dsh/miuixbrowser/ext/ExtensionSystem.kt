@@ -148,18 +148,57 @@ class ExtensionSystem(
 
     fun onWebRequestBefore(tabId: Int, request: android.webkit.WebResourceRequest): WebResourceResponse? =
         declarativeNetRequest.intercept(tabId, request) ?: webRequest.beforeRequest(tabId, request)
-    fun onWebRequestMainFrameResponseStarted(tabId: Int, url: String) = webRequest.mainFrameResponseStarted(tabId, url)
-    fun onWebRequestMainFrameCompleted(tabId: Int, url: String) = webRequest.mainFrameCompleted(tabId, url)
+    // 以下两个 WebViewClient 近似事件，在由 NavigationListener 驱动的标签上让位给 [navigationSink]（真实状态码 / 响应头）
+    fun onWebRequestMainFrameResponseStarted(tabId: Int, url: String) {
+        if (!webNavigation.isListenerDriven(tabId)) webRequest.mainFrameResponseStarted(tabId, url)
+    }
+    fun onWebRequestMainFrameCompleted(tabId: Int, url: String) {
+        if (!webNavigation.isListenerDriven(tabId)) webRequest.mainFrameCompleted(tabId, url)
+    }
     fun onWebRequestMainFrameFailed(tabId: Int, url: String, error: String) = webRequest.mainFrameFailed(tabId, url, error)
 
     fun onWebNavigationBefore(tabId: Int, url: String, transitionType: String = "other") = webNavigation.beforeNavigate(tabId, url, transitionType)
     fun onWebNavigationStarted(tabId: Int, url: String) = webNavigation.ensureBeforeNavigate(tabId, url)
-    fun onWebNavigationCommitted(tabId: Int, url: String) = webNavigation.committed(tabId, url)
+    fun onWebNavigationCommitted(tabId: Int, url: String) {
+        if (!webNavigation.isListenerDriven(tabId)) webNavigation.committed(tabId, url)
+    }
     fun onWebNavigationError(tabId: Int, url: String, error: String) = webNavigation.errorOccurred(tabId, url, error)
     fun onWebNavigationForgetTab(tabId: Int) = webNavigation.forgetTab(tabId)
-    fun onWebNavigationCompleted(tabId: Int, url: String) = webNavigation.completed(tabId, url)
+    fun onWebNavigationCompleted(tabId: Int, url: String) {
+        if (!webNavigation.isListenerDriven(tabId)) webNavigation.completed(tabId, url)
+    }
     fun onWebNavigationHistoryState(tabId: Int, url: String) = webNavigation.historyStateUpdated(tabId, url)
     fun onWebNavigationFragment(tabId: Int, url: String) = webNavigation.referenceFragmentUpdated(tabId, url)
+
+    private val navigationSink = object : NavigationSink {
+        override fun redirected(tabId: Int, fromUrl: String, toUrl: String, statusCode: Int?, headers: org.json.JSONArray?) =
+            webRequest.mainFrameRedirected(tabId, fromUrl, toUrl, statusCode, headers)
+
+        override fun committed(
+            tabId: Int, url: String, transitionType: String, qualifiers: List<String>,
+            statusCode: Int?, headers: org.json.JSONArray?,
+        ) {
+            webNavigation.committed(tabId, url, transitionType, qualifiers)
+            webRequest.mainFrameResponse(tabId, url, statusCode, headers)
+        }
+
+        override fun domContentLoaded(tabId: Int, url: String) = webNavigation.domContentLoaded(tabId, url)
+
+        override fun loaded(tabId: Int, url: String, statusCode: Int?, headers: org.json.JSONArray?) {
+            webNavigation.completed(tabId, url)
+            webRequest.mainFrameCompleted(tabId, url, statusCode, headers)
+        }
+    }
+
+    /**
+     * 给非无痕的 WebView 标签接上 NavigationListener。成功后该标签的 committed / completed / webRequest 主文档事件
+     * 改由真实导航回调驱动；系统 WebView 不支持时返回 false，保持 WebViewClient 近似路径。主线程调用。
+     */
+    fun attachNavigationListener(webView: android.webkit.WebView, tabId: Int): Boolean {
+        if (!WebViewNavigationBridge.attach(webView, tabId, navigationSink)) return false
+        webNavigation.setListenerDriven(tabId, true)
+        return true
+    }
 
     /**
      * 用户在快捷菜单里点了某个拓展：对当前前台标签的当前 origin 授予 activeTab。

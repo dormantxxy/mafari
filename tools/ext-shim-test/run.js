@@ -1090,7 +1090,7 @@ test('feature-detectable namespaces stay absent (privacy / dns / contextualIdent
 test('inert events and no-op setters never reach the native bridge (no fake success against a native handler)', () => {
   const env = makeEnv();
   env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: ['webRequest', 'idle'] } }), entry([
-    "var f = function () {}; browser.webRequest.onHeadersReceived.addListener(f, {}, ['blocking']); browser.browserAction.onClicked.addListener(f); browser.browserAction.setIcon({}); browser.idle.onStateChanged.addListener(f);",
+    "var f = function () {}; browser.webRequest.onBeforeSendHeaders.addListener(f, {}, ['blocking']); browser.browserAction.onClicked.addListener(f); browser.browserAction.setIcon({}); browser.idle.onStateChanged.addListener(f);",
   ])));
   assert.deepStrictEqual(env.posted.map((x) => x.api), ['runtime.hello']);
 });
@@ -1182,10 +1182,10 @@ test('inert events warn once (unless quiet) and never reach the native bridge', 
   env.sandbox.console.warn = (m) => warns.push(String(m));
   env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: ['webRequest'] } }), entry([`
     var f = function () {}, g = function () {};
-    browser.webRequest.onHeadersReceived.addListener(f); browser.webRequest.onHeadersReceived.addListener(g);
+    browser.webRequest.onBeforeSendHeaders.addListener(f); browser.webRequest.onBeforeSendHeaders.addListener(g);
     browser.runtime.onSuspend.addListener(f);
   `])));
-  assert.strictEqual(warns.filter((w) => w.includes('webRequest.onHeadersReceived')).length, 1);
+  assert.strictEqual(warns.filter((w) => w.includes('webRequest.onBeforeSendHeaders')).length, 1);
   assert.strictEqual(warns.filter((w) => w.includes('runtime.onSuspend')).length, 0);
   assert.deepStrictEqual(env.posted.map((x) => x.api), ['runtime.hello']);
 });
@@ -1238,3 +1238,26 @@ test('wiring: every `fun register(router: ApiRouter)` is actually called from Ex
   console.log(failed ? failed + ' failed' : 'all ' + tests.length + ' passed');
   process.exit(failed ? 1 : 0);
 })();
+
+// ───────────── onHeadersReceived / onDOMContentLoaded 现在是真实事件（来自 NavigationListener），要走原生桥 ─────────────
+test('webRequest.onHeadersReceived registers natively with its extraInfoSpec and receives main-frame events', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: ['webRequest'] } }), entry([`
+    window.__got = [];
+    browser.webRequest.onHeadersReceived.addListener(function (d) { window.__got.push(d.statusCode); }, { urls: ['<all_urls>'] }, ['responseHeaders']);
+  `])));
+  const reg = env.posted.find((x) => x.api === 'webRequest.addListener');
+  assert.ok(reg, 'onHeadersReceived must register with the native router');
+  assert.strictEqual(reg.args[0], 'onHeadersReceived');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(reg.args[3])), ['responseHeaders']);
+});
+
+test('webNavigation.onDOMContentLoaded is a real event', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: ['webNavigation'] } }), entry([`
+    window.__n = 0;
+    browser.webNavigation.onDOMContentLoaded.addListener(function () { window.__n++; });
+  `])));
+  assert.strictEqual(typeof env.sandbox.__n, 'number');
+});
+

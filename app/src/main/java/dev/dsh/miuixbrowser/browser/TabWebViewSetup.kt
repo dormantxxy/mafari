@@ -198,6 +198,13 @@ internal fun BrowserTab.setupWebView() {
     CookieManager.getInstance().setAcceptCookie(true)
     CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
+    // 非无痕标签：主文档的 committed / completed / webRequest 响应交给 NavigationListener（系统 WebView 支持时）。
+    // 必须在首次加载前注册；不支持就保持下面 WebViewClient 的近似路径。
+    if (!incognito) {
+        runCatching { appContext.appContainer.webExtensions.attachNavigationListener(webView, id) }
+            .onFailure { Diag.log("webnav: NavigationListener attach failed ${it.message}") }
+    }
+
     var lastVisitedHistoryUrl: String? = url
     webView.webViewClient = object : WebViewClient() {
         override fun onPageStarted(view: WebView, pageUrl: String?, favicon: Bitmap?) {

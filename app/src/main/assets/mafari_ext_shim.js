@@ -45,7 +45,7 @@ function (CFG, ENTRIES) {
   // 早于监听器注册到达的事件先缓存（只缓存下面 BUFFERED 里的几种，每种最多 BUF_MAX 条，页面启动 BUF_MS 之后不再缓存），
   // 第一个监听器注册时统一补投。常见时序：后台页的脚本是异步加载 / 动态 import 的，原生已经把 onStartup / onAlarm 送到了。
   var BUF = {}, BUF_MAX = 32, BUF_MS = 5000;
-  var BUFFERED = { 'storage.onChanged': 1, 'storage.local.onChanged': 1, 'storage.session.onChanged': 1, 'storage.sync.onChanged': 1, 'runtime.onStartup': 1, 'runtime.onInstalled': 1, 'runtime.onConnect': 1, 'tabs.onHighlighted': 1, 'alarms.onAlarm': 1, 'webNavigation.onBeforeNavigate': 1, 'webNavigation.onCommitted': 1, 'webNavigation.onCompleted': 1, 'webNavigation.onErrorOccurred': 1, 'webNavigation.onHistoryStateUpdated': 1, 'webNavigation.onReferenceFragmentUpdated': 1, 'contextMenus.onClicked': 1, 'notifications.onClicked': 1, 'notifications.onClosed': 1, 'bookmarks.onCreated': 1, 'bookmarks.onChanged': 1, 'bookmarks.onMoved': 1, 'bookmarks.onRemoved': 1, 'downloads.onCreated': 1, 'downloads.onErased': 1 };
+  var BUFFERED = { 'storage.onChanged': 1, 'storage.local.onChanged': 1, 'storage.session.onChanged': 1, 'storage.sync.onChanged': 1, 'runtime.onStartup': 1, 'runtime.onInstalled': 1, 'runtime.onConnect': 1, 'tabs.onHighlighted': 1, 'alarms.onAlarm': 1, 'webNavigation.onBeforeNavigate': 1, 'webNavigation.onCommitted': 1, 'webNavigation.onCompleted': 1, 'webNavigation.onDOMContentLoaded': 1, 'webNavigation.onErrorOccurred': 1, 'webNavigation.onHistoryStateUpdated': 1, 'webNavigation.onReferenceFragmentUpdated': 1, 'contextMenus.onClicked': 1, 'notifications.onClicked': 1, 'notifications.onClosed': 1, 'bookmarks.onCreated': 1, 'bookmarks.onChanged': 1, 'bookmarks.onMoved': 1, 'bookmarks.onRemoved': 1, 'downloads.onCreated': 1, 'downloads.onErased': 1 };
   function ev(name) {
     return {
       addListener: function (f) {
@@ -87,6 +87,7 @@ function (CFG, ENTRIES) {
     'webNavigation.onCommitted': function (p) { return [['webNavigation.onCommitted', [p]]]; },
     'webNavigation.onCompleted': function (p) { return [['webNavigation.onCompleted', [p]]]; },
     'webNavigation.onErrorOccurred': function (p) { return [['webNavigation.onErrorOccurred', [p]]]; },
+    'webNavigation.onDOMContentLoaded': function (p) { return [['webNavigation.onDOMContentLoaded', [p]]]; },
     'webNavigation.onHistoryStateUpdated': function (p) { return [['webNavigation.onHistoryStateUpdated', [p]]]; },
     'webNavigation.onReferenceFragmentUpdated': function (p) { return [['webNavigation.onReferenceFragmentUpdated', [p]]]; },
     'contextMenus.onClicked': function (p) {
@@ -104,6 +105,7 @@ function (CFG, ENTRIES) {
     'downloads.onErased': function (p) { return [['downloads.onErased', [p.id]]]; },
     'webRequest.onBeforeRequest': function (p) { return [['webRequest.onBeforeRequest', [p]]]; },
     'webRequest.onBeforeRedirect': function (p) { return [['webRequest.onBeforeRedirect', [p]]]; },
+    'webRequest.onHeadersReceived': function (p) { return [['webRequest.onHeadersReceived', [p]]]; },
     'webRequest.onResponseStarted': function (p) { return [['webRequest.onResponseStarted', [p]]]; },
     'webRequest.onCompleted': function (p) { return [['webRequest.onCompleted', [p]]]; },
     'webRequest.onErrorOccurred': function (p) { return [['webRequest.onErrorOccurred', [p]]]; }
@@ -623,7 +625,7 @@ function (CFG, ENTRIES) {
 
   var webRequest = null, webRequestSequence = 1;
   if (CFG.page && declares('webRequest')) {
-    var webRequestListeners = { onBeforeRequest: [], onBeforeRedirect: [], onResponseStarted: [], onCompleted: [], onErrorOccurred: [] };
+    var webRequestListeners = { onBeforeRequest: [], onBeforeRedirect: [], onHeadersReceived: [], onResponseStarted: [], onCompleted: [], onErrorOccurred: [] };
     function makeWebRequestEvent(eventName) {
       return {
         addListener: function (fn, filter, extraInfoSpec) {
@@ -649,15 +651,15 @@ function (CFG, ENTRIES) {
     webRequest = {
       onBeforeRequest: makeWebRequestEvent('onBeforeRequest'),
       onBeforeRedirect: makeWebRequestEvent('onBeforeRedirect'),
+      onHeadersReceived: makeWebRequestEvent('onHeadersReceived'),
       onResponseStarted: makeWebRequestEvent('onResponseStarted'),
       onCompleted: makeWebRequestEvent('onCompleted'),
       onErrorOccurred: makeWebRequestEvent('onErrorOccurred'),
-      // 请求头 / 响应头 / 认证阶段 WebView 看不到（shouldInterceptRequest 只在发请求前给一次）；仅拓展自定义重定向可触发 onBeforeRedirect：
-      // 事件对象必须存在，否则 uBO / 篡改猴 / 沉浸式翻译的后台页在 `webRequest.onHeadersReceived.addListener` 这一行就抛 TypeError，
-      // 后台页从此不响应任何消息。事件本身不会触发。
+      // 请求头 / 认证阶段 WebView 看不到（shouldInterceptRequest 只在发请求前给一次）。
+      // 主框架的响应头 / 状态码来自 androidx.webkit NavigationListener（系统 WebView 支持时）：onHeadersReceived 只读，且只覆盖主文档。
+      // 其余事件对象必须存在，否则 uBO / 篡改猴 / 沉浸式翻译的后台页在 `.addListener` 这一行就抛 TypeError，事件本身不会触发。
       onBeforeSendHeaders: inertEvent('webRequest.onBeforeSendHeaders'),
       onSendHeaders: inertEvent('webRequest.onSendHeaders'),
-      onHeadersReceived: inertEvent('webRequest.onHeadersReceived'),
       onAuthRequired: inertEvent('webRequest.onAuthRequired'),
       handlerBehaviorChanged: promised(function () { return P.resolve(); }),
       MAX_HANDLER_BEHAVIOR_CHANGED_CALLS_PER_10_MINUTES: 20
@@ -700,7 +702,7 @@ function (CFG, ENTRIES) {
       onReferenceFragmentUpdated: ev('webNavigation.onReferenceFragmentUpdated'),
       // uBO 等的后台页在顶层直接 addListener（弹窗拦截 / 标签替换）；宿主不产生这几个事件
       onCreatedNavigationTarget: inertEvent('webNavigation.onCreatedNavigationTarget'),
-      onDOMContentLoaded: inertEvent('webNavigation.onDOMContentLoaded'),
+      onDOMContentLoaded: ev('webNavigation.onDOMContentLoaded'),
       onTabReplaced: inertEvent('webNavigation.onTabReplaced', true)
     };
   }

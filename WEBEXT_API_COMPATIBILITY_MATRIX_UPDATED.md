@@ -86,8 +86,8 @@
 | `types` | N/A | 公共类型命名空间，不是独立运行时服务 | — |
 | `userScripts` | PARTIAL | 标准 register/getScripts/update/unregister 已接入动态脚本注入器；MAIN/ISOLATED 仍受 WebView 世界隔离限制，frame 支持不完整 | P2 |
 | `userScripts (Legacy)` | NONE | MV2 legacy userScripts API 未实现 | P4 |
-| `webNavigation` | PARTIAL | 主框架 before/commit/complete/error 与 SPA History/Fragment 近似事件；子框架、DOMContentLoaded、documentId 语义不完整 | P1 |
-| `webRequest` | PARTIAL | `onBeforeRequest` blocking cancel/redirect、拓展重定向 `onBeforeRedirect`、主框架 `onResponseStarted`（onPageCommitVisible 近似）、completed/error；请求头/响应头和子资源阶段缺失 | P0 |
+| `webNavigation` | PARTIAL | 主框架 before/commit/complete/error 与 SPA History/Fragment 近似事件；系统 WebView 支持 NavigationListener 时 committed（真实 transitionType / qualifiers）、DOMContentLoaded、completed 为真实回调；子框架、documentId 仍缺 | P1 |
+| `webRequest` | PARTIAL | `onBeforeRequest` blocking cancel/redirect、拓展重定向 `onBeforeRedirect`、主文档的真实 `onBeforeRedirect` / `onHeadersReceived`（只读）/ `onResponseStarted` / `onCompleted`（NavigationListener：statusCode + responseHeaders，不支持时退回 onPageCommitVisible 近似）、error；请求头和子资源阶段缺失 | P0 |
 | `windows` | NONE | 当前标签桥接按单窗口模型设计，无扩展窗口管理 API | P3 |
 
 `FULL*` 表示源码已有完整主路径，但仍需更广泛的 Firefox 行为兼容测试；不代表已经证明 100% 一致。

@@ -25,7 +25,7 @@ object ApiSupport {
         "history" to SupportLevel.PARTIAL, // search/deleteUrl/deleteRange/deleteAll；visit 级别数据不可用
         "notifications" to SupportLevel.PARTIAL, // basic 文本通知 create/update/clear/getAll 与点击/关闭事件；Android 系统通知权限由用户在系统设置管理
         "downloads" to SupportLevel.PARTIAL, // 复用 Mafari 下载器：download/search/pause/resume/cancel/erase；选项、过滤器及事件为子集
-        "webNavigation" to SupportLevel.PARTIAL, // 主框架 before/commit/complete/error 与 SPA 近似事件；无子框架 / documentId，DOMContentLoaded 受限
+        "webNavigation" to SupportLevel.PARTIAL, // 主框架 before/commit/complete/error 与 SPA 近似事件；无子框架 / documentId；NavigationListener 可用时 committed / DOMContentLoaded / completed 为真实回调
         "webRequest" to SupportLevel.PARTIAL, // onBeforeRequest + 主框架 completed/error；无子资源终态和响应头
         "webRequestBlocking" to SupportLevel.PARTIAL, // onBeforeRequest 同步 cancel / redirectUrl；IO 线程有限等待，超时 fail-open，不支持改请求头
         "userScripts" to SupportLevel.PARTIAL, // register/getScripts/update/unregister；WebView 注入世界仍有隔离限制

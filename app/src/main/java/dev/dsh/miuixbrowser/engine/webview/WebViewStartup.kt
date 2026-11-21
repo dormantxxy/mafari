@@ -39,7 +39,7 @@ object WebViewStartup {
         if (started) return
         started = true
         val t0 = SystemClock.elapsedRealtime()
-        val ok = runCatching {
+        val ok = runCatching<Unit> {
             val executor = Executors.newSingleThreadExecutor { r ->
                 Thread(r, "mafari-webview-startup").apply { isDaemon = true }
             }
@@ -47,11 +47,13 @@ object WebViewStartup {
                 // 主线程上的启动任务也在这里分块做完，而不是留到第一个 WebView 创建时一次做
                 .setShouldRunUiThreadStartUpTasks(true)
                 .build()
-            WebViewCompat.startUpWebView(context.applicationContext, config) {
+            // 1.19 起 startUpWebView 有两个单参回调重载（WebViewStartUpCallback / WebViewOutcomeReceiver），
+            // 直接传 Kotlin lambda 会 overload resolution ambiguity；显式 SAM 构造固定到 StartUpCallback。
+            WebViewCompat.startUpWebView(context.applicationContext, config, WebViewCompat.WebViewStartUpCallback {
                 Diag.log("webview startup: done in ${SystemClock.elapsedRealtime() - t0}ms")
                 done.countDown()
                 executor.shutdown()
-            }
+            })
         }.onFailure {
             // 系统 WebView 太旧（没有这个接口）等：放弃预热，WebView 首次创建时照旧同步加载
             Diag.log("webview startup: unavailable (${it.javaClass.simpleName}: ${it.message})")

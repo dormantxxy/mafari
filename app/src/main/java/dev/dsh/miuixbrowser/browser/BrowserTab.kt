@@ -315,7 +315,12 @@ class BrowserTab(
     val pageAdBlocked = java.util.concurrent.atomic.AtomicInteger(0)
 
     /** 只有 WebView 内核的标签才有 WebView；Gecko 标签不创建（省内存） */
-    internal val webViewOrNull: WebView? = if (engineKind == EngineKind.WEBVIEW) WebView(appContext) else null
+    internal val webViewOrNull: WebView? = if (engineKind == EngineKind.WEBVIEW) {
+        // 无痕标签：创建后立刻绑到独立 Profile（必须在 WebView 首次使用前）。不支持多 Profile 时沿用进程级 Cookie 开关
+        WebView(appContext).also { if (startIncognito) dev.dsh.miuixbrowser.engine.webview.IncognitoProfile.bind(it) }
+    } else {
+        null
+    }
 
     /** WebView 内核专用 API 的入口。Gecko 标签访问它会抛异常，界面层应改用 [contentView] 等与内核无关的成员 */
     val webView: WebView
@@ -1165,9 +1170,16 @@ class BrowserTab(
         gecko?.applyPrivacy()
         webViewOrNull?.let { wv ->
             runCatching {
-                // 官方 CookieManager：总开关（无痕 / 拒绝全部时关）+ 按 WebView 的第三方开关
-                CookieManager.getInstance().setAcceptCookie(!incognito && cookieMode != 3)
-                CookieManager.getInstance().setAcceptThirdPartyCookies(wv, cookieMode == 0)
+                if (dev.dsh.miuixbrowser.engine.webview.IncognitoProfile.isBound(wv)) {
+                    // 无痕 Profile 有自己的 CookieManager：只管它，不碰进程级（默认 Profile）的开关；无痕里登录也能保持，Profile 随最后一个无痕标签一起删
+                    val cm = dev.dsh.miuixbrowser.engine.webview.IncognitoProfile.cookieManagerFor(wv)
+                    cm.setAcceptCookie(cookieMode != 3)
+                    cm.setAcceptThirdPartyCookies(wv, cookieMode == 0)
+                } else {
+                    // 官方 CookieManager：总开关（无痕 / 拒绝全部时关）+ 按 WebView 的第三方开关
+                    CookieManager.getInstance().setAcceptCookie(!incognito && cookieMode != 3)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(wv, cookieMode == 0)
+                }
             }
         }
         dntEnabled = sendDnt
@@ -1581,6 +1593,8 @@ class BrowserTab(
             webView.removeAllViews()
             webView.destroy()
         }
+        // 绑在无痕 Profile 上的最后一个 WebView 销毁后，整个 Profile（Cookie / 缓存 / 站点数据）一起删掉
+        webViewOrNull?.let { dev.dsh.miuixbrowser.engine.webview.IncognitoProfile.release(it) }
     }
 
     /**

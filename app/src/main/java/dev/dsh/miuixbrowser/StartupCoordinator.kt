@@ -4,6 +4,7 @@ import dev.dsh.miuixbrowser.adblock.AdBlock
 import dev.dsh.miuixbrowser.data.AppDatabase
 import dev.dsh.miuixbrowser.data.RestoreMode
 import dev.dsh.miuixbrowser.data.TabDb
+import dev.dsh.miuixbrowser.engine.webview.IncognitoProfile
 import dev.dsh.miuixbrowser.engine.webview.WebViewDebug
 import dev.dsh.miuixbrowser.engine.webview.WebViewStartup
 import dev.dsh.miuixbrowser.browser.AppShortcuts
@@ -49,6 +50,9 @@ internal object StartupCoordinator {
 
     /** WebView 拓展的后台页是隐藏 WebView，创建有开销：首帧之后再起，别和首屏抢主线程。 */
     private const val EXT_BACKGROUND_DELAY_MS = 1_500L
+
+    /** 清扫上次遗留的无痕 Profile：不急，排在拓展后台页之后。 */
+    private const val SWEEP_INCOGNITO_DELAY_MS = 3_000L
 
     /** 长按图标的快捷方式在界面出来之后再发布。 */
     private const val SHORTCUTS_DELAY_MS = 2_000L
@@ -128,6 +132,10 @@ internal object StartupCoordinator {
                 runCatching { app.appContainer.webExtensions.startAll() }
                     .onFailure { Diag.log("web extensions: start backgrounds failed ${it.message}") }
             }, EXT_BACKGROUND_DELAY_MS)
+        }
+        // 上次进程被杀留在磁盘上的无痕 Profile 数据：界面出来、WebView 预热结束之后再扫（本进程已用过无痕就跳过）
+        activity.window.decorView.post {
+            Handler(Looper.getMainLooper()).postDelayed({ IncognitoProfile.sweepStale() }, SWEEP_INCOGNITO_DELAY_MS)
         }
         // 长按应用图标的快捷方式：界面出来后再发布，不占冷启动
         activity.window.decorView.post {

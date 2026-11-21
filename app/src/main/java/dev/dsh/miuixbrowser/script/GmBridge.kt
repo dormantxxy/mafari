@@ -187,7 +187,7 @@ class GmBridge(
         val anonymous = opt.optBoolean("anonymous", false)
         var body: ByteArray? = if (bodyBase64.isNotEmpty()) android.util.Base64.decode(bodyBase64, android.util.Base64.DEFAULT) else null
         var currentUrl = opt.getString("url")
-        val cookieManager = CookieManager.getInstance()
+        val cookieManager = profileCookies()
 
         try {
             var redirects = 0
@@ -518,16 +518,20 @@ class GmBridge(
         }
     }
 
+    /** 脚本所在 WebView 的 Profile 对应的 CookieManager：无痕标签读写的是无痕 Profile 的 Cookie，不碰默认 Profile 的 */
+    private fun profileCookies(): CookieManager =
+        dev.dsh.miuixbrowser.engine.webview.IncognitoProfile.cookieManagerFor(webViewProvider())
+
     /** 旧桥的回调投递：把参数数组按 JS 字面量拼进 evaluateJavascript（JSONArray.join 对字符串自动加引号转义） */
     private val jsSink: (String, JSONArray) -> Unit = { fn, args -> callJs(fn, args.join(",")) }
 
     @JavascriptInterface
     fun cookies(url: String): String =
-        runCatching { CookieManager.getInstance().getCookie(url).orEmpty() }.getOrDefault("")
+        runCatching { profileCookies().getCookie(url).orEmpty() }.getOrDefault("")
 
     @JavascriptInterface
     fun setCookie(url: String, cookie: String) {
-        runCatching { CookieManager.getInstance().setCookie(url, cookie) }
+        runCatching { profileCookies().setCookie(url, cookie) }
     }
 
     /**
@@ -540,7 +544,7 @@ class GmBridge(
         if (!isHttp(url)) return arr.toString()
         val host = runCatching { java.net.URI(url).host }.getOrNull().orEmpty()
         val secure = url.startsWith("https://", true)
-        CookieManager.getInstance().getCookie(url).orEmpty().split(";").forEach { kv ->
+        profileCookies().getCookie(url).orEmpty().split(";").forEach { kv ->
             val pair = kv.trim()
             if (pair.isEmpty()) return@forEach
             val i = pair.indexOf('=')
@@ -578,7 +582,7 @@ class GmBridge(
                     sb.append("; Expires=").append(fmt.format(java.util.Date(exp * 1000)))
                 }
             }
-            val cm = CookieManager.getInstance()
+            val cm = profileCookies()
             cm.setCookie(url, sb.toString())
             cm.flush()
         }

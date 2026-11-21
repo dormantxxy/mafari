@@ -76,8 +76,11 @@ internal fun BrowserTab.setupWebView() {
     webView.setOnScrollChangeListener { _, _, _, _, _ -> scrollSignal.trySend(Unit) }
     runCatching { webView.addJavascriptInterface(AdBlockBridge { !incognito || adblockInIncognito }, "MafariAdblock") }
     runCatching { webView.addJavascriptInterface(blob.bridge, "MafariBlob") }
-    // 页内翻译：页面脚本经它把待译文本交给原生（只在翻译进行中受理）
-    runCatching { webView.addJavascriptInterface(translate.webBridge(), "MafariTr") }
+    // 页内翻译：页面脚本经它把待译文本交给原生（只在翻译进行中受理）。单向消息，优先 WebMessageListener
+    // （只受理主框架 http(s) 来源）；系统 WebView 不支持时退回 addJavascriptInterface
+    if (!dev.dsh.miuixbrowser.engine.webview.OneWayBridge.install(webView, "MafariTr", TabTranslate.MAX_WEB_MESSAGE_CHARS) { translate.onWebMessage(it) }) {
+        runCatching { webView.addJavascriptInterface(translate.webBridge(), "MafariTr") }
+    }
     // 仅降级路径：WebView 不支持 DOCUMENT_START_SCRIPT 时才安装无参的指纹桥；主路径不向页面暴露任何指纹接口
     val fp = fpInjector ?: return
     if (!fp.docStartSupported) {
@@ -198,8 +201,11 @@ internal fun BrowserTab.setupWebView() {
     }.onFailure { Diag.log("passkey: enable failed ${it.message}") }
     // 默认浅色底；深浅色由 applyDisplayTheme 按应用主题覆盖
     webView.setBackgroundColor(0xFFFFFFFF.toInt())
-    CookieManager.getInstance().setAcceptCookie(true)
-    CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+    // 按 WebView 所在 Profile 的 CookieManager 设（无痕标签有自己的，不能顺手把默认 Profile 的开关也改了）
+    dev.dsh.miuixbrowser.engine.webview.IncognitoProfile.cookieManagerFor(webView).apply {
+        setAcceptCookie(true)
+        setAcceptThirdPartyCookies(webView, true)
+    }
 
     // 非无痕标签：主文档的 committed / completed / webRequest 响应交给 NavigationListener（系统 WebView 支持时）。
     // 必须在首次加载前注册；不支持就保持下面 WebViewClient 的近似路径。
@@ -451,7 +457,10 @@ internal fun BrowserTab.setupWebView() {
         }
     }
 
-    webView.addJavascriptInterface(inspector.bridge, "MafariElement")
+    // 长按元素：同上，单向消息优先走 WebMessageListener
+    if (!dev.dsh.miuixbrowser.engine.webview.OneWayBridge.install(webView, "MafariElement", TabElementInspector.MAX_MESSAGE_CHARS) { inspector.onMessage(it) }) {
+        runCatching { webView.addJavascriptInterface(inspector.bridge, "MafariElement") }
+    }
 
     webView.webChromeClient = object : WebChromeClient() {
         override fun onProgressChanged(view: WebView, newProgress: Int) {

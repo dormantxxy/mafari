@@ -1,5 +1,13 @@
 # Changelog
 
+## WebView adoption, part 2: incognito Profile, WebMessageListener bridges
+
+- **Incognito tabs use a separate WebView Profile** (`IncognitoProfile`, `MULTI_PROFILE`). The tab's WebView is bound with `setProfile` right after creation (incognito is fixed at tab creation, which is already how `createTab` uses it). Cookies, cache, localStorage / IndexedDB, service workers and site permissions are isolated from the default profile; logging in inside an incognito tab now persists for that session (the old process-wide `setAcceptCookie(false)` flip blocked all cookies). When the last bound WebView is destroyed the whole profile is deleted (retry once; leftovers from a killed process are removed on first incognito use, plus a sweep after the UI is shown). Without `MULTI_PROFILE` the old behaviour is kept.
+- Cookie access that used the global `CookieManager` is now profile-aware: `applyPrivacy`, initial tab setup, `GmBridge` (GM_cookie / `GM_xmlhttpRequest` cookies) and the temp WebView of `window.open` (bound to the opener's profile). Cookie backup reads the default profile path and is unchanged; incognito downloads still send no cookies (`withCookies = !tab.incognito`).
+- **One-way bridges moved to `WebMessageListener`** (`OneWayBridge`): `MafariTr` (page translation) and `MafariElement` (ad marking long-press) now only accept messages from the main frame with an http(s) origin, string payloads under a length cap. `addJavascriptInterface` remains as the fallback when `WEB_MESSAGE_LISTENER` is unsupported; the page scripts feature-detect `postMessage` vs the old method (`mafari_translate.js` and its Gecko copy kept identical; node test added).
+- Not converted (they need a synchronous return value): `MafariAdblock.css`, `MafariFp.fp` (fallback only), `MafariBlob.begin` / chunk streaming. Tests: `OneWayBridgeTest`.
+- Not compiled here; see the delivery notes for the device checklist.
+
 ## WebView adoption: render-process recovery, UA client hints, async startup
 
 - **Main tabs now survive a renderer crash / OOM kill.** `TabWebViewSetup` handles `onRenderProcessGone` (returns `true`, so the app is no longer taken down with the renderer). `BrowserState.replaceCrashedTab` swaps in a fresh tab at the same position, keeping URL / title / desktop mode / opener chain / `tabs` row key. A foreground tab shows the existing "page crashed" error page (`ErrorPages.crashed`) and waits for Retry (no auto-reload, so a page that crashes on load cannot loop); a background tab becomes a pending-restore tab and loads when switched to.

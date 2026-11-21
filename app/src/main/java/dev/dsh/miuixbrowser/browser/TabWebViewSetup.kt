@@ -124,8 +124,9 @@ internal fun BrowserTab.setupWebView() {
         }
     }.onFailure { Diag.log("adblock: document-start install failed ${it.message}") }
     runCatching {
-        // 旧桥：页面世界里的 MafariGM。支持隔离世界的 WebView 上，脚本改走 GmChannel（见 TabScripts.sync），
-        // 但通道的原生实现复用这个实例（xhr / 下载 / 通知 / 文件流），所以仍要先建出来并交给 tab.gmBridge
+        // 原生能力实现（xhr / 下载 / 通知 / 文件流 / Cookie）：隔离世界通道 GmChannel 与旧桥共用这一个实例，先建出来交给 tab.gmBridge。
+        // 旧桥 MafariGM（页面世界里的 JS 接口，所有框架可见）只在系统 WebView 不支持隔离世界、或通道装不上时才挂上，
+        // 见 TabScripts.ensureLegacyBridge：支持的设备上页面世界里没有任何原生入口。
         val gmBridge = GmBridge(
             appContext,
             { webView },
@@ -148,7 +149,7 @@ internal fun BrowserTab.setupWebView() {
             { resolveActivity() },
             )
         this.gmBridge = gmBridge
-        webView.addJavascriptInterface(gmBridge, "MafariGM")
+        if (!dev.dsh.miuixbrowser.script.GmChannel.isSupported()) scripts.ensureLegacyBridge()
     }
     webView.settings.apply {
         javaScriptEnabled = true

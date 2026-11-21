@@ -25,10 +25,16 @@ shim 与 Gecko 共用（`mafari_gm_shim.js`，原 `mafari_gm_gecko_shim.js`）�
 |---|---|---|
 | 1a | shim 挪到 main 并加异步文件流；WebView 中继；运行时 `openFileStream` 支持同步 / 异步桥；协议测试 | ✅ 已完成（`tools/gm-wv-test`，Node 里跑通） |
 | 1b | Kotlin `GmChannel`：安装、校验、分发、广播；`UserscriptEngine` 内联值快照；脚本源码包装 | ✅ 代码已写（`script/GmChannel.kt` `GmOrigins.kt` `GmGuard.kt` `GmSnapshot.kt`，由 `TabScripts.sync` 接入）；**未在 Android 环境编译 / 真机验证** |
-| 1c | 支持隔离世界的 WebView 上不再注入 `MafariGM`；`@connect` 校验 | ⬜ 待做 |
+| 1c | 支持隔离世界的 WebView 上不再注入 `MafariGM`；`@connect` 校验 | ✅ 代码已写（`script/GmConnectPolicy.kt`；`TabScripts.ensureLegacyBridge`）；**未在 Android 环境编译 / 真机验证**；策略类已在 JVM 上单独编译并跑过断言（`GmConnectPolicyTest`） |
 
-**旧桥保留**：系统 WebView 不支持 `JS_INJECTION_IN_FRAME_AND_WORLD` 时，仍走原来的 `addJavascriptInterface(GmBridge, "MafariGM")`，
-脚本源码不变（运行时取 `W.MafariGM`）。该路径的暴露问题依旧存在，只是范围缩到旧设备。
+**旧桥保留，但按需才挂**：系统 WebView 不支持 `JS_INJECTION_IN_FRAME_AND_WORLD`、或通道装到一半失败退回旧路径时，才由
+`TabScripts.ensureLegacyBridge()`（幂等）挂上 `addJavascriptInterface(GmBridge, "MafariGM")`，脚本源码不变（运行时取 `W.MafariGM`）。
+支持隔离世界的设备上，`setupWebView` 只创建 `GmBridge` 实例（供通道复用），**页面世界里没有 `MafariGM`**。
+旧路径的暴露问题依旧存在，只是范围缩到旧设备（`addJavascriptInterface` 对下一次页面加载生效）。
+
+另外：通道接管时 `TabScripts.injectMissing`（页面加载完后用 `evaluateJavascript` 补注入）直接跳过——补注入的源码没有 `MafariGM`、
+也没有中继（中继只随 document-start 注入），脚本半残运行没有意义；漏掉的脚本在下次导航由 document-start handler 注入。
+`WebAppActivity`（轻应用）不走通道，仍沿用 `MafariGM`。
 
 ## 一、线路协议（均为 JSON 字符串）
 
@@ -94,6 +100,19 @@ shim 与 Gecko 共用（`mafari_gm_shim.js`，原 `mafari_gm_gecko_shim.js`）�
 8. **令牌**：原生内存里为每个脚本随机生成（128 位以上），只出现在注入源码的快照里，不落盘、不进日志。
 9. **降级**：不支持隔离世界时沿用旧路径，脚本源码不变。
 
+## 三·补、`@connect` 目标主机策略（1c）
+
+与 Gecko 侧 `background.js` 的 `connectAllows / cookieAllows` 同一口径，实现在 `GmConnectPolicy`（纯 JVM）：
+
+| | 规则 |
+|---|---|
+| `GM_xmlhttpRequest` | 同站（目标 = 页面主机或其子域）始终放行；`@connect` 列出的主机（含子域）放行；本机 / 局域网 / 链路本地 / 单标签内网名必须显式 `@connect`（`*` 不算）；没声明：放行公网；声明了就按声明，`*` = 任意公网主机 |
+| `GM_cookie` | 更严：只给同站或 `@connect` 明确列出的主机（`*` 与「没声明」都不算）；不允许时 `cookieList` 回空数组，`cookieSet` 丢弃 |
+| 重定向 | `GmBridge.runXhr` 每一跳（含首跳）都重新过策略，不通过以 `blocked by @connect policy: <host>` 结束；只对通道版生效（`allowHost` 非空），旧桥传 null，行为不变 |
+| 页面主机 | 取浏览器给出的 `sourceOrigin`；`about:blank` / `srcdoc` 等不透明 origin（`null`）的子框架没有主机，退回 `webView.url`（对应 Gecko 的「退回标签地址」） |
+
+策略对象随令牌一起登记，脚本停用 / 删除 / 通道关闭时一并作废。已知限制：解析到内网的公网域名（DNS rebinding）看不出来，与 Gecko 相同。
+
 ## 四、真机验证清单（Node 里无法确认）
 
 1. 同一个 document-start 里，隔离世界中继与页面世界脚本谁先执行，含 `about:blank` / `srcdoc` 子框架（文档不保证跨世界顺序；协议靠 `hi/ready` 握手兜底）。
@@ -101,7 +120,9 @@ shim 与 Gecko 共用（`mafari_gm_shim.js`，原 `mafari_gm_gecko_shim.js`）�
 3. `addWebMessageListener` 的 `originRules` 不匹配的框架里确实没有 `mafariGmRelay` 对象。
 4. `JavaScriptReplyProxy` 在框架销毁 / 后退缓存恢复后的行为（抛异常还是静默忽略）。
 5. 大脚本、大值快照对页面启动耗时的影响；`bind` 到首个值读取的延迟。
-6. 两个变体都要重新编译一次（`GeckoGm.kt` 这次只改了 shim 的资源名，但 shim 换了目录）。
+6. 隔离世界设备上确认页面世界 `typeof MafariGM === "undefined"`；人为让通道安装失败（或在不支持的系统 WebView 上）确认退回旧桥后脚本仍能用，且第一次导航之后 `MafariGM` 才出现。
+7. `@connect`：不透明 origin（`about:blank` / `srcdoc`）子框架里发 xhr 是否按 `webView.url` 的主机判同站；`sourceOrigin` 带端口时主机解析是否正确。
+8. 两个变体都要重新编译一次（`GeckoGm.kt` 这次只改了 shim 的资源名，但 shim 换了目录）。
 
 ## 五、测试
 

@@ -119,8 +119,16 @@ class GmBridge(
      * [sid] 只用于「每脚本在途上限」；[reqId] 在本桥内必须唯一（通道侧会加上帧前缀）。
      * [onResult] 恰好回调一次（工作线程 / 调用线程），内容是与 [xhrPoll] 相同形状的 JSON；
      * 唯一例外：调用过 [abortXhr] 的请求不再回调（调用方已不关心结果）。
+     * [allowHost] 非空时（通道版的 @connect 策略）每一跳（含重定向）都要先过它，不通过就以错误结束；旧桥传 null，行为不变。
      */
-    internal fun xhrExec(sid: String, reqId: String, optionsJson: String, bodyBase64: String, onResult: (String) -> Unit) {
+    internal fun xhrExec(
+        sid: String,
+        reqId: String,
+        optionsJson: String,
+        bodyBase64: String,
+        allowHost: ((String) -> Boolean)? = null,
+        onResult: (String) -> Unit,
+    ) {
         val counter = inflight.getOrPut(sid) { AtomicInteger(0) }
         if (counter.incrementAndGet() > MAX_INFLIGHT_PER_SCRIPT) {
             counter.decrementAndGet()
@@ -130,7 +138,7 @@ class GmBridge(
         try {
             pool.execute {
                 try {
-                    val result = runCatching { runXhr(reqId, optionsJson, bodyBase64) }.getOrElse { e ->
+                    val result = runCatching { runXhr(reqId, optionsJson, bodyBase64, allowHost) }.getOrElse { e ->
                         JSONObject().put("state", "error").put("error", e.message ?: "request failed").toString()
                     }
                     connections.remove(reqId)
@@ -171,7 +179,7 @@ class GmBridge(
     private fun hasHeader(headers: JSONObject, name: String): Boolean =
         headers.keys().asSequence().any { it.equals(name, ignoreCase = true) }
 
-    private fun runXhr(reqId: String, optionsJson: String, bodyBase64: String): String {
+    private fun runXhr(reqId: String, optionsJson: String, bodyBase64: String, allowHost: ((String) -> Boolean)?): String {
         val opt = JSONObject(optionsJson)
         var method = opt.optString("method", "GET").ifBlank { "GET" }.uppercase()
         val headers = opt.optJSONObject("headers") ?: JSONObject()
@@ -184,6 +192,14 @@ class GmBridge(
         try {
             var redirects = 0
             while (true) {
+                if (allowHost != null) {
+                    if (!isHttp(currentUrl)) return JSONObject().put("state", "error").put("error", "unsupported url").toString()
+                    val host = runCatching { URL(currentUrl).host }.getOrDefault("").orEmpty()
+                    if (host.isEmpty() || !allowHost(host)) {
+                        return JSONObject().put("state", "error")
+                            .put("error", "blocked by @connect policy: $host（在脚本头部添加 // @connect $host）").toString()
+                    }
+                }
                 val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
                     requestMethod = method
                     connectTimeout = timeoutMs

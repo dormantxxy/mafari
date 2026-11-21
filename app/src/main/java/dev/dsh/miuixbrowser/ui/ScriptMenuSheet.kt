@@ -71,7 +71,7 @@ private val NO_MENU_TEXT: String get() = tr("脚本未注册快捷菜单")
 
 /**
  * 脚本快捷菜单（底部 Sheet）。
- * - 标题 + 绿点副标题「N个脚本运行中」，右上角一键启停开关
+ * - 标题 + 绿点副标题「N个脚本运行中 · 运行环境（隔离世界 / 页面内）」，右上角一键启停开关
  * - 下方为当前页面运行的脚本：图标 + 标题（过长滚动）+ 下拉框，下拉里是该脚本注册的快捷命令
  * - 一键关闭后脚本列表整体置灰、不可操作
  */
@@ -80,6 +80,7 @@ fun ScriptMenuSheet(
     show: Boolean,
     backdrop: Backdrop?,
     scripts: List<RunningScript>,
+    bridgeMode: dev.dsh.miuixbrowser.script.ScriptBridgeMode,
     commands: List<ScriptMenuCommand>,
     scriptsEnabled: Boolean,
     onScriptsEnabledChange: (Boolean) -> Unit,
@@ -127,7 +128,14 @@ fun ScriptMenuSheet(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = if (scriptsEnabled) tr("{0}个脚本运行中", scripts.size) else tr("脚本已停用"),
+                            text = if (scriptsEnabled) {
+                                // 运行环境：隔离世界（中继 + 私有通道）/ 页面内（MafariGM 挂在页面世界）
+                                val env = when (bridgeMode) {
+                                    dev.dsh.miuixbrowser.script.ScriptBridgeMode.ISOLATED -> tr("隔离世界")
+                                    dev.dsh.miuixbrowser.script.ScriptBridgeMode.IN_PAGE -> tr("页面内")
+                                }
+                                tr("{0}个脚本运行中", scripts.size) + " · " + env
+                            } else tr("脚本已停用"),
                             fontSize = 12.sp,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )

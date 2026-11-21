@@ -367,6 +367,7 @@ BrowserChunk {
                 show = scriptSheetShow,
                 backdrop = if (glassAvailable) glassBackdrop else null,
                 scripts = runningScripts,
+                bridgeMode = scriptBridgeMode,
                 commands = scriptMenuItems,
                 scriptsEnabled = settings.scriptsEnabled,
                 onScriptsEnabledChange = { on ->

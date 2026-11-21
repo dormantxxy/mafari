@@ -99,6 +99,9 @@ internal class GmChannel(
     // ------------------------------------------------------------------ 状态（均在主线程）
 
     private val guard = GmGuard()
+
+    /** 每个脚本的 @connect 策略（随令牌一起登记 / 作废） */
+    private val connectPolicies = HashMap<String, GmConnectPolicy>()
     private var closed = false
 
     private var gmWorld: JavaScriptExecutionWorld? = null
@@ -138,6 +141,7 @@ internal class GmChannel(
         if (scripts.isEmpty()) {
             uninstallAll()
             guard.clear()
+            connectPolicies.clear()
             return true
         }
         val scopes = scripts.associate { it.id to scopeOf(it) }
@@ -151,12 +155,14 @@ internal class GmChannel(
         val live = scripts.map { it.id }.toSet()
         hosted.keys.filter { it !in live }.forEach { id -> hosted.remove(id)?.handler?.let { runCatching { it.remove() } } }
         guard.retain(live)
+        connectPolicies.keys.retainAll(live)
 
         val pageWorld = pageWorld ?: return false
         for (script in scripts) {
             val scope = scopes.getValue(script.id)
             val key = "${script.code.hashCode()}:${script.match.hashCode()}:${ScriptResources.cachedCount(context, script.code)}:${valVer[script.id] ?: 0}"
             val token = guard.register(script.id, scope) // 沿用已有令牌：已打开的页面快照里的旧令牌继续有效
+            connectPolicies[script.id] = GmConnectPolicy(UserscriptEngine.parse(script.code).raw["connect"].orEmpty())
             if (hosted[script.id]?.key == key) continue
             hosted.remove(script.id)?.handler?.let { runCatching { it.remove() } }
             try {
@@ -215,6 +221,7 @@ internal class GmChannel(
         detach(this)
         uninstallAll()
         guard.clear()
+        connectPolicies.clear()
         frames.clear()
         resyncPending.clear()
     }
@@ -236,13 +243,13 @@ internal class GmChannel(
             return
         }
         try {
-            dispatch(t, sid, pid, m, isMainFrame, reply)
+            dispatch(t, sid, pid, m, isMainFrame, origin, reply)
         } catch (e: Exception) {
             log("gm channel: handle $t failed ${e.message}")
         }
     }
 
-    private fun dispatch(t: String, sid: String, pid: Int, m: JSONObject, isMainFrame: Boolean, reply: JavaScriptReplyProxy) {
+    private fun dispatch(t: String, sid: String, pid: Int, m: JSONObject, isMainFrame: Boolean, origin: String, reply: JavaScriptReplyProxy) {
         when (t) {
             "bind" -> {
                 register(reply, sid)
@@ -276,7 +283,9 @@ internal class GmChannel(
                 if (reqId.isEmpty() || reqId.length > 200 || opts.isEmpty()) return
                 // 桥内的请求键：脚本 id + 运行时生成的随机 reqId（运行时的 reqId 本身就以脚本 id 开头）
                 val key = "$sid#$reqId"
-                bridge.xhrExec(sid, key, opts, m.optString("body")) { json ->
+                val policy = connectPolicies[sid] ?: GmConnectPolicy(emptyList())
+                val pageHost = pageHostOf(origin)
+                bridge.xhrExec(sid, key, opts, m.optString("body"), { host -> policy.xhrAllows(host, pageHost) }) { json ->
                     send(reply, JSONObject().put("t", "xhrRes").put("pid", pid).put("reqId", reqId).put("json", json))
                 }
             }
@@ -288,12 +297,16 @@ internal class GmChannel(
                 val url = m.optString("url")
                 val cbId = m.optString("cbId")
                 if (url.length > MAX_URL_CHARS || cbId.isEmpty() || cbId.length > 100 || !guard.allow(sid, "cookie", 120, 10_000)) return
-                val arr = runCatching { JSONArray(bridge.cookieList(url)) }.getOrDefault(JSONArray())
+                // GM_cookie 比 xhr 更严：只给同站或 @connect 明确列出的主机，其余按「没有 Cookie」回复（不报错、不泄露存在与否）
+                val arr = if (cookieAllowed(sid, url, origin)) {
+                    runCatching { JSONArray(bridge.cookieList(url)) }.getOrDefault(JSONArray())
+                } else JSONArray()
                 send(reply, JSONObject().put("t", "cookieRes").put("pid", pid).put("cbId", cbId).put("arr", arr))
             }
             "cookieSet" -> {
                 val opts = m.optJSONObject("opts") ?: return
                 if (!guard.allow(sid, "cookie", 120, 10_000)) return
+                if (!cookieAllowed(sid, opts.optString("url"), origin)) return
                 bridge.cookieSet(opts.toString())
             }
             "toast" -> if (guard.allow(sid, "toast", 10, 10_000)) bridge.toast(m.optString("msg").take(500))
@@ -319,6 +332,20 @@ internal class GmChannel(
             "menu", "ran" -> if (!isMainFrame) return
             else -> {} // 白名单之外（中继已过滤一次）：丢弃
         }
+    }
+
+    /**
+     * 发起请求的页面主机：优先用浏览器给出的 sourceOrigin；about:blank / srcdoc / 不透明 origin（`null`）的子框架
+     * 没有主机，退回标签当前地址（与 Gecko 侧「退回标签地址」一致）。主线程。
+     */
+    private fun pageHostOf(origin: String): String =
+        GmConnectPolicy.hostOf(origin).ifEmpty { GmConnectPolicy.hostOf(webView.url) }
+
+    private fun cookieAllowed(sid: String, url: String, origin: String): Boolean {
+        if (url.length > MAX_URL_CHARS) return false
+        val host = GmConnectPolicy.hostOf(url)
+        if (host.isEmpty()) return false
+        return (connectPolicies[sid] ?: GmConnectPolicy(emptyList())).cookieAllows(host, pageHostOf(origin))
     }
 
     private fun download(sid: String, pid: Int, m: JSONObject, reply: JavaScriptReplyProxy) {

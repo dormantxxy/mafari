@@ -993,11 +993,10 @@ test('cookies: namespace is extension-page-only and requires the manifest permis
   assert.strictEqual(noPerm.sandbox.browser.cookies, undefined);
   const page = makeEnv();
   page.run(assemble(cfg({ page: true, manifest }), '[]'));
-  for (const method of ['get', 'set', 'remove']) {
+  for (const method of ['get', 'getAll', 'set', 'remove']) {
     assert.strictEqual(typeof page.sandbox.browser.cookies[method], 'function', method);
     assert.strictEqual(typeof page.sandbox.chrome.cookies[method], 'function', 'chrome.' + method);
   }
-  assert.strictEqual(page.sandbox.browser.cookies.getAll, undefined);
 });
 
 test('cookies: get/set/remove forward details to native', () => {
@@ -1005,13 +1004,14 @@ test('cookies: get/set/remove forward details to native', () => {
   const env = makeEnv();
   env.run(assemble(cfg({ page: true, manifest }), entry([
     "browser.cookies.get({ url: 'https://example.com/', name: 'sid' });",
+    "browser.cookies.getAll({ url: 'https://example.com/' });",
     "browser.cookies.set({ url: 'https://example.com/', name: 'sid', value: 'abc', secure: true });",
     "browser.cookies.remove({ url: 'https://example.com/', name: 'sid', path: '/' });",
     "chrome.cookies.get({ url: 'https://example.com/', name: 'sid' }, function () {});"
   ])));
   const calls = env.posted.filter((x) => x.api && x.api.indexOf('cookies.') === 0);
-  assert.deepStrictEqual(calls.map((x) => x.api), ['cookies.get', 'cookies.set', 'cookies.remove', 'cookies.get']);
-  assert.strictEqual(calls[1].args[0].value, 'abc');
+  assert.deepStrictEqual(calls.map((x) => x.api), ['cookies.get', 'cookies.getAll', 'cookies.set', 'cookies.remove', 'cookies.get']);
+  assert.strictEqual(calls[2].args[0].value, 'abc');
 });
 
 test('history API is extension-page-only and exposes native-backed methods', () => {

@@ -153,9 +153,10 @@ class TabsApi(
             val id = resolveTabId(a.argOrNull(0))
             val p = a.argOrNull(1) as? JSONObject ?: JSONObject()
             val url = p.stringOrNull("url")?.let { TabUrlPolicy.normalize(ctx.ext.spec.id, it) }
-            // highlighted:true 在单窗口里等同于激活；pinned / muted / autoDiscardable 等没有对应概念，按空操作处理
+            // highlighted:true 在单窗口里等同于激活；muted 在支持 MUTE_AUDIO 的系统 WebView 上生效，否则空操作；
+            // pinned / autoDiscardable 等没有对应概念，按空操作处理
             val active = p.boolOrNull("active") ?: p.boolOrNull("selected") ?: p.boolOrNull("highlighted")
-            val tab = bridge().update(id, TabUpdateOptions(url, active)) ?: throw noTab(id)
+            val tab = bridge().update(id, TabUpdateOptions(url, active, p.boolOrNull("muted"))) ?: throw noTab(id)
             toJson(ctx.ext, tab, activeGranted(ctx.ext, tab))
         }
         router.register("tabs.duplicate") { ctx, a ->
@@ -217,6 +218,7 @@ class TabsApi(
         val see = canSeeDetails(ext, tab.url, activeGranted(ext, tab))
         val info = JSONObject()
         change.status?.let { info.put("status", it) }
+        change.muted?.let { info.put("mutedInfo", JSONObject().put("muted", it)) }
         if (see) {
             change.url?.let { info.put("url", it) }
             change.title?.let { info.put("title", it) }
@@ -287,7 +289,7 @@ class TabsApi(
                 .put("discarded", false)
                 .put("autoDiscardable", true)
                 .put("groupId", -1)
-                .put("mutedInfo", JSONObject().put("muted", false))
+                .put("mutedInfo", JSONObject().put("muted", t.muted == true))
             t.openerTabId?.let { o.put("openerTabId", it) }
             if (canSeeDetails(ext, t.url, activeTabGranted)) {
                 o.put("url", t.url).put("title", t.title)
@@ -330,8 +332,8 @@ class TabsApi(
 }
 
 /**
- * tabs.query 的过滤条件。没有对应概念的属性（pinned / audible / muted / discarded / incognito）
- * 按「全部为 false」处理：查 `pinned:true` 得到空，查 `pinned:false` 得到全部。
+ * tabs.query 的过滤条件。没有对应概念的属性（pinned / audible / discarded / incognito）
+ * 按「全部为 false」处理（muted 看标签的真实静音状态，不支持静音的 WebView 上恒为 false）：查 `pinned:true` 得到空，查 `pinned:false` 得到全部。
  */
 internal class TabQuery private constructor(
     private val active: Boolean?,
@@ -355,7 +357,8 @@ internal class TabQuery private constructor(
     fun matches(ext: InstalledExtension, t: TabInfo, activeTabGranted: Boolean = false): Boolean {
         if (active != null && t.active != active) return false
         if (highlighted != null && t.active != highlighted) return false
-        if (pinned == true || audible == true || muted == true || discarded == true || incognito == true) return false
+        if (pinned == true || audible == true || discarded == true || incognito == true) return false
+        if (muted != null && (t.muted == true) != muted) return false
         if (autoDiscardable == false) return false
         // 只有一个窗口且它就是当前窗口：false 表示「不在当前窗口」，必然为空
         if (currentWindow == false || lastFocusedWindow == false) return false

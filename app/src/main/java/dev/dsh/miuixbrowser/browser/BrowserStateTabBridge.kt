@@ -13,6 +13,7 @@ import dev.dsh.miuixbrowser.ext.TabCreateOptions
 import dev.dsh.miuixbrowser.ext.TabEventListener
 import dev.dsh.miuixbrowser.ext.TabInfo
 import dev.dsh.miuixbrowser.ext.TabUpdateOptions
+import dev.dsh.miuixbrowser.ext.WebViewAudio
 import dev.dsh.miuixbrowser.ext.WorldEval
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -105,6 +106,7 @@ class BrowserStateTabBridge(
                 loading = onPage && t.loading,
                 // openerId 指向已关闭的标签时 BrowserState 会改挂到上一层，这里再兜一次：不是可见标签就当没有
                 openerTabId = t.openerId.takeIf { it != -1 && it in ids },
+                muted = t.webViewOrNull?.let { WebViewAudio.isMuted(it) },
             )
         }
     }
@@ -137,6 +139,11 @@ class BrowserStateTabBridge(
         if (options.active == true) {
             val i = state.tabs.indexOf(tab)
             if (i >= 0) state.select(i)
+        }
+        val muted = options.muted
+        if (muted != null && tab.webViewOrNull?.let { WebViewAudio.setMuted(it, muted) } == true) {
+            // 静音状态不是 Compose 状态，snapshotFlow 观察不到：这里主动推一次快照，tabs.onUpdated 才会带 mutedInfo
+            tracker.update(visibleInfos())
         }
         infoOf(tabId)
     }

@@ -782,9 +782,11 @@ function (CFG, ENTRIES) {
   if (CFG.page && declares('cookies')) {
     cookies = {
       get: promised(function (details) { return rpc('cookies.get', [details || {}]); }),
+      // 只支持带 url 的调用（WebView 没有全局枚举）；不带 url 时原生端会报 unsupported
+      getAll: promised(function (details) { return rpc('cookies.getAll', [details || {}]); }),
       set: promised(function (details) { return rpc('cookies.set', [details || {}]); }),
       remove: promised(function (details) { return rpc('cookies.remove', [details || {}]); }),
-      // WebView 只有按 URL 的 CookieManager：没有全局枚举（getAll 故意不提供，让拓展特性检测后降级），也没有变更事件
+      // WebView 只有按 URL 的 CookieManager：getAll 必须带 url，没有全局枚举，也没有变更事件
       onChanged: inertEvent('cookies.onChanged')
     };
   }

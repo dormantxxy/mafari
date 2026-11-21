@@ -7,6 +7,7 @@ import androidx.webkit.Navigation
 import androidx.webkit.NavigationListener
 import androidx.webkit.NavigationRedirectParameters
 import androidx.webkit.NavigationState
+import androidx.webkit.Page
 import androidx.webkit.PageState
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -80,30 +81,49 @@ object NavigationMapping {
  *   webRequest 主文档的 onBeforeRedirect / onHeadersReceived / onResponseStarted / onCompleted（带真实状态码与响应头）。
  *   这些标签上 WebViewClient 的对应近似事件由 ExtensionSystem 丢弃，避免同一次导航发两遍。
  *
- * 系统 WebView 不支持时 [attach] 返回 false，调用方保持旧路径。所有回调在主线程。
+ * 两档支持：
+ * - 档 1（NAVIGATION_LISTENER_NAVIGATION_STATE）：走 NavigationState 重载，带状态码和响应头；
+ * - 档 2（只有 NAVIGATION_LISTENER）：走已废弃的 Navigation / Page 重载，仍有真实 transitionType / qualifiers /
+ *   DOMContentLoaded / load 和状态码，但拿不到响应头与重定向响应；
+ * - 都不支持时 [attach] 返回 false，调用方保持旧路径。所有回调在主线程。
  */
 object WebViewNavigationBridge {
-    fun isSupported(): Boolean = runCatching {
-        WebViewFeature.isFeatureSupported(WebViewFeature.NAVIGATION_LISTENER) &&
-            WebViewFeature.isFeatureSupported(WebViewFeature.NAVIGATION_LISTENER_NAVIGATION_STATE)
-    }.getOrDefault(false)
+    private fun supported(feature: String): Boolean =
+        runCatching { WebViewFeature.isFeatureSupported(feature) }.getOrDefault(false)
 
-    private fun headersSupported(): Boolean = runCatching {
-        WebViewFeature.isFeatureSupported(WebViewFeature.NAVIGATION_GET_RESPONSE_HEADERS)
-    }.getOrDefault(false)
+    /** 0 = 不支持；1 = 只有旧版 NavigationListener；2 = 带 NavigationState 快照。 */
+    fun tier(): Int = when {
+        !supported(WebViewFeature.NAVIGATION_LISTENER) -> 0
+        supported(WebViewFeature.NAVIGATION_LISTENER_NAVIGATION_STATE) -> 2
+        else -> 1
+    }
+
+    fun isSupported(): Boolean = tier() > 0
+
+    private fun headersSupported(): Boolean = supported(WebViewFeature.NAVIGATION_GET_RESPONSE_HEADERS)
 
     fun attach(webView: WebView, tabId: Int, sink: NavigationSink): Boolean {
-        if (!isSupported()) return false
+        val tier = tier()
+        if (tier == 0) return false
         return try {
             val main = Handler(Looper.getMainLooper())
-            WebViewCompat.addNavigationListener(webView, Executor { main.post(it) }, Listener(tabId, sink))
+            WebViewCompat.addNavigationListener(webView, Executor { main.post(it) }, Listener(tabId, sink, tier == 2))
             true
         } catch (_: Throwable) {
             false
         }
     }
 
-    private class Listener(private val tabId: Int, private val sink: NavigationSink) : NavigationListener {
+    /**
+     * [stateMode] 为真时只处理 NavigationState / PageState 重载，为假时只处理旧重载。
+     * 两组都覆盖且互相屏蔽，避免同一次导航被处理两遍（新重载的默认实现会转调旧重载，这里都不调 super）。
+     */
+    @Suppress("OVERRIDE_DEPRECATION")
+    private class Listener(
+        private val tabId: Int,
+        private val sink: NavigationSink,
+        private val stateMode: Boolean,
+    ) : NavigationListener {
         private class Flight(var url: String, var redirected: Boolean = false)
 
         /** 在途导航（主线程访问）。键用 Navigation 对象本身，文档要求不要用 NavigationState 做键。 */
@@ -116,46 +136,105 @@ object WebViewNavigationBridge {
         private var domReported = false
         private var loadReported = false
 
+        // ---- 档 1：NavigationState 重载 ----
         override fun onNavigationStarted(navigationState: NavigationState) {
-            val nav = navigationState.navigation
-            val url = nav.url ?: return
-            flights[nav] = Flight(url)
+            if (stateMode) started(navigationState.navigation)
         }
 
         override fun onNavigationRedirected(
             navigationState: NavigationState,
             navigationRedirectParameters: NavigationRedirectParameters,
         ) {
-            val nav = navigationState.navigation
-            val to = nav.url ?: return
+            if (!stateMode) return
+            val withHeaders = headersSupported()
+            val code = if (withHeaders) {
+                runCatching { NavigationMapping.statusOrNull(navigationRedirectParameters.statusCode) }.getOrNull()
+            } else null
+            val hdrs = if (withHeaders) {
+                runCatching { NavigationMapping.headersJson(navigationRedirectParameters.responseHeaders) }.getOrNull()
+            } else null
+            redirected(navigationState.navigation, code, hdrs)
+        }
+
+        override fun onNavigationCompleted(navigationState: NavigationState) {
+            if (!stateMode) return
+            val hdrs = if (headersSupported()) {
+                runCatching { NavigationMapping.headersJson(navigationState.responseHeaders) }.getOrNull()
+            } else null
+            completed(
+                navigationState.navigation,
+                sameDocument = navigationState.isSameDocument,
+                didCommit = navigationState.didCommit(),
+                errorPage = navigationState.didCommitErrorPage(),
+                code = NavigationMapping.statusOrNull(runCatching { navigationState.statusCode }.getOrDefault(0)),
+                hdrs = hdrs,
+            )
+        }
+
+        override fun onPageDomContentLoadedEvent(pageState: PageState) {
+            if (stateMode) domContentLoaded()
+        }
+
+        override fun onPageLoadEvent(pageState: PageState) {
+            if (stateMode) loaded()
+        }
+
+        // ---- 档 2：旧的 Navigation / Page 重载（1.19.0-alpha02 起废弃，旧系统 WebView 仍只会调这些） ----
+        override fun onNavigationStarted(navigation: Navigation) {
+            if (!stateMode) started(navigation)
+        }
+
+        override fun onNavigationRedirected(navigation: Navigation) {
+            if (!stateMode) redirected(navigation, null, null)
+        }
+
+        override fun onNavigationCompleted(navigation: Navigation) {
+            if (stateMode) return
+            completed(
+                navigation,
+                sameDocument = navigation.isSameDocument,
+                didCommit = navigation.didCommit(),
+                errorPage = navigation.didCommitErrorPage(),
+                code = NavigationMapping.statusOrNull(runCatching { navigation.statusCode }.getOrDefault(0)),
+                hdrs = null, // 旧版没有响应头
+            )
+        }
+
+        override fun onPageDomContentLoadedEvent(page: Page) {
+            if (!stateMode) domContentLoaded()
+        }
+
+        override fun onPageLoadEvent(page: Page) {
+            if (!stateMode) loaded()
+        }
+
+        // ---- 两档共用的逻辑 ----
+        private fun started(nav: Navigation) {
+            flights[nav] = Flight(nav.url)
+        }
+
+        private fun redirected(nav: Navigation, code: Int?, hdrs: JSONArray?) {
+            val to = nav.url
             val flight = flights.getOrPut(nav) { Flight(to) }
             val from = flight.url
             flight.url = to
             flight.redirected = true
             if (from == to) return
-            val code = if (headersSupported()) {
-                runCatching { NavigationMapping.statusOrNull(navigationRedirectParameters.statusCode) }.getOrNull()
-            } else null
-            val hdrs = if (headersSupported()) {
-                runCatching { NavigationMapping.headersJson(navigationRedirectParameters.responseHeaders) }.getOrNull()
-            } else null
             sink.redirected(tabId, from, to, code, hdrs)
         }
 
-        override fun onNavigationCompleted(navigationState: NavigationState) {
-            val nav = navigationState.navigation
+        private fun completed(
+            nav: Navigation, sameDocument: Boolean, didCommit: Boolean, errorPage: Boolean,
+            code: Int?, hdrs: JSONArray?,
+        ) {
             val flight = flights.remove(nav)
             // 同文档（pushState / 片段）由 doUpdateVisitedHistory 路径报告；没提交（204 / 下载 / 被取消）没有文档可言；
             // 错误页由 onReceivedError 路径报 onErrorOccurred，这里不能再报 committed。
-            if (navigationState.isSameDocument || !navigationState.didCommit() || navigationState.didCommitErrorPage()) {
-                if (navigationState.didCommitErrorPage()) committedUrl = null
+            if (sameDocument || !didCommit || errorPage) {
+                if (errorPage) committedUrl = null
                 return
             }
-            val url = nav.url ?: flight?.url ?: return
-            val code = NavigationMapping.statusOrNull(runCatching { navigationState.statusCode }.getOrDefault(0))
-            val hdrs = if (headersSupported()) {
-                runCatching { NavigationMapping.headersJson(navigationState.responseHeaders) }.getOrNull()
-            } else null
+            val url = nav.url
             committedUrl = url
             status = code
             headers = hdrs
@@ -169,14 +248,14 @@ object WebViewNavigationBridge {
             )
         }
 
-        override fun onPageDomContentLoadedEvent(pageState: PageState) {
+        private fun domContentLoaded() {
             val url = committedUrl ?: return
             if (domReported) return
             domReported = true
             sink.domContentLoaded(tabId, url)
         }
 
-        override fun onPageLoadEvent(pageState: PageState) {
+        private fun loaded() {
             val url = committedUrl ?: return
             if (loadReported) return
             loadReported = true

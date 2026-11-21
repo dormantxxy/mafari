@@ -38,7 +38,7 @@ class WebNavigationApi(
         }
     }
 
-    private val navigationStates = java.util.concurrent.ConcurrentHashMap<Int, NavigationState>()
+    private val navigationStates = java.util.concurrent.ConcurrentHashMap<Int, NavState>()
 
     /**
      * 由 androidx.webkit NavigationListener（[WebViewNavigationBridge]）驱动的标签。这些标签上，
@@ -63,7 +63,7 @@ class WebNavigationApi(
         val current = navigationStates[tabId]
         if (current != null && !current.terminal && current.initialUrl == url) return
         // 新的顶层导航取代尚未结束的导航；WebView 不提供可靠的 redirect chain，因此只保留初始 URL。
-        navigationStates[tabId] = NavigationState(initialUrl = url, transitionType = transitionType)
+        navigationStates[tabId] = NavState(initialUrl = url, transitionType = transitionType)
         emit("webNavigation.onBeforeNavigate", tabId, url, frameId)
     }
 
@@ -136,7 +136,7 @@ class WebNavigationApi(
         listenerDriven.remove(tabId)
     }
 
-    private data class NavigationState(
+    private data class NavState(
         val initialUrl: String,
         val transitionType: String,
         var committedUrl: String? = null,

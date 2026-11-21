@@ -48,7 +48,7 @@
 | `commands` | NONE | 未发现快捷键注册/触发 API | P2 |
 | `contentScripts` | MANIFEST | 静态 `content_scripts` 可由注入器处理；动态 API `register/unregister/update/getRegisteredContentScripts` 在 shim 有入口，但原生 router 没有 handler | P1 |
 | `contextualIdentities` | NONE | 无容器身份 API；Android 标签隐私模式不等同 Firefox Containers | P4 |
-| `cookies` | PARTIAL | URL 范围 get/set/remove；需要 cookies + 对应 host permission；WebView 不提供全局枚举和变更事件，get 只能返回 name/value 等可确认字段 | P1 |
+| `cookies` | PARTIAL | URL 范围 get/getAll/set/remove；需要 cookies + 对应 host permission；系统 WebView 支持 GET_COOKIE_INFO（CookieManagerCompat 1.6）时 get/getAll 返回真实 domain/hostOnly/path/secure/httpOnly/sameSite/过期时间，不支持时只有 name/value；getAll 必须带 url（不带返回 unsupported）；WebView 不提供全局枚举、storeId（仅 "0"）和变更事件 | P1 |
 | `declarativeNetRequest` | PARTIAL | 动态 block/redirect/allow 规则已接入；静态 ruleset、session rules、高级条件与调试 API 缺失 | P1 |
 | `devtools` | NONE | 无扩展 DevTools 页面及面板宿主 | P4 |
 | `dns` | NONE | 无扩展 DNS resolve API | P2 |
@@ -80,14 +80,14 @@
 | `sidebarAction` | NONE | 无侧边栏宿主 | P4 |
 | `storage` | PARTIAL | local/sync/session CRUD、配额与 onChanged 已接入；`sync` 仅本地持久化，不是 Firefox Sync；session 默认只对受信上下文开放 | P1 |
 | `tabGroups` | NONE | 无扩展标签组 API | P3 |
-| `tabs` | PARTIAL | query/get/getCurrent/create/update/duplicate/move/remove/reload/goBack/goForward/sendMessage/captureVisibleTab 与 onActivated/onHighlighted/onUpdated/onRemoved/onMoved 等基础事件已接入；截图仅活动 WebView viewport，单窗口且 sendMessage 仅主框架 | P1 |
+| `tabs` | PARTIAL | query/get/getCurrent/create/update/duplicate/move/remove/reload/goBack/goForward/sendMessage/captureVisibleTab 与 onActivated/onHighlighted/onUpdated/onRemoved/onMoved 等基础事件已接入；截图仅活动 WebView viewport，单窗口且 sendMessage 仅主框架；`update({muted})` / `mutedInfo` / `query({muted})` / onUpdated 的 mutedInfo 在支持 MUTE_AUDIO（WebViewCompat 1.11）的系统 WebView 上为真实静音，不支持时空操作且恒为未静音；`audible` 无对应 API，恒为 false | P1 |
 | `theme` | NONE | 无扩展主题读取/应用 API | P4 |
 | `topSites` | NONE | 无常访站点 API | P3 |
 | `types` | N/A | 公共类型命名空间，不是独立运行时服务 | — |
 | `userScripts` | PARTIAL | 标准 register/getScripts/update/unregister 已接入动态脚本注入器；MAIN/ISOLATED 仍受 WebView 世界隔离限制，frame 支持不完整 | P2 |
 | `userScripts (Legacy)` | NONE | MV2 legacy userScripts API 未实现 | P4 |
-| `webNavigation` | PARTIAL | 主框架 before/commit/complete/error 与 SPA History/Fragment 近似事件；系统 WebView 支持 NavigationListener 时 committed（真实 transitionType / qualifiers）、DOMContentLoaded、completed 为真实回调；子框架、documentId 仍缺 | P1 |
-| `webRequest` | PARTIAL | `onBeforeRequest` blocking cancel/redirect、拓展重定向 `onBeforeRedirect`、主文档的真实 `onBeforeRedirect` / `onHeadersReceived`（只读）/ `onResponseStarted` / `onCompleted`（NavigationListener：statusCode + responseHeaders，不支持时退回 onPageCommitVisible 近似）、error；请求头和子资源阶段缺失 | P0 |
+| `webNavigation` | PARTIAL | 主框架 before/commit/complete/error 与 SPA History/Fragment 近似事件；系统 WebView 支持 NavigationListener（1.15 起；有 NavigationState 特性为档 2，只有旧版为档 1）时 committed（真实 transitionType / qualifiers）、DOMContentLoaded、completed 为真实回调；子框架、documentId 仍缺 | P1 |
+| `webRequest` | PARTIAL | `onBeforeRequest` blocking cancel/redirect、拓展重定向 `onBeforeRedirect`、主文档的真实 `onBeforeRedirect` / `onHeadersReceived`（只读）/ `onResponseStarted` / `onCompleted`（NavigationListener：statusCode 两档都有，responseHeaders 与重定向响应仅 NavigationState 档有；响应头不含 Set-Cookie，同名多值头只给一条；不支持时退回 onPageCommitVisible 近似）、error；请求头和子资源阶段缺失 | P0 |
 | `windows` | NONE | 当前标签桥接按单窗口模型设计，无扩展窗口管理 API | P3 |
 
 `FULL*` 表示源码已有完整主路径，但仍需更广泛的 Firefox 行为兼容测试；不代表已经证明 100% 一致。

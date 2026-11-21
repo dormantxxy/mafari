@@ -156,15 +156,53 @@ jobs:
           (cd dist && sha256sum Mafari-*.apk > SHA256SUMS.txt)
           ls -lh dist
 
-      - name: Upload artifacts
+      # 每个安装包单独一个构建产物（upload-artifact@v7 的 archive: false：不压缩、不套 zip，产物名就是 apk 文件名）。
+      # archive: false 一次只能传 1 个文件，所以每个变体一步；lite-armeabi / lite-x86_64 在 canary 里不构建，找不到就跳过。
+      # 配额满时不拦住后面的 Release / Telegram（它们直接用 dist/ 里的文件）。
+      # 保留期：会发布的运行（tag / gecko / dual）安装包已在 Release 里，只留 1 天；main 等不发布的运行，产物是唯一的安装包来源，留 3 天
+      - name: Upload gecko
         uses: actions/upload-artifact@v7
-        # 产物配额满时不拦住后面的 Release / Telegram（它们直接用 dist/ 里的文件）
         continue-on-error: true
         with:
-          name: mafari-apk
-          path: dist/*.apk
+          path: dist/*-gecko.apk
+          archive: false
           if-no-files-found: error
-          # 会发布的运行（tag / gecko / dual）安装包已在 Release 里，产物只留 1 天；main 等不发布的运行，产物是唯一的安装包来源，留 3 天
+          retention-days: ${{ (env.IS_RELEASE_TAG == 'true' || env.IS_PRE_BRANCH == 'true') && 1 || 3 }}
+
+      - name: Upload lite arm64
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          path: dist/*-lite-arm64-v8a.apk
+          archive: false
+          if-no-files-found: error
+          retention-days: ${{ (env.IS_RELEASE_TAG == 'true' || env.IS_PRE_BRANCH == 'true') && 1 || 3 }}
+
+      - name: Upload lite arm32
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          path: dist/*-lite-armeabi-v7a.apk
+          archive: false
+          if-no-files-found: ignore
+          retention-days: ${{ (env.IS_RELEASE_TAG == 'true' || env.IS_PRE_BRANCH == 'true') && 1 || 3 }}
+
+      - name: Upload lite x64
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          path: dist/*-lite-x86_64.apk
+          archive: false
+          if-no-files-found: ignore
+          retention-days: ${{ (env.IS_RELEASE_TAG == 'true' || env.IS_PRE_BRANCH == 'true') && 1 || 3 }}
+
+      - name: Upload sync_lite arm64
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          path: dist/*-sync_lite-arm64.apk
+          archive: false
+          if-no-files-found: error
           retention-days: ${{ (env.IS_RELEASE_TAG == 'true' || env.IS_PRE_BRANCH == 'true') && 1 || 3 }}
 
       # tag 用 CHANGELOG 对应小节；gecko 分支写预发布说明

@@ -1,6 +1,7 @@
 # Changelog
 
 ## WebView GM channel: step 1c (legacy bridge only on demand, `@connect`)
+## [2.1.68]
 
 - Isolated-world devices no longer expose `MafariGM` to page JS: `setupWebView` only creates the shared `GmBridge`; `TabScripts.ensureLegacyBridge()` attaches the `addJavascriptInterface` bridge only when the system WebView lacks isolated worlds or the channel failed to install.
 - `TabScripts.injectMissing` skips late `evaluateJavascript` injection while the channel is active (such a script would have neither bridge nor relay).

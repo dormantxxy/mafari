@@ -67,7 +67,9 @@ class ExtensionSystem(
         val prefix = ExtensionOrigins.originFor(ext.spec.id) + "/"
         if (!url.startsWith(prefix, ignoreCase = true)) return false
         val path = url.substring(prefix.length)
-        val handler = pages.openOptionsHandler ?: return false
+        val handler = pages.openOptionsHandler
+        log("ext ${ext.spec.id}: 打开自己的页面 path=$path -> " + if (handler != null) "拓展页面 Sheet" else "无 UI 处理器，退回标签")
+        if (handler == null) return false
         android.os.Handler(android.os.Looper.getMainLooper()).post { handler(ext.spec.id, path) }
         return true
     }
@@ -107,6 +109,7 @@ class ExtensionSystem(
             { tabs.bridgeOrNull() },
             openOptions = { extId ->
                 val handler = pages.openOptionsHandler
+                log("ext $extId: runtime.openOptionsPage -> " + if (handler != null) "拓展页面 Sheet" else "无 UI 处理器，退回标签")
                 if (handler == null) false else {
                     android.os.Handler(android.os.Looper.getMainLooper()).post { handler(extId, null) }
                     true

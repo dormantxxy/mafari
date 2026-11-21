@@ -1582,8 +1582,9 @@ Mafari 是一款本地优先的浏览器。应用不要求注册账号，不包�
 脚本快捷菜单	Script quick menu
 {0}个脚本运行中	{0} scripts running
 脚本已停用	Scripts disabled
-隔离世界	Isolated world
-页面内	In-page
+隔离世界通道	Isolated-world channel
+页面内桥	In-page bridge
+页面内桥不安全：网页可直接调用脚本原生接口，建议更新 WebView 版本	In-page bridge is unsafe: web pages can call the script native interface directly. Please update WebView.
 当前页面没有运行中的脚本	No scripts running on this page
 开启后将在刷新页面时运行脚本	Scripts will run when the page is refreshed after turning on
 外观	Appearance

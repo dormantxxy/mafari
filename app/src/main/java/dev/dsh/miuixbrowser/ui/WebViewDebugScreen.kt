@@ -4,6 +4,7 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import dev.dsh.miuixbrowser.i18n.tr
 
 import dev.dsh.miuixbrowser.engine.webview.WebViewDebug
+import dev.dsh.miuixbrowser.engine.webview.WebViewNetSavings
 import dev.dsh.miuixbrowser.engine.webview.WebViewPerf
 import dev.dsh.miuixbrowser.engine.webview.WebViewSpeculative
 import dev.dsh.miuixbrowser.util.hostOf
@@ -220,6 +221,23 @@ fun WebViewDebugScreen(onBack: () -> Unit, blurEnabled: Boolean = true) {
                     item { SmallTitle(text = tr("维护")) }
                     item {
                         WebViewDebugGroup {
+                            if (WebViewNetSavings.isCacheQuotaSupported()) {
+                                var quotaSel by remember { mutableIntStateOf(WebViewNetSavings.selectedIndex()) }
+                                val autoLabel = WebViewNetSavings.defaultQuotaBytes()
+                                    ?.let { tr("自动（约 {0}）", android.text.format.Formatter.formatShortFileSize(context, it)) }
+                                    ?: tr("自动")
+                                val choices = listOf(autoLabel) + WebViewNetSavings.QUOTA_CHOICES_MB.map { "$it MB" }
+                                AppDropdownPreference(
+                                    backdrop = if (glass) backdrop else null,
+                                    title = tr("网页缓存上限"),
+                                    summary = tr("只限制 WebView 网页缓存的最大占用，不会立即清空；调小可能在后台触发清理。清空请用「清除 WebView 网页缓存」"),
+                                    items = choices,
+                                    selectedIndex = quotaSel.coerceIn(0, choices.lastIndex),
+                                    onSelectedIndexChange = { idx ->
+                                        if (WebViewNetSavings.select(idx)) quotaSel = idx
+                                    },
+                                )
+                            }
                             ArrowPreference(
                                 title = tr("清除 WebView 网页缓存"),
                                 summary = tr("只清 HTTP 缓存，不影响 Cookie、登录状态和站点数据"),

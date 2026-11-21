@@ -160,6 +160,15 @@ class BrowserTab(
     /** 请求关闭自己（由 [BrowserState] 接线），用于 [openedFromLink] 标签在第一页返回 */
     var onRequestClose: (() -> Unit)? = null
 
+    /**
+     * WebView 渲染进程崩溃 / 被系统回收（由 [BrowserState] 接线）：这个标签的 WebView 已经不能用了，
+     * 回调里由 [BrowserState] 建一个新标签顶替它的位置。参数是 [android.webkit.RenderProcessGoneDetail.didCrash]。
+     */
+    var onRenderGone: ((didCrash: Boolean) -> Unit)? = null
+
+    /** 渲染进程已经没了（只会置一次）：之后这个标签等着被替换，不再处理第二次回调 */
+    @Volatile internal var renderGone = false
+
     /** 从主页进入页面时 WebView 历史的当前下标（-1 = 历史为空）：回退到这一层就回主页，不再穿透到主页之前的旧页面 */
     internal var homeAnchor = -1
 
@@ -1090,6 +1099,8 @@ class BrowserTab(
             else -> customUserAgent
         }
         runCatching { webView.settings.userAgentString = ua }
+        // 请求头 Sec-CH-UA-Mobile / Sec-CH-UA-Platform 和 navigator.userAgentData 跟着 UA 走，别和 UA 字符串矛盾
+        dev.dsh.miuixbrowser.engine.webview.UaClientHints.apply(webView.settings, ua, defaultUserAgent)
     }
 
     /**
@@ -1420,6 +1431,10 @@ class BrowserTab(
 
     /** 成为当前标签时调用：该显示页面的恢复标签此刻才加载 */
     internal fun wakeIfPending() = restore.wakeIfPending()
+
+    /** 渲染进程崩溃后顶替上来的前台标签：不自动重载（页面可能一加载就崩，会死循环），显示崩溃页等用户点「重试」 */
+    internal fun adoptCrashedPage(failingUrl: String, savedTitle: String, desktop: Boolean, fromLink: Boolean, didCrash: Boolean) =
+        restore.adoptCrashed(failingUrl, savedTitle, desktop, fromLink, didCrash)
 
     internal fun canDiscardEngine(): Boolean = restore.canDiscard()
 

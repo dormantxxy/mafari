@@ -1,5 +1,12 @@
 # Changelog
 
+## WebView adoption: render-process recovery, UA client hints, async startup
+
+- **Main tabs now survive a renderer crash / OOM kill.** `TabWebViewSetup` handles `onRenderProcessGone` (returns `true`, so the app is no longer taken down with the renderer). `BrowserState.replaceCrashedTab` swaps in a fresh tab at the same position, keeping URL / title / desktop mode / opener chain / `tabs` row key. A foreground tab shows the existing "page crashed" error page (`ErrorPages.crashed`) and waits for Retry (no auto-reload, so a page that crashes on load cannot loop); a background tab becomes a pending-restore tab and loads when switched to.
+- **UA client hints follow the UA string.** New `UaClientHints` derives platform / mobile from the effective UA and applies `WebSettingsCompat.setUserAgentMetadata` (`USER_AGENT_METADATA`) after every `userAgentString` change, so `Sec-CH-UA-Mobile` / `Sec-CH-UA-Platform` / `navigator.userAgentData` no longer contradict desktop mode or a custom UA. When the target UA has the same platform and mobile flag as the system default it is left to WebView (the reduced UA's Android version is frozen and less accurate). Brand list untouched. Test: `UaClientHintsTest`.
+- **Async WebView start-up.** New `WebViewStartup` calls `WebViewCompat.startUpWebView` from `Application.onCreate` (main process, WebView default engine only). The cold-start content gate (`StartupCoordinator.awaitContentReady`) waits for it (<= 1.5 s, in parallel with the encrypted-DB warm-up), so the first `BrowserTab` WebView is created only after start-up finished; if it never finishes or is unsupported the old synchronous behaviour applies.
+- Not compiled here; `startUpWebView` / `UserAgentMetadata` signatures are written from the androidx.webkit docs, see the device checklist in the delivery notes.
+
 ## WebView GM channel: step 1c (legacy bridge only on demand, `@connect`)
 ## [2.1.68]
 

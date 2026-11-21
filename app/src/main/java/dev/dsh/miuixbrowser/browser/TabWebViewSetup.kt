@@ -168,6 +168,8 @@ internal fun BrowserTab.setupWebView() {
         cacheMode = WebSettings.LOAD_DEFAULT
         userAgentString = userAgentString.replace("; wv", "")
     }
+    // 图标由应用自己的 FaviconLoader 取，不读 WebView 的图标：别让 WebView 每次导航再下载一遍
+    dev.dsh.miuixbrowser.engine.webview.WebViewNetSavings.disableFaviconDownload(webView)
     // 先固定系统默认 UA（之后 applyUserAgent 会覆盖 settings.userAgentString）
     runCatching { defaultUserAgent.length }
     // 打开 WebView 的 WebAuthn（Passkey）支持。
@@ -379,6 +381,21 @@ internal fun BrowserTab.setupWebView() {
                 showWebViewErrorPage(view, request.url.toString(), ErrorPages.fromHttp(errorResponse.statusCode, errorResponse.reasonPhrase))
             }
             WebViewDebug.logHttpError(request, errorResponse)
+        }
+
+        /**
+         * 渲染进程崩溃 / 被系统回收（后台标签内存吃紧时最常见）。必须返回 true：返回 false 或不处理，
+         * 系统会连应用进程一起杀掉。这个 WebView 已经不能再用，不在回调里就地销毁，
+         * 而是稍后交给 [BrowserState] 建新标签顶替（前台标签显示崩溃页，后台标签等切过去再加载）。
+         */
+        override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+            if (renderGone) return true
+            renderGone = true
+            val crashed = detail.didCrash()
+            Diag.log("webview render process gone tab=$id crashed=$crashed page=$url")
+            loading = false
+            mainHandler.post { if (!closed && !destroyed) onRenderGone?.invoke(crashed) }
+            return true
         }
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {

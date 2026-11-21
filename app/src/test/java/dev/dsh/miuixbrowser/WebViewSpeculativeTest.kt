@@ -103,3 +103,19 @@ class WebViewPerfTest {
         assertEquals("2.35 s", WebViewPerf.format(2350))
     }
 }
+
+class QuotaMathTest {
+    private val choices = listOf(64, 128, 256, 512)
+    private fun mb(n: Long) = n * 1024 * 1024
+
+    @org.junit.Test fun exactQuotaPicksItsChoice() {
+        org.junit.Assert.assertEquals(0, dev.dsh.miuixbrowser.engine.webview.QuotaMath.nearestChoice(mb(64), choices))
+        org.junit.Assert.assertEquals(2, dev.dsh.miuixbrowser.engine.webview.QuotaMath.nearestChoice(mb(256), choices))
+    }
+
+    @org.junit.Test fun clampedQuotaPicksNearest() {
+        org.junit.Assert.assertEquals(0, dev.dsh.miuixbrowser.engine.webview.QuotaMath.nearestChoice(mb(10), choices))
+        org.junit.Assert.assertEquals(1, dev.dsh.miuixbrowser.engine.webview.QuotaMath.nearestChoice(mb(150), choices))
+        org.junit.Assert.assertEquals(3, dev.dsh.miuixbrowser.engine.webview.QuotaMath.nearestChoice(mb(4000), choices))
+    }
+}

@@ -2103,3 +2103,7 @@ API Key（可选）	API key (optional)
 旧版（仅 Page 重载）	Legacy (Page overloads only)
 URL 预取	URL prefetch
 导航排空预取	Nav drains prefetch
+网页缓存上限	Web cache limit
+只限制 WebView 网页缓存的最大占用，不会立即清空；调小可能在后台触发清理。清空请用「清除 WebView 网页缓存」	Only caps the maximum size of the WebView web cache and does not clear it right away; lowering it may trigger cleanup in the background. To clear it, use "Clear WebView page cache"
+自动（约 {0}）	Automatic (about {0})
+自动	Automatic

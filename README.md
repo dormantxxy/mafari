@@ -90,7 +90,7 @@ Mafari 是一款基于 **miuix** 设计风格的 Android 浏览器：界面简�
 ## 三个版本都有的功能
 
 **界面与浏览**
-- 单条悬浮底栏，「高级材质」可选柔光玻璃（带折射与边缘高光）、磨砂（无折射，更稳更省）、液态玻璃或纯色；向下滚动时自动让出空间，回到顶部再恢复；底栏可左右滑动缩成圆形搜索钮，导航栏位置可选「靠上 / 靠下 / 始终最小化」。
+- 单条悬浮底栏，「高级材质」可选柔光玻璃（带折射与边缘高光）、磨砂（无折射，更稳更省）、液态玻璃或纯色；向下滚动时自动让出空间，回到顶部再恢复；底栏可左右滑动缩成圆形搜索钮，导航栏样式可选「靠上 / 靠下 / 始终最小化 / 固定 / 悬浮三段式」。
 - 多标签，可在文字列表与卡片两种样式间切换；地址栏可显示网站标题、主域名或完整域名。
 - 主页内容（收藏、书签分组、隐私报告、最近浏览、下载项）可显示 / 隐藏并拖动排序；起始页可设为默认主页、新标签页或指定网页。
 - 点击主页的书签分组，会在图标下方弹出小窗，直接浏览子分组与书签，不用跳转页面。
@@ -146,11 +146,6 @@ bash tools/miuix-sync.sh   # 拉取 miuix 到 third_party/miuix 并应用 tools/
 
 完整的构建说明、版本变体、自动发布流程与代码结构，请见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
-## 许可证
-
-本项目以 [Apache License 2.0](LICENSE) 发布；构建时拉取的 miuix 上游同为 Apache-2.0（见其仓库 LICENSE），本地改造以补丁形式放在 `tools/miuix-patches/`。
-
-项目地址：<https://github.com/rosenii/mafari>
 
 ## 捐赠
 
@@ -175,3 +170,7 @@ Mafari 由个人业余时间开发维护，完全免费、无广告。如果它�
 - 繁體中文：`zh-TW-phrases.tsv`（台湾用语）+ `s2t.txt`（简→繁逐字表）运行时转换；个别用词不理想时在 phrases 里加一行即可。
 - 找不到译文时回退为简体中文原文，不会崩溃。新增文案只需在代码里写 `tr("…")`，再往 en.tsv 补一行。
 - 系统级字符串（应用名、自动填充服务名）在 `res/values*/strings.xml`，跟随系统语言。
+
+## WebExtension adapter additions
+
+The WebView adapter's partial `webRequestBlocking` support and Mafari-native Userscript bridge are documented in [`docs/WEBEXT_MAFARI_APIS.md`](docs/WEBEXT_MAFARI_APIS.md). Dynamic DNR rules and the standard `userScripts` subset are documented in [`docs/WEBEXT_DNR_USERSCRIPTS.md`](docs/WEBEXT_DNR_USERSCRIPTS.md). The compatibility matrix is in [`WEBEXT_API_COMPATIBILITY_MATRIX_UPDATED.md`](WEBEXT_API_COMPATIBILITY_MATRIX_UPDATED.md).

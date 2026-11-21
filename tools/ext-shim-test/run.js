@@ -80,6 +80,47 @@ test('bridge global is deleted from the page after capture', () => {
   assert.strictEqual(env.sandbox[BRIDGE], undefined);
 });
 
+test('mainWorld: runs without a bridge, never talks to native, gets the page\'s own chrome/browser', () => {
+  const env = makeEnv();
+  delete env.sandbox[BRIDGE];
+  env.sandbox.chrome = { pageOwn: 1 };
+  env.run(assemble({ mainWorld: true }, entry(['window.seen = typeof browser + \':\' + (chrome && chrome.pageOwn)'])));
+  assert.strictEqual(env.sandbox.seen, 'undefined:1');
+  assert.strictEqual(env.posted.length, 0);
+  assert.strictEqual(env.sandbox.browser, undefined);
+});
+
+test('mainWorld: match / exclude / run_at / css still apply', () => {
+  let env = makeEnv({ href: 'https://b.com/' });
+  const only = { s: ['https'], h: 'a.com', sub: false, p: null, r: null };
+  delete env.sandbox[BRIDGE];
+  env.run(assemble({ mainWorld: true }, entry(['window.hit = 1'], { m: [only] })));
+  assert.strictEqual(env.sandbox.hit, undefined);
+
+  env = makeEnv();
+  delete env.sandbox[BRIDGE];
+  env.run(assemble({ mainWorld: true }, entry(['window.hit = 1'], { at: 'document_end', css: ['a{}'] })));
+  assert.strictEqual(env.sandbox.hit, undefined);
+  env.fireDoc('DOMContentLoaded');
+  assert.strictEqual(env.sandbox.hit, 1);
+  assert.strictEqual(env.appended.length, 1);
+});
+
+test('isolatedWorld: browser/chrome become globals of that world (so scripting.executeScript code can use them)', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ isolatedWorld: true, tabId: 7 }), entry([''])));
+  assert.strictEqual(typeof env.sandbox.chrome.runtime.sendMessage, 'function');
+  assert.strictEqual(typeof env.sandbox.browser.storage.local.get, 'function');
+  assert.strictEqual(env.sandbox[BRIDGE], undefined);
+});
+
+test('legacy page-world mode still keeps browser/chrome out of the page globals', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ tabId: 7 }), entry([''])));
+  assert.strictEqual(env.sandbox.chrome, undefined);
+  assert.strictEqual(env.sandbox.browser, undefined);
+});
+
 test('does nothing when the bridge is missing', () => {
   const env = makeEnv();
   delete env.sandbox[BRIDGE];
@@ -241,6 +282,21 @@ test('tabs.sendMessage forwards tabId, message and options to the native router'
   assert.strictEqual(await p, 'pong');
 });
 
+test('tabs.captureVisibleTab supports options and window overloads', async () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true }), '[]'));
+  const p1 = env.sandbox.browser.tabs.captureVisibleTab({ format: 'jpeg', quality: 65 });
+  const c1 = env.posted.find((x) => x.api === 'tabs.captureVisibleTab');
+  assert.deepStrictEqual(c1.args, [{ format: 'jpeg', quality: 65 }]);
+  env.native({ id: c1.id, ok: true, result: 'data:image/jpeg;base64,AA==' });
+  assert.strictEqual(await p1, 'data:image/jpeg;base64,AA==');
+  const p2 = env.sandbox.chrome.tabs.captureVisibleTab(1, { format: 'png' });
+  const c2 = env.posted.filter((x) => x.api === 'tabs.captureVisibleTab')[1];
+  assert.deepStrictEqual(c2.args, [1, { format: 'png' }]);
+  env.native({ id: c2.id, ok: true, result: 'data:image/png;base64,AA==' });
+  assert.strictEqual(await p2, 'data:image/png;base64,AA==');
+});
+
 test('tabs duplicate and move forward to native handlers', async () => {
   const env = makeEnv();
   env.run(assemble(cfg({ page: true }), entry([
@@ -261,6 +317,13 @@ test('content-script mode handshakes only when installed for a browser tab', () 
   assert.ok(env.posted.some((x) => x.api === 'runtime.hello'));
 });
 
+test('tabs.onHighlighted dispatches Chrome highlightInfo payload', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true }), entry(['browser.tabs.onHighlighted.addListener(function (info) { window.highlighted = info; });'])));
+  env.native({ event: 'tabs.onHighlighted', payload: { highlightInfo: { tabIds: [7], windowId: 1 } } });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(env.sandbox.highlighted)), { tabIds: [7], windowId: 1 });
+});
+
 test('runtime.onMessage: sync, return true + sendResponse, promise, and no listener', async () => {
   // 没有监听器
   let env = makeEnv();
@@ -268,11 +331,17 @@ test('runtime.onMessage: sync, return true + sendResponse, promise, and no liste
   env.native({ type: 'message', cid: 'c0', message: 'x' });
   assert.deepStrictEqual(env.posted[0].args, ['c0', null, { noReceiver: true }]);
 
-  // 同步监听器没有返回 true：立即回 undefined
+  // 监听器收到消息但没有回复：按 NO_RECEIVER 处理，不伪造成功的 undefined
   env = makeEnv();
   env.run(assemble(cfg(), entry(['browser.runtime.onMessage.addListener(function () { });'])));
   env.native({ type: 'message', cid: 'c1', message: 'x' });
-  assert.deepStrictEqual(env.posted[0].args, ['c1', null, null]);
+  assert.deepStrictEqual(env.posted[0].args, ['c1', null, { noReceiver: true }]);
+
+  // 同步 sendResponse：即使监听器没有 return true，也立即完成回复
+  env = makeEnv();
+  env.run(assemble(cfg(), entry(['browser.runtime.onMessage.addListener(function (m, s, send) { send("sync-answer"); });'])));
+  env.native({ type: 'message', cid: 'cSync', message: 'x' });
+  assert.deepStrictEqual(env.posted[0].args, ['cSync', 'sync-answer', null]);
 
   // return true + 稍后 sendResponse
   env = makeEnv();
@@ -294,6 +363,20 @@ test('runtime.onMessage: sync, return true + sendResponse, promise, and no liste
   env.native({ type: 'message', cid: 'c3', message: 'hi' });
   await tick();
   assert.deepStrictEqual(env.posted[0].args, ['c3', { echo: 'hi' }, null]);
+});
+
+test('MV3 offscreen namespace is permission gated and exposes lifecycle methods', async () => {
+  let env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 3, name: 'Demo', version: '1' } }), entry([''])));
+  assert.strictEqual(env.sandbox.browser.offscreen, undefined);
+
+  env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 3, name: 'Demo', version: '1', permissions: ['offscreen'] } }), entry([''])));
+  assert.strictEqual(typeof env.sandbox.browser.offscreen.createDocument, 'function');
+  assert.strictEqual(typeof env.sandbox.chrome.offscreen.closeDocument, 'function');
+  env.sandbox.browser.offscreen.hasDocument();
+  await tick();
+  assert.ok(env.posted.some((p) => p.api === 'offscreen.hasDocument'));
 });
 
 test('getManifest is synchronous and returns a fresh copy; getURL and platform', async () => {
@@ -371,6 +454,29 @@ test('webRequest exposes filtered onBeforeRequest and registers/removes listener
   assert.ok(remove);
   assert.strictEqual(remove.args[0], add.args[1]);
   await tick();
+});
+
+test('webRequest blocking listener returns cancel / redirect decisions to native', async () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'Demo', version: '1', permissions: ['webRequest', 'webRequestBlocking', 'https://*.example.com/*'] } }), entry([
+    'window.listener = function () { return { cancel: true }; };' +
+    'browser.webRequest.onBeforeRequest.addListener(window.listener, { urls: ["https://*.example.com/*"] }, ["blocking"]);'
+  ])));
+  const add = env.posted.find(x => x.api === 'webRequest.addListener');
+  assert.ok(add);
+  assert.deepStrictEqual(Array.from(add.args[3]), ['blocking']);
+  env.native({ event: 'webRequest.onBeforeRequest', payload: { url: 'https://cdn.example.com/a.js', listenerTokens: [add.args[1]], blockingToken: 'wrb-test' } });
+  const resolve = env.posted.find(x => x.api === 'webRequest.resolveBlocking');
+  assert.ok(resolve);
+  assert.strictEqual(resolve.args[0], 'wrb-test');
+  assert.strictEqual(resolve.args[1].cancel, true);
+  await tick();
+});
+
+test('Mafari native userscripts API is exposed only to pages declaring mafariScripts', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 3, name: 'Demo', version: '1', permissions: ['mafariScripts'] } }), entry([''])));
+  assert.ok(env.sandbox.browser['mafari'].userscripts.getAll);
 });
 
 test('webRequest main-frame terminal events register and dispatch independently', async () => {
@@ -752,7 +858,7 @@ test('scripting.insertCSS / removeCSS: css / files / target only', () => {
   s.removeCSS({ target: { tabId: 3 }, files: ['x.css'] });
   const calls = env.posted.filter((p) => p.api && p.api.startsWith('scripting.')).map((p) => [p.api, p.args]);
   assert.deepStrictEqual(calls, [
-    ['scripting.insertCSS', [{ target: { tabId: 3 }, css: 'a{}' }]],
+    ['scripting.insertCSS', [{ target: { tabId: 3 }, css: 'a{}', origin: 'USER' }]],
     ['scripting.removeCSS', [{ target: { tabId: 3 }, files: ['x.css'] }]],
   ]);
 });
@@ -937,6 +1043,164 @@ test('action and browserAction expose compatible setters through shared API shap
   ])));
   const calls = env.posted.filter((x) => x.api && (x.api.indexOf('action.') === 0 || x.api.indexOf('browserAction.') === 0));
   assert.deepStrictEqual(calls.map((x) => x.api), ['action.setBadgeText', 'action.setBadgeBackgroundColor', 'action.setTitle', 'action.setPopup', 'browserAction.setBadgeText']);
+});
+
+// ───────────── 后台页启动不能因为「命名空间 / 事件对象不存在」抛 TypeError ─────────────
+// 现象：uBO / 篡改猴 / 沉浸式翻译的 popup 白屏、转圈，或「插件未能连接当前页面」。
+// 原因：它们的后台页在启动时无条件调用 webRequest.onHeadersReceived 等；垫片原来只有 3 个 webRequest 事件，
+// 后台页在那一行抛 TypeError，之后的 runtime.onMessage / onConnect 永远没注册，所有 popup / content script 的请求都没人应。
+const UBO_PERMS = ['alarms', 'dns', 'menus', 'privacy', 'storage', 'tabs', 'unlimitedStorage', 'webNavigation', 'webRequest', 'webRequestBlocking', '<all_urls>'];
+const TM_PERMS = ['alarms', 'notifications', 'tabs', 'idle', 'webNavigation', 'webRequest', 'webRequestBlocking', 'unlimitedStorage', 'storage', 'contextMenus', 'clipboardWrite', 'cookies', 'contextualIdentities', 'downloads', '<all_urls>'];
+const IMT_PERMS = ['storage', 'activeTab', 'contextMenus', 'webRequest', 'webRequestBlocking', '<all_urls>'];
+
+for (const [label, perms] of [['uBlock Origin', UBO_PERMS], ['Tampermonkey', TM_PERMS], ['Immersive Translate', IMT_PERMS]]) {
+  test('background bootstrap does not throw on the Firefox-style APIs ' + label + ' calls unguarded', () => {
+    const env = makeEnv();
+    env.run(assemble(cfg({ page: true, background: true, manifest: { manifest_version: 2, name: label, version: '1', permissions: perms } }), entry([`
+      window.__err = null;
+      try {
+        var wr = browser.webRequest, f = function () {}, flt = { urls: ['<all_urls>'] };
+        wr.onBeforeRequest.addListener(f, flt, ['blocking']);
+        ['onBeforeSendHeaders', 'onSendHeaders', 'onHeadersReceived', 'onAuthRequired', 'onResponseStarted', 'onBeforeRedirect']
+          .forEach(function (n) { wr[n].addListener(f, flt, ['blocking', 'responseHeaders']); });
+        wr.handlerBehaviorChanged();
+        browser.browserAction.onClicked.addListener(f);
+        browser.browserAction.setIcon({ path: 'x.png' }); browser.browserAction.setBadgeTextColor({ color: 'white' });
+        browser.runtime.onSuspend.addListener(f); browser.runtime.onMessageExternal.addListener(f);
+        browser.runtime.setUninstallURL('https://x').catch(f);
+        browser.tabs.onReplaced.addListener(f); browser.tabs.onAttached.addListener(f);
+        browser.windows.onFocusChanged.addListener(f); browser.windows.getCurrent(); chrome.windows.getAll({ populate: true }, f);
+        browser.storage.managed.get().catch(f);
+        window.__bg = browser.extension.getBackgroundPage() === window;
+      } catch (e) { window.__err = String(e && e.message || e); }
+    `])));
+    assert.strictEqual(env.sandbox.__err, null);
+    assert.strictEqual(env.sandbox.__bg, true);
+  });
+}
+
+test('feature-detectable namespaces stay absent (privacy / dns / contextualIdentities), so extensions take their own fallback path', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: UBO_PERMS.concat(['contextualIdentities']) } }), entry([
+    'window.__has = [browser.privacy, browser.dns, browser.contextualIdentities, browser.commands].map(function (x) { return x !== undefined; });',
+  ])));
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(env.sandbox.__has)), [false, false, false, false]);
+});
+
+test('inert events and no-op setters never reach the native bridge (no fake success against a native handler)', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: ['webRequest', 'idle'] } }), entry([
+    "var f = function () {}; browser.webRequest.onHeadersReceived.addListener(f, {}, ['blocking']); browser.browserAction.onClicked.addListener(f); browser.browserAction.setIcon({}); browser.idle.onStateChanged.addListener(f);",
+  ])));
+  assert.deepStrictEqual(env.posted.map((x) => x.api), ['runtime.hello']);
+});
+
+test('methods the host cannot do reject with UNSUPPORTED instead of throwing synchronously or faking success', async () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: ['idle'] } }), entry([`
+    window.__codes = [];
+    [function () { return browser.tabs.executeScript(1, { code: '1' }); }, function () { return browser.idle.queryState(60); },
+     function () { return browser.windows.create({}); }]
+      .forEach(function (fn) { fn().then(function () { window.__codes.push('resolved'); }, function (e) { window.__codes.push(e.code); }); });
+  `])));
+  await tick(); await tick();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(env.sandbox.__codes)), ['UNSUPPORTED', 'UNSUPPORTED', 'UNSUPPORTED']);
+});
+
+test('windows: single-window model, ids agree with tabs.windowId', async () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true }), entry([`
+    window.__w = [];
+    browser.windows.getCurrent().then(function (w) { window.__w.push(w.id, w.type, w.focused); });
+    browser.windows.get(99).catch(function (e) { window.__w.push(e.message); });
+    chrome.windows.getAll(function (l) { window.__w.push(l.length); });
+  `])));
+  await tick(); await tick();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(env.sandbox.__w)), [1, 'normal', true, 'No window with id: 99.', 1]);
+});
+
+test('menus.create({ onclick }) is honoured locally and the function never crosses the bridge', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: ['contextMenus'] } }), entry([
+    "window.__clicked = []; browser.menus.create({ id: 'm1', title: 'T', onclick: function (info, tab) { window.__clicked.push(info.menuItemId + ':' + tab.id); } });",
+  ])));
+  const create = env.posted.find((x) => x.api === 'contextMenus.create');
+  assert.ok(create && !('onclick' in create.args[0]));
+  env.native({ event: 'contextMenus.onClicked', payload: { info: { menuItemId: 'm1' }, tab: { id: 3 } } });
+  env.runTimers();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(env.sandbox.__clicked)), ['m1:3']);
+});
+
+test('extension.getBackgroundPage is null outside the background page (callers fall back to messaging)', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true }), entry(['window.__bg = browser.extension.getBackgroundPage();'])));
+  assert.strictEqual(env.sandbox.__bg, null);
+});
+
+// ───────────── 兜底：不存在的 onXxx 事件不能把后台页带死；方法 / 命名空间的特性检测不能被破坏 ─────────────
+test('catch-all: any unknown onXxx event on an existing namespace is a registrable inert event', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: ['webNavigation', 'downloads', 'notifications', 'cookies', 'tabs'] } }), entry([`
+    window.__err = null; window.__r = [];
+    try {
+      var f = function () {};
+      browser.webNavigation.onCreatedNavigationTarget.addListener(f); browser.webNavigation.onDOMContentLoaded.addListener(f);
+      browser.downloads.onChanged.addListener(f); browser.notifications.onButtonClicked.addListener(f);
+      browser.cookies.onChanged.addListener(f);
+      browser.tabs.onSomethingFirefoxAddsNextYear.addListener(f);       // 完全没听说过的事件
+      chrome.runtime.onSomethingElse.addListener(f);                     // chrome.* 同样兜底
+      window.__r.push(browser.tabs.onSomethingFirefoxAddsNextYear.hasListener(f), browser.tabs.onSomethingFirefoxAddsNextYear.hasListeners());
+      browser.tabs.onSomethingFirefoxAddsNextYear.removeListener(f);
+      window.__r.push(browser.tabs.onSomethingFirefoxAddsNextYear.hasListener(f));
+    } catch (e) { window.__err = String(e && e.message || e); }
+  `])));
+  assert.strictEqual(env.sandbox.__err, null);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(env.sandbox.__r)), [true, true, false]);
+});
+
+test('catch-all does not invent methods or namespaces, and does not change what Object.keys / in report', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: ['tabs'] } }), entry([`
+    window.__r = [
+      typeof browser.tabs.someFutureMethod, 'onFutureEvent' in browser.tabs, Object.keys(browser.tabs).indexOf('onFutureEvent') >= 0,
+      typeof browser.privacy, typeof browser.dns, typeof browser.commands,
+      typeof browser.tabs.query, browser.tabs.onUpdated === browser.tabs.onUpdated
+    ];
+  `])));
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(env.sandbox.__r)), ['undefined', false, false, 'undefined', 'undefined', 'undefined', 'function', true]);
+});
+
+test('catch-all also covers the small namespaces a content script sees', () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({}), entry(["window.__ok = false; browser.runtime.onSuspend.addListener(function () {}); browser.runtime.onNewThing.addListener(function () {}); window.__ok = true;"])));
+  assert.strictEqual(env.sandbox.__ok, true);
+});
+
+test('inert events warn once (unless quiet) and never reach the native bridge', () => {
+  const env = makeEnv();
+  const warns = [];
+  env.sandbox.console.warn = (m) => warns.push(String(m));
+  env.run(assemble(cfg({ page: true, manifest: { manifest_version: 2, name: 'x', version: '1', permissions: ['webRequest'] } }), entry([`
+    var f = function () {}, g = function () {};
+    browser.webRequest.onHeadersReceived.addListener(f); browser.webRequest.onHeadersReceived.addListener(g);
+    browser.runtime.onSuspend.addListener(f);
+  `])));
+  assert.strictEqual(warns.filter((w) => w.includes('webRequest.onHeadersReceived')).length, 1);
+  assert.strictEqual(warns.filter((w) => w.includes('runtime.onSuspend')).length, 0);
+  assert.deepStrictEqual(env.posted.map((x) => x.api), ['runtime.hello']);
+});
+
+test('background page prints a one-line startup summary; other pages do not', () => {
+  const lines = [];
+  const bg = makeEnv();
+  bg.sandbox.console.info = (m) => lines.push(String(m));
+  bg.run(assemble(cfg({ page: true, background: true }), '[]'));
+  assert.strictEqual(lines.filter((l) => l.startsWith('[mafari] shim ready')).length, 1);
+  lines.length = 0;
+  const popup = makeEnv();
+  popup.sandbox.console.info = (m) => lines.push(String(m));
+  popup.run(assemble(cfg({ page: true }), '[]'));
+  assert.strictEqual(lines.length, 0);
 });
 
 // ───────────── 垫片 ⇄ 原生 的静态一致性（不跑 Kotlin，只读源码）：专抓「写了没接上」────────────

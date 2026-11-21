@@ -13,7 +13,7 @@ val miuixVersion: String = rootProject.file("third_party/miuix/build-logic/src/m
 val backdropVersion = "2.0.1"
 val activityComposeVersion = "1.13.0"
 val coreKtxVersion = "1.19.1"
-val webkitVersion = "1.18.0"
+val webkitVersion = "1.19.0-alpha02"
 val credentialsVersion = "1.6.0"
 val browserVersion = "1.10.0"
 // 扫一扫：CameraX 取景 + ML Kit 内置版条码识别（模型打进 APK，不依赖 Google Play 服务）
@@ -36,6 +36,23 @@ val fxaComponentsVersion = (project.findProperty("fxaComponentsVersion") as Stri
 // fxaComponentsVersion 为 "+" 时同样用 "+"。想固定写 gradle.properties：appServicesVersion=161.0
 val appServicesVersion = (project.findProperty("appServicesVersion") as String?)
     ?: if (fxaComponentsVersion == "+") "+" else fxaComponentsVersion.replace(Regex("b\\d+$"), "")
+// application-services 对齐：Kotlin 绑定（fxaclient 等）与原生库（libmegazord.so）必须来自同一个版本，否则 JNA 会报
+// "Error looking up function 'uniffi_..._fn_method_...'"（登录 / 同步全部失效）。fxaComponentsVersion 与 appServicesVersion
+// 同为 "+" 时各自解析到的版本可能不一致（例如 Mozilla 刚发新版），所以以 service-firefox-accounts 实际依赖的 fxaclient 版本为准，
+// 强制整个 org.mozilla.appservices 组使用它；解析失败（离线 / IDE 同步）则不干预，行为与以前一致。
+val appServicesAligned: String? = (project.findProperty("appServicesVersion") as String?) ?: runCatching {
+    val probe = configurations.detachedConfiguration(
+        dependencies.create("org.mozilla.components:service-firefox-accounts:$fxaComponentsVersion"),
+    )
+    probe.attributes.attribute(
+        org.gradle.api.attributes.Usage.USAGE_ATTRIBUTE,
+        objects.named(org.gradle.api.attributes.Usage::class.java, org.gradle.api.attributes.Usage.JAVA_RUNTIME),
+    )
+    probe.resolvedConfiguration.lenientConfiguration.allModuleDependencies
+        .map { it.module.id }
+        .firstOrNull { it.group == "org.mozilla.appservices" && it.name == "fxaclient" }
+        ?.version
+}.getOrNull()
 // GeckoView nightly（仅 arm64-v8a）。默认 "+" = 取 Mozilla Maven 上最新的 nightly；
 // 要锁定版本（推荐，nightly 的 API 偶尔会改）在 gradle.properties 写 geckoViewVersion=152.0.20260801093011
 val geckoViewVersion = (project.findProperty("geckoViewVersion") as String?) ?: "+"
@@ -43,7 +60,7 @@ val geckoViewVersion = (project.findProperty("geckoViewVersion") as String?) ?: 
 // Gradle 版本在 gradle/wrapper/gradle-wrapper.properties；升级时请同步这里，仅用于「关于」页展示
 val kotlinVersion = "2.4.21"
 val composeMultiplatformVersion = "1.12.2"
-val agpVersion = "9.5.1"
+val agpVersion = "9.5.2"
 
 // 格式：分组|名称|版本;分组|名称|版本…（分组用 ASCII 标识，界面文案由 AboutScreen 映射）
 // withGecko：无内核版（lite）不带 GeckoView，不在「依赖版本」里展示它
@@ -99,8 +116,8 @@ android {
         applicationId = "dev.dsh.miuixbrowser"
         minSdk = 33
         targetSdk = 37
-        versionCode = 20062
-        versionName = "v2.1.62-canary"
+        versionCode = 20067
+        versionName = "v2.1.67"
         // gecko 分支的 CI 构建号（GITHUB_RUN_NUMBER，与预发布 tag「gecko-<n>」一致）；dual 是正式发布，按版本号比较，不写构建号；其它构建为 0
         val geckoBuild = if (System.getenv("GITHUB_REF") == "refs/heads/gecko" || System.getenv("GITHUB_REF_NAME") == "gecko") {
             System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
@@ -310,6 +327,12 @@ dependencies {
 // 与 Fenix 一致：gecko 变体排除 glean-native，用 GeckoView 里的；lite 没有 GeckoView，保留 glean-native。
 configurations.configureEach {
     if (name.contains("gecko", ignoreCase = true)) exclude(module = "glean-native")
+    // 上面 appServicesAligned 的探测配置自己不能套这条规则
+    if (!name.startsWith("detachedConfiguration") && appServicesAligned != null) {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "org.mozilla.appservices") useVersion(appServicesAligned)
+        }
+    }
 }
 
 // 动态版本（"+"）每 6 小时才重新解析一次，避免每次构建都访问网络

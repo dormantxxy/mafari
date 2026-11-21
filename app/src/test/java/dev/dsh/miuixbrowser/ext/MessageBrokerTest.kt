@@ -60,6 +60,75 @@ class MessageBrokerTest {
         assertEquals("pong", r.await())
     }
 
+    // 回归：sender.url 缺失 / 只有 origin（少一个斜杠）时，uBO 的 `port.sender.url.startsWith(getURL(''))` 判定失败，
+    // popup 的所有请求被当作无特权而静默忽略；篡改猴 / 沉浸式翻译读 sender.url / sender.tab.url 时也会抛 TypeError。
+    @Test fun senderCarriesFullUrlAndTabDetails() = runBlocking {
+        val b = MessageBroker(timeoutMs = 5000, newCid = { "c1" })
+        val bg = Ep("bg")
+        b.register(bg)
+        val cs = Sender(SenderKind.CONTENT_SCRIPT, "https://a.com", true, 7, null, "https://a.com/p?q=1")
+        val r = async { b.sendMessage(ctx(cs), null, "x") }
+        yield()
+        val sender = bg.got[0].third
+        assertEquals("https://a.com/p?q=1", sender.getString("url"))
+        assertEquals("https://a.com/p?q=1", sender.getJSONObject("tab").getString("url"))
+        assertEquals(TabBridge.WINDOW_ID, sender.getJSONObject("tab").getInt("windowId"))
+        b.reply(TestExt.ID, "c1", "ok", false)
+        r.await()
+
+        // 子框架：没有可信的完整网址，退化为 origin/，且不带 tab.url
+        val b2 = MessageBroker(timeoutMs = 5000, newCid = { "c2" })
+        val bg2 = Ep("bg")
+        b2.register(bg2)
+        val frame = Sender(SenderKind.CONTENT_SCRIPT, "https://a.com", false, 7)
+        val r2 = async { b2.sendMessage(ctx(frame), null, "x") }
+        yield()
+        val s2 = bg2.got[0].third
+        assertEquals("https://a.com/", s2.getString("url"))
+        assertFalse(s2.getJSONObject("tab").has("url"))
+        b2.reply(TestExt.ID, "c2", "ok", false)
+        r2.await()
+    }
+
+    @Test fun extensionPageSenderUrlStartsWithGetUrlRoot() = runBlocking {
+        val b = MessageBroker(timeoutMs = 5000, newCid = { "c1" })
+        val bg = Ep("bg")
+        b.register(bg)
+        val popup = Sender(SenderKind.EXTENSION_PAGE, ExtensionOrigins.originFor(TestExt.ID), true, null, "popup")
+        val r = async { b.sendMessage(ctx(popup), null, "x") }
+        yield()
+        val url = bg.got[0].third.getString("url")
+        assertTrue(url.startsWith(ExtensionOrigins.urlFor(TestExt.ID, "")))
+        b.reply(TestExt.ID, "c1", "ok", false)
+        r.await()
+    }
+
+    // 后台页正在启动（已 expectBackground、还没握手）：content script 的第一条消息要等后台页，而不是立刻 NO_RECEIVER
+    @Test fun sendMessageWaitsForBackgroundThatIsStillStarting() = runBlocking {
+        val b = MessageBroker(timeoutMs = 5000, newCid = { "c1" }, backgroundGraceMs = 2000)
+        b.expectBackground(TestExt.ID)
+        val r = async { b.sendMessage(ctx(csSender()), null, "early") }
+        kotlinx.coroutines.delay(150)
+        val bg = Ep("bg")
+        b.register(bg)
+        b.backgroundReady(TestExt.ID)
+        kotlinx.coroutines.delay(150)
+        assertEquals(1, bg.got.size)
+        b.reply(TestExt.ID, "c1", "late-but-ok", false)
+        assertEquals("late-but-ok", r.await())
+    }
+
+    @Test fun sendMessageDoesNotWaitWhenNoBackgroundIsExpectedOrGraceExpired() = runBlocking {
+        val none = MessageBroker(timeoutMs = 5000)
+        assertEquals("NO_RECEIVER", code { runBlocking { none.sendMessage(ctx(csSender()), null, "x") } })
+
+        var now = 1_000L
+        val expired = MessageBroker(timeoutMs = 5000, backgroundGraceMs = 100, clock = { now })
+        expired.expectBackground(TestExt.ID)
+        now += 101
+        assertEquals("NO_RECEIVER", code { runBlocking { expired.sendMessage(ctx(csSender()), null, "x") } })
+    }
+
     @Test fun contentScriptsAreNotTargetsAndSenderPageIsExcluded() = runBlocking {
         val b = MessageBroker(timeoutMs = 200)
         val cs = Ep("cs", kind = SenderKind.CONTENT_SCRIPT)
@@ -200,6 +269,20 @@ class MessageBrokerTest {
         assertEquals(ErrorCodes.NO_RECEIVER, code { runBlocking { b.sendToTab(ctx, 123, "x") } })
     }
 
+    @Test fun unregisteringPendingReceiverReleasesSendMessageImmediately() = runBlocking {
+        val b = MessageBroker(timeoutMs = 10_000)
+        val bg = Ep("bg")
+        b.register(bg)
+        val result = async {
+            try { b.sendMessage(ctx(csSender()), null, "waiting"); null }
+            catch (e: ApiException) { e.code }
+        }
+        yield()
+        assertEquals(1, bg.got.size)
+        b.unregister("bg")
+        assertEquals(ErrorCodes.NO_RECEIVER, result.await())
+    }
+
     @Test fun unregisterRemovesContexts() {
         val b = MessageBroker()
         b.register(Ep("a")); b.register(Ep("b", extId = "o@x"))
@@ -308,4 +391,49 @@ class MessageBrokerTest {
         c.emit("x", "storage.onChanged", JSONObject())
         assertEquals(listOf("x:storage.onChanged"), seen)
     }
+    @Test fun runtimeGetContextsReturnsOnlyOwnExtensionContextsAndAppliesFilters() {
+        val b = MessageBroker()
+        val background = object : Ep("bg") {
+            override val contextType = "BACKGROUND"
+            override val documentUrl = "https://extension.invalid/background.html"
+            override val documentOrigin = "https://extension.invalid"
+        }
+        val popup = object : Ep("popup") {
+            override val contextType = "POPUP"
+            override val documentUrl = "https://extension.invalid/popup.html"
+            override val documentOrigin = "https://extension.invalid"
+        }
+        val content = object : Ep("content:${TestExt.ID}:7", kind = SenderKind.CONTENT_SCRIPT, tabId = 7) {
+            override val contextType = "TAB"
+            override val documentUrl = "https://site.example/page"
+            override val documentOrigin = "https://site.example"
+        }
+        b.register(background); b.register(popup); b.register(content)
+        b.register(Ep("other", extId = "other@x.org"))
+
+        val all = b.getContexts(TestExt.ID)
+        assertEquals(3, all.length())
+        val popupOnly = b.getContexts(TestExt.ID, JSONObject("""{"contextTypes":["POPUP"]}"""))
+        assertEquals(1, popupOnly.length())
+        assertEquals("popup", popupOnly.getJSONObject(0).getString("contextId"))
+        val tabOnly = b.getContexts(TestExt.ID, JSONObject("""{"tabIds":[7],"documentOrigins":["https://site.example"],"documentUrls":["https://site.example/page"]}"""))
+        assertEquals(1, tabOnly.length())
+        assertEquals("https://site.example/page", tabOnly.getJSONObject(0).getString("documentUrl"))
+        assertEquals("https://site.example", tabOnly.getJSONObject(0).getString("documentOrigin"))
+        assertEquals(7, tabOnly.getJSONObject(0).getInt("tabId"))
+        assertEquals(TabBridge.WINDOW_ID, tabOnly.getJSONObject(0).getInt("windowId"))
+        assertEquals(0, b.getContexts(TestExt.ID, JSONObject("""{"documentUrls":["https://other.example/page"]}""")).length())
+        assertEquals(0, b.getContexts(TestExt.ID, JSONObject("""{"contextTypes":["DEVELOPER_TOOLS"]}""")).length())
+    }
+
+    @Test fun runtimeGetContextsRejectsMalformedFilters() {
+        val b = MessageBroker()
+        try {
+            b.getContexts(TestExt.ID, JSONObject("""{"tabIds":"7"}"""))
+            fail("expected BAD_REQUEST")
+        } catch (e: ApiException) {
+            assertEquals(ErrorCodes.BAD_REQUEST, e.code)
+        }
+    }
+
 }

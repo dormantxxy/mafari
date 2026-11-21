@@ -85,8 +85,9 @@
 | `userScripts` | NONE | Mafari 自身 Userscript/GM 系统不等同 Firefox `browser.userScripts` API | P2 |
 | `userScripts (Legacy)` | NONE | MV2 legacy userScripts API 未实现 | P4 |
 | `webNavigation` | PARTIAL | 主框架 before/commit/complete/error 与 SPA History/Fragment 近似事件；子框架、DOMContentLoaded、documentId 语义不完整 | P1 |
-| `webRequest` | PARTIAL | 已接入 WebView `shouldInterceptRequest` 的 `onBeforeRequest` 观察事件；blocking / response 生命周期未实现 | P0 |
-| `windows` | NONE | 当前标签桥接按单窗口模型设计，无扩展窗口管理 API | P3 |
+| `webRequest` | PARTIAL | 支持 `onBeforeRequest` 观察与有限 blocking cancel/redirect；响应头修改、请求头修改及完整子资源生命周期缺失 | P0 |
+| `mafari.userscripts` | PARTIAL（Mafari 专有） | `browser.mafari.userscripts` 管理原生 Userscript 库；需要 `mafariScripts` 权限，仅扩展页面可用 | P2 |
+| `windows` | PARTIAL | 单窗口模型：`get / getCurrent / getLastFocused / getAll / update` 返回唯一窗口（id=1，与 tabs.windowId 一致）；`create / remove` 返回 UNSUPPORTED；事件惰性 | P3 |
 
 `FULL*` 表示源码已有完整主路径，但仍需更广泛的 Firefox 行为兼容测试；不代表已经证明 100% 一致。
 
@@ -315,3 +316,26 @@
 - 失败后若 WebView 再回调页面完成，不会重新生成一条虚假的完成事件；无对应 before 记录的终态回调直接忽略。
 - 仍然不支持子资源 `onCompleted/onErrorOccurred`、`onHeadersReceived`、`onBeforeSendHeaders`、`onSendHeaders`、`requestBody` 和 blocking；`webRequest` 继续为 PARTIAL。
 - 这不是完整 Firefox 生命周期兼容：WebView 的主文档回调与网络请求级回调并不一一对应，重定向和错误页行为需真机验证。
+
+## 16. 2026-11-20 启动期兼容面（后台页不再因缺 API 在启动时抛 TypeError）
+
+- 事件对象一律存在且可 `addListener`：`webRequest.onBeforeSendHeaders / onSendHeaders / onHeadersReceived / onAuthRequired / onResponseStarted / onBeforeRedirect`、`webNavigation.onCreatedNavigationTarget / onDOMContentLoaded / onTabReplaced`、`downloads.onChanged`、`notifications.onButtonClicked`、`cookies.onChanged`、`runtime.onSuspend` 等。宿主不触发它们（首次注册在控制台警告一次）。
+- 兜底：每个命名空间对象再包一层 Proxy，读到不存在的 `onXxx` 一律给惰性事件。只兜事件名；方法与命名空间不兜，`privacy / dns / contextualIdentities / commands / cookies.getAll` 仍然不存在，让拓展特性检测后降级。
+- 方法返回 `UNSUPPORTED` 拒绝而非 `undefined`：`tabs.executeScript / insertCSS / removeCSS / detectLanguage / captureVisibleTab / getZoom / setZoom`、`i18n.detectLanguage`、`windows.create / remove`、`idle.queryState`、`runtime.reload / requestUpdateCheck`、`browserAction.openPopup`、`downloads.open / show / removeFile / acceptDanger`。
+- 纯外观调用接受并忽略：`browserAction / action.setIcon / setBadgeTextColor / enable / disable`、`runtime.setUninstallURL`、`webRequest.handlerBehaviorChanged`。
+- `storage.managed` 读取失败（无企业策略），`extension.getBackgroundPage / getViews` 仅后台页自己能返回 window，`menus.create({ onclick })` 在本地处理。
+- `sender.url` 由宿主从自己持有的 WebView 取（主框架）或退化为 `origin/`（子框架）；`sender.tab` 补 `windowId / incognito / url`。
+- 后台页握手前，找不到接收端的 `runtime.sendMessage` 最多等 5 秒（`MessageBroker.expectBackground`）。`runtime.connect` 是同步建立的，不等。
+- 仍然不支持：`webRequestBlocking`（native 对 `blocking` 注册明确拒绝，拓展的后台页会在控制台看到一条 console.error，属预期）、MV2 `tabs.executeScript` 注入、isolated world。
+
+
+## 17. 2026-11-21 WebRequest blocking 与原生脚本互通增量
+
+- `webRequest.onBeforeRequest.addListener(..., ["blocking"])` 现在允许注册，但必须同时声明并获授 `webRequest`、`webRequestBlocking`，且通过对应 URL 的 host permission。
+- 原生 `shouldInterceptRequest` 在 IO 线程发出 blocking 事件，最多等待 350ms；JS 同步 listener 返回 `{ cancel: true }` 或 `{ redirectUrl }` 后通过 `webRequest.resolveBlocking` 回复。无回复 / 超时默认放行。
+- `cancel` 当前以合成 204 空响应阻止原请求；重定向以合成 302 + Location 响应实现，需真机验证 WebView 对该响应的处理。
+- 不支持 requestBody、请求头/响应头修改、认证阶段与子资源终态；`webRequestBlocking` 仍为 PARTIAL，不是完整 Firefox 兼容。
+- 新增 Mafari 专有 `browser.mafari.userscripts` / `chrome.mafari.userscripts`：`getAll/get/create/update/setEnabled/remove`，通过 `mafariScripts` 显式权限访问原生脚本库；只在拓展页面可用。
+- 页面上下文销毁时清理该上下文注册的 webRequest listener，避免 popup 关闭后遗留的 blocking listener 令后续请求无谓等待。
+
+验证：Node shim 测试 77 项通过，WebExtension 示例测试通过。Android Gradle 编译/单元测试未能执行：Gradle 9.9.0 Wrapper 下载需要网络，当前环境 DNS 无法解析 `services.gradle.org`。

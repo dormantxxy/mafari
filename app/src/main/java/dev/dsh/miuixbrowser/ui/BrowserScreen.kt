@@ -8,16 +8,19 @@ import kotlinx.coroutines.Dispatchers
 import android.app.AlertDialog
 import dev.dsh.miuixbrowser.appContainer
 import dev.dsh.miuixbrowser.browser.AppRoute
+import dev.dsh.miuixbrowser.browser.AppShortcuts
 import dev.dsh.miuixbrowser.browser.BrowserState
 import dev.dsh.miuixbrowser.browser.BrowserStateTabBridge
 import dev.dsh.miuixbrowser.browser.BrowserTab
 import dev.dsh.miuixbrowser.browser.DefaultBrowser
 import dev.dsh.miuixbrowser.browser.MenuAction
 import dev.dsh.miuixbrowser.browser.MenuOrderStore
+import dev.dsh.miuixbrowser.browser.pollPageBottomBar
 import dev.dsh.miuixbrowser.data.AppSettings
 import dev.dsh.miuixbrowser.data.BAR_POS_FIXED_BOTTOM
 import dev.dsh.miuixbrowser.data.BAR_POS_FIXED_TOP
 import dev.dsh.miuixbrowser.data.BAR_POS_MINIMIZED
+import dev.dsh.miuixbrowser.data.BAR_POS_SAFARI_BOTTOM
 import dev.dsh.miuixbrowser.data.BAR_POS_TOP
 import dev.dsh.miuixbrowser.engine.EngineSupport
 import dev.dsh.miuixbrowser.engine.gecko.GeckoDebug
@@ -37,6 +40,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -90,6 +94,8 @@ fun BrowserScreen(
     onInitialUrlConsumed: () -> Unit = {},
     openDownloads: Boolean = false,
     onOpenDownloadsConsumed: () -> Unit = {},
+    shortcutAction: String? = null,
+    onShortcutConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val state = remember {
@@ -105,14 +111,19 @@ fun BrowserScreen(
     LaunchedEffect(state) {
         androidx.compose.runtime.snapshotFlow { state.tabRows() }.collect { rows ->
             state.saveTabs(rows)
+            // 火狐同步：标签开 / 关 / 换页后，把标签页同步到云端（内部会防抖、去重，没登录时直接返回）
+            if (EngineSupport.SYNC_BUNDLED) FxaSync.onLocalTabsChanged()
             kotlinx.coroutines.delay(800)
         }
     }
     // WebView 拓展的 tabs / scripting 要操作真实标签：界面建好后把标签桥接接到拓展系统上，界面销毁时摘掉。
     // 摘桥接时按身份比对：界面重建时旧界面晚到的 onDispose 不会把新界面刚接上的桥接摘掉
     DisposableEffect(state, context) {
-        val bridge = BrowserStateTabBridge(state)
         val extSystem = context.appContainer.webExtensions
+        // scripting.executeScript 的 ISOLATED 世界：借标签页宿主里该拓展的隔离世界桥执行（见 WebViewExtensionHost.executeInIsolatedWorld）
+        val bridge = BrowserStateTabBridge(state) { extId, tabId, js, done ->
+            extSystem.tabHost.executeInIsolatedWorld(extId, tabId, js, done)
+        }
         extSystem.attachTabs(bridge)
         val permissionPrompt = ExtensionPermissionPrompt { ext, permissions, origins ->
             withContext(Dispatchers.Main.immediate) {
@@ -252,11 +263,13 @@ fun BrowserScreen(
     /** 底栏被左右滑动缩小为圆形搜索钮 */
     val barMinimizedState = remember { mutableStateOf(settings.barPosition == BAR_POS_MINIMIZED) }
     var barMinimized by barMinimizedState
-    // 「布局 → 导航栏位置」：顶部 / 底部 / 始终最小化（圆钮是常态，展开后一段时间无操作自动缩回）
-    val barOnTop = settings.barPosition == BAR_POS_TOP || settings.barPosition == BAR_POS_FIXED_TOP
+    // 「布局 → 导航栏样式」：顶部 / 底部 / 始终最小化（圆钮是常态，展开后一段时间无操作自动缩回）
+    // 位置选项 → 「边 + 样式」（悬浮胶囊 / 停靠平铺…，见 BarStyle.kt）：下面所有与栏有关的布局都向它查询
+    val barLayout = BarStyles.resolve(settings.barPosition)
     val alwaysMin = settings.barPosition == BAR_POS_MINIMIZED
-    // 固定在顶部 / 底部：不随滚动自动隐藏，也不响应滑动收起 / 缩成圆钮 / 换边
-    val barFixed = settings.barPosition == BAR_POS_FIXED_TOP || settings.barPosition == BAR_POS_FIXED_BOTTOM
+    // 固定在顶部 / 底部 / 悬浮三段式：不随滚动自动隐藏，也不响应滑动收起 / 缩成圆钮 / 换边；栏停靠在屏幕边缘，网页从栏的另一侧展开
+    val barFixed = settings.barPosition == BAR_POS_FIXED_TOP || settings.barPosition == BAR_POS_FIXED_BOTTOM ||
+        settings.barPosition == BAR_POS_SAFARI_BOTTOM
     var showQuickPicker by ui::showQuickPicker
     var showGroupPicker by ui::showGroupPicker
     // 书签分组弹窗：显示开关与路径 / 锚点分开存，关闭动画期间内容不会突然消失
@@ -460,13 +473,31 @@ fun BrowserScreen(
         history = history,
     )
 
-    ui.BarAutoHideEffects(tab, barFixed)
+    // 固定（停靠）栏：滑动时页面深入栏下，滑回页面顶部 / 底部恢复（判定见 BarOverlap，状态在 ui.barOverlap）。
+    // dockedBarPx 是栏占掉网页区域的像素高度，底栏要把导航栏算进去：恢复瞬间网页区域按这个高度缩小，判定要据此留迟滞。
+    val barDensity = androidx.compose.ui.platform.LocalDensity.current
+    val navBarInsets = WindowInsets.navigationBars
+    val dockedBarPx: () -> Int = {
+        val body = with(barDensity) { barLayout.style.metrics.height.roundToPx() }
+        if (barLayout.reservesBottom) body + navBarInsets.getBottom(barDensity) else body
+    }
+    ui.BarAutoHideEffects(
+        tab = tab,
+        barFixed = barFixed,
+        dockedEdge = if (barFixed) barLayout.edge else null,
+        dockedBarPx = dockedBarPx,
+        compactOnScroll = settings.barPosition == BAR_POS_SAFARI_BOTTOM,
+    )
 
     val statusBarHeight = with(androidx.compose.ui.platform.LocalDensity.current) {
         WindowInsets.statusBars.getTop(this).toDp()
     }
+    // 停靠在顶部的栏占掉网页区域顶部一段：网页从「状态栏 + 栏」下面开始，而不是被悬浮的栏盖住
+    val dockedTopBody = if (barLayout.reservesTop) barLayout.style.metrics.height else 0.dp
+    val topReserved = statusBarHeight + dockedTopBody
     val animatedTopPadding by animateDpAsState(
-        targetValue = if (barHidden) 0.dp else statusBarHeight,
+        // 顶栏停靠且页面已深入栏下：留白归零，网页铺到屏幕顶（栏的玻璃盖在网页上）
+        targetValue = if (barHidden || (barLayout.reservesTop && ui.barOverlap)) 0.dp else topReserved,
         animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow),
         label = "statusInset",
     )
@@ -476,13 +507,14 @@ fun BrowserScreen(
     val fixedContentTop = tab.isGecko && !GeckoDebug.nativeImmersive
     // 只在布局阶段读取动画值（见 TopInset.kt）：滚动收起 / 回落的每一帧不再触发整个 BrowserScreen 重组
     val contentTopPx: androidx.compose.ui.unit.Density.() -> Int = {
-        if (fixedContentTop) statusBarHeight.roundToPx() else animatedTopPadding.coerceAtLeast(0.dp).roundToPx()
+        if (fixedContentTop) topReserved.roundToPx() else animatedTopPadding.coerceAtLeast(0.dp).roundToPx()
     }
     // Gecko 原生沉浸（仅网页状态；主页仍按普通留白排版）：GeckoView 占满内容区、尺寸恒定，
     // 状态栏留白用 offset 平移出来（只改位置、不触发 Gecko 重新布局），并把被推出屏幕的高度告诉 Gecko。
     val nativeInset = tab.isGecko && GeckoDebug.nativeImmersive && tab.url.isNotEmpty()
     val density = androidx.compose.ui.platform.LocalDensity.current
-    val statusBarPx = with(density) { statusBarHeight.roundToPx() }
+    // Gecko 原生沉浸的「最大可收起高度」：状态栏 + 停靠在顶部的栏
+    val statusBarPx = with(density) { topReserved.roundToPx() }
     LaunchedEffect(tab.id, nativeInset, statusBarPx) {
         if (!nativeInset) {
             tab.geckoApplyImmersive(0, 0)
@@ -501,6 +533,38 @@ fun BrowserScreen(
     // 弹簧动画每帧都会改 hide；直接在组合里比较 hide < 0.995f 会让整个 BrowserScreen 逐帧重组。
     // 包进 derivedStateOf 后只有「显示 / 不显示」这个结果翻转时才重组，位移 / 透明度仍在绘制阶段读取。
     val barVisible by remember { androidx.compose.runtime.derivedStateOf { !barHidden || hide < 0.995f } }
+    // 停靠在底部的栏占掉网页区域底部一段（不含导航栏，导航栏在内容层另算）；栏收起时随 hide 归零。
+    // 只在布局阶段读取 hide，避免弹簧动画逐帧重组。
+    val dockedBottomBody = if (barLayout.reservesBottom) barLayout.style.metrics.height else 0.dp
+    // 底栏停靠且页面已深入栏下：网页区域伸到屏幕底（栏 + 导航栏那一段都交给网页）。
+    // WebView 随弹簧逐帧伸缩；Gecko 调整视口代价大（见上面 fixedContentTop 的说明），只在翻转时一次到位。
+    // 悬浮三段式：只有「网页自己带固定在底部的整宽栏」且三段式处于展开状态时才让出栏的位置，
+    // 页面的底部导航停在三段式上方不被遮挡；页面没有底栏、首页、或缩成小胶囊（向下滑动）时，内容铺满到屏幕底。
+    // WebView 每 0.8 秒检测一次，Gecko 由内容脚本回报（见 PageBottomBar.kt / scroll-metrics.js）
+    if (barLayout.style.splitPills) {
+        LaunchedEffect(tab.id, tab.url.isEmpty(), tab.isGecko) {
+            if (tab.url.isEmpty() || tab.isGecko) return@LaunchedEffect
+            while (true) {
+                kotlinx.coroutines.delay(800)
+                tab.pollPageBottomBar()
+            }
+        }
+    }
+    val bottomOverlapTarget = barLayout.reservesBottom &&
+        (ui.barOverlap || (barLayout.style.splitPills && (tab.url.isEmpty() || !tab.pageHasBottomBar)))
+    val bottomOverlapAnim by animateFloatAsState(
+        targetValue = if (bottomOverlapTarget) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow),
+        label = "barOverlap",
+    )
+    // 网页区域为底栏保留的比例：1 = 全部保留（页面在栏上面结束），0 = 完全深入栏下。只在布局阶段读取
+    val bottomReserveFactor: () -> Float = {
+        val overlap = if (tab.isGecko) (if (bottomOverlapTarget) 1f else 0f) else bottomOverlapAnim
+        1f - overlap.coerceIn(0f, 1f)
+    }
+    val contentBottomPx: androidx.compose.ui.unit.Density.() -> Int = {
+        (dockedBottomBody.toPx() * (1f - hide) * bottomReserveFactor()).toInt()
+    }
 
     // 二级页面的返回（含预见性返回）由 NavDisplay 接管；这里只处理浏览主界面自己的返回。
     BackHandler(enabled = backStack.size <= 1 && !settings.onboardingPending && !onboardingReplay) {
@@ -631,10 +695,12 @@ fun BrowserScreen(
             wallpaperBackdrop = wallpaperBackdrop,
             wallpaperLiquidBackdrop = wallpaperLiquidBackdrop,
             startScroll = startScroll,
-            barOnTop = barOnTop,
+            barLayout = barLayout,
             quickRunner = quickRunner,
             nativeInset = nativeInset,
             contentTopPx = contentTopPx,
+            contentBottomPx = contentBottomPx,
+            bottomReserveFactor = bottomReserveFactor,
             animatedTopPadding = { animatedTopPadding },
             pushPage = ::pushPage,
         )
@@ -662,6 +728,16 @@ fun BrowserScreen(
         // ---- 地址栏输入中：底栏以外的区域是「收键盘」热区 ----
         // 透明遮罩盖在网页之上、底栏之下：点击只退出编辑并收起键盘，不会落到网页上
         // （避免误触链接 / 按钮）；同时吞掉拖动，输入时不让网页跟着滚动。
+        // 下拉刷新指示器：放在采集层之外，圆形底板才能用高级材质采样页面内容
+        Box(modifier = Modifier.fillMaxSize()) {
+            PullSpinnerHost(
+                tab = tab,
+                backdrop = glassBackdrop,
+                liquid = if (settings.liquidGlass) barLiquidBackdrop else null,
+                blurEnabled = settings.blurEnabled,
+                textureBlurEnabled = glassAvailable,
+            )
+        }
         BrowserFloatingBar(
             ui = ui,
             settings = settings,
@@ -671,7 +747,7 @@ fun BrowserScreen(
             clipboard = clipboard,
             focus = focus,
             haptic = haptic,
-            barOnTop = barOnTop,
+            barLayout = barLayout,
             alwaysMin = alwaysMin,
             barFixed = barFixed,
             displayAddress = displayAddress,
@@ -694,6 +770,28 @@ fun BrowserScreen(
         ui.performMenuAction(action, state, favorites, context, scope, clipboard, launchers, ::pushPage)
     }
     quickRunner.run = { runMenuAction(it) }
+
+    // 长按应用图标的快捷方式（搜索 / 设置 / 扫一扫 / 书签 / 历史，见 AppShortcuts）：先回到浏览主界面、收起弹层，再执行
+    LaunchedEffect(shortcutAction) {
+        val id = shortcutAction ?: return@LaunchedEffect
+        popToBrowser()
+        sheet = Sheet.None
+        when (id) {
+            // 搜索：展开底栏并进入地址编辑（全选当前网址 + 弹键盘，与点地址栏一致）
+            AppShortcuts.SEARCH -> {
+                barHidden = false
+                barMinimized = false
+                address = state.activeTab.url
+                addressDirty = false
+                editing = true
+            }
+            AppShortcuts.SETTINGS -> runMenuAction(MenuAction.Settings)
+            AppShortcuts.SCAN -> runMenuAction(MenuAction.Scan)
+            AppShortcuts.BOOKMARKS -> runMenuAction(MenuAction.Bookmarks)
+            AppShortcuts.HISTORY -> runMenuAction(MenuAction.History)
+        }
+        onShortcutConsumed()
+    }
 
     // 脚本总开关 / 启用范围 / 脚本菜单与地址栏脚本图标的状态同步（BrowserMenuActions.kt）
     ui.ScriptStateEffects(settings, state, context)

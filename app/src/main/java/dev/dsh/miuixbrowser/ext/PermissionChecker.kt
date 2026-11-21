@@ -13,6 +13,12 @@ class Sender(
     val tabId: Int? = null,
     /** 发送方所在上下文（拓展页面）的 ID，由原生在建立连接时分配；消息投递时用来排除「发给自己」。content script 为 null */
     val contextId: String? = null,
+    /**
+     * 发送方所在框架的完整网址（WebExtension 的 `sender.url`）。WebMessageListener 只给 origin，所以由宿主在主线程从
+     * 自己持有的 WebView 取（主框架）或退化为 `origin/`（子框架）；绝不取自消息体。
+     * 不能缺：uBO 用 `port.sender.url.startsWith(getURL(''))` 判断 popup 是否有特权，缺了 / 少一个斜杠都会让 popup 的所有请求被静默忽略。
+     */
+    val url: String? = null,
 )
 
 /**
@@ -46,6 +52,9 @@ object PermissionChecker {
         "webNavigation." to setOf("webNavigation"),
         "webRequest." to setOf("webRequest"),
         "declarativeNetRequest." to setOf("declarativeNetRequest", "declarativeNetRequestWithHostAccess"),
+        "mafari.userscripts." to setOf("mafariScripts"),
+        "userScripts." to setOf("userScripts"),
+        "offscreen." to setOf("offscreen"),
     )
 
     /** content script 能直接调的 API 前缀；其余只有拓展自己的页面能调 */

@@ -14,8 +14,14 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Column
@@ -73,7 +79,7 @@ internal fun BoxScope.BrowserFloatingBar(
     clipboard: ClipboardManager,
     focus: FocusManager,
     haptic: HapticFeedback,
-    barOnTop: Boolean,
+    barLayout: BarLayout,
     alwaysMin: Boolean,
     barFixed: Boolean,
     displayAddress: String,
@@ -87,6 +93,11 @@ internal fun BoxScope.BrowserFloatingBar(
     quickRunner: MenuActionRunner,
     pushPage: (AppRoute) -> Unit,
 ) {
+    // 栏的「边 + 样式」：悬浮胶囊 / 停靠平铺等的差异都从 style 取，这里不再自己判断固定模式
+    val style = barLayout.style
+    val metrics = style.metrics
+    val barOnTop = barLayout.onTop
+    val barEdge = barLayout.edge
     var sheet by ui::sheet
     var address by ui::address
     var editing by ui::editing
@@ -116,11 +127,17 @@ internal fun BoxScope.BrowserFloatingBar(
             .align(if (barOnTop) Alignment.TopCenter else Alignment.BottomCenter)
             .fillMaxWidth()
             .then(
-                // 靠上：状态栏下方留 12dp，键盘弹出时不跟着动；靠下：避开键盘 / 导航栏
-                if (barOnTop) Modifier.statusBarsPadding().padding(top = 12.dp)
-                else Modifier.imePadding().navigationBarsPadding().padding(bottom = 8.dp),
+                when {
+                    // 停靠：底板自己铺到状态栏 / 导航栏下面，系统栏的避让在栏内部处理；
+                    // 靠下时只需要让整个栏跟着键盘走，键盘弹出时栏贴在键盘上沿
+                    style.docked -> if (barOnTop) Modifier else Modifier.imePadding()
+                    // 悬浮靠上：状态栏下方留一段间距，键盘弹出时不跟着动
+                    barOnTop -> Modifier.statusBarsPadding().padding(top = style.edgeGap(barEdge))
+                    // 悬浮靠下：避开键盘 / 导航栏
+                    else -> Modifier.imePadding().navigationBarsPadding().padding(bottom = style.edgeGap(barEdge))
+                },
             )
-            .padding(horizontal = 8.dp),
+            .padding(horizontal = style.horizontalMargin),
     ) {
         // 收起 / 弹出动画的方向：靠下向下沉，靠上向上缩
         val barEdgeSign = if (barOnTop) -1f else 1f
@@ -154,7 +171,7 @@ internal fun BoxScope.BrowserFloatingBar(
         // 编辑时给光标留一点余量：光标在行尾时正好贴着文字右缘，会被裁掉
         val cursorSlack = if (editing) 4.dp else 0.dp
         val measuredAddressWidth = with(LocalDensity.current) { measuredAddressPx.toDp() } + cursorSlack
-        val fixedToolbarWidth = 44.dp * 4 + 12.dp + 24.dp
+        val fixedToolbarWidth = metrics.fixedWidth
         val loadingIndicatorWidth = if (tab.loading) 15.dp else 0.dp
         val refreshWidth = if (shouldShowAddressRefresh(displayAddress, tab.loading, editing)) AddressRefreshWidth else 0.dp
         // 阅读模式图标（地址栏最左侧）：可进入 / 正在阅读，且有页面（主页 url 为空不显示）
@@ -178,6 +195,20 @@ internal fun BoxScope.BrowserFloatingBar(
             animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
             label = "dynamicBottomBarWidth",
         )
+        // 悬浮三段式：页面向下滑动后缩成标题小胶囊（输入网址 / 主页不缩）。进度只在绘制阶段读取，不让弹簧逐帧重组
+        val compact = style.splitPills && ui.barCompact && !editing && tab.url.isNotEmpty()
+        val compactProgress = animateFloatAsState(
+            targetValue = if (compact) 1f else 0f,
+            animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow),
+            label = "safariCompact",
+        )
+        // 固定在顶部 / 底部（平铺停靠）在首页时底板透明：栏的内容直接叠在首页壁纸上，与壁纸融为一体。
+        // 进度只在绘制阶段读取。
+        val homeClearProgress = animateFloatAsState(
+            targetValue = if (style.docked && !style.splitPills && tab.url.isEmpty()) 1f else 0f,
+            animationSpec = tween(durationMillis = 220),
+            label = "dockedHomeClear",
+        )
         var dragDistance by remember(tab.id) { mutableFloatStateOf(0f) }
         var hDragDistance by remember(tab.id) { mutableFloatStateOf(0f) }
 
@@ -185,7 +216,7 @@ internal fun BoxScope.BrowserFloatingBar(
         // 不留下透明/平移后的 Compose 节点拦截 WebView 的触摸事件。
         if (barVisible()) {
             // 缩小后的圆形搜索钮（弹性缩放入场）
-            if (barMinimized) {
+            if (barMinimized && !style.docked) {
                 val circleScale by animateFloatAsState(
                     targetValue = 1f,
                     animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow),
@@ -250,7 +281,8 @@ internal fun BoxScope.BrowserFloatingBar(
             Column(
                 modifier = Modifier
                     .align(if (barOnTop) Alignment.TopCenter else Alignment.BottomCenter)
-                    .width(animatedBarWidth)
+                    // 悬浮：宽度随地址文字弹簧伸缩；停靠：整宽，平铺到屏幕边缘
+                    .then(if (style.docked) Modifier.fillMaxWidth() else Modifier.width(animatedBarWidth))
                     // 在底栏上朝屏幕边缘滑动（靠下向下 / 靠上向上）主动收起；左右滑动缩小为搜索圆钮；
                     // 朝屏幕中间快速一扫（靠下快速上扫 / 靠上快速下扫）把底栏换到另一侧并记进设置。
                     // 编辑地址时不挂这组手势：横向拖动要留给输入框（移动光标 / 滚动文字），
@@ -310,14 +342,126 @@ internal fun BoxScope.BrowserFloatingBar(
                     .graphicsLayer {
                         translationY = barEdgeSign * hide() * 210.dp.toPx()
                         alpha = 1f - hide()
-                        val s = 1f - 0.08f * hide()
+                        // 停靠的整宽栏只做位移 + 淡出，不缩放
+                        val s = if (style.docked) 1f else 1f - 0.08f * hide()
                         scaleX = s
                         scaleY = s
                         transformOrigin = TransformOrigin(0.5f, 0.5f)
                     },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-        BottomBar(
+        // 底板由样式画（悬浮：圆角胶囊玻璃；停靠：铺满整宽、一直铺到状态栏 / 导航栏下面的玻璃条），
+        // 与按钮内容分层，避免 backdrop 采集层递归包含自身。停靠样式下系统栏的高度只加在内容层上。
+        Box(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                // 缩小成小胶囊时整条底板淡出（网页铺满屏幕，只剩标题胶囊盖在上面）
+                .graphicsLayer { alpha = if (style.splitPills) 1f - compactProgress.value else 1f - homeClearProgress.value }
+                .then(
+                    style.surface(
+                        modifier = Modifier,
+                        edge = barEdge,
+                        backdrop = glassBackdrop,
+                        blurEnabled = settings.blurEnabled,
+                        textureBlurEnabled = glassAvailable,
+                        liquid = if (settings.liquidGlass) barLiquidBackdrop else null,
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (!style.docked) Modifier else {
+                        // 横屏时让按钮避开刘海 / 侧边导航栏；竖直方向：靠上避开状态栏，靠下避开导航栏
+                        Modifier
+                            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                            .then(if (barOnTop) Modifier.statusBarsPadding() else Modifier.navigationBarsPadding())
+                    },
+                ),
+        ) {
+        if (style.splitPills) {
+            // Safari 三段式：左后退 / 中地址栏 / 右更多（地址栏：长按新建、左右滑切换标签、上滑开标签列表）
+            // 整体放大 SafariSplitScale（5%）：栏内一切 dp / sp 随 Density 放大；这里传进去的是放大前的尺寸（对外占位用的 metrics 已含放大）
+            val baseDensity = LocalDensity.current
+            androidx.compose.runtime.CompositionLocalProvider(
+                LocalDensity provides androidx.compose.ui.unit.Density(
+                    density = baseDensity.density * SafariSplitScale,
+                    fontScale = baseDensity.fontScale,
+                ),
+            ) {
+            SafariSplitBar(
+                metrics = metrics.scaledBy(1f / SafariSplitScale),
+                backdrop = glassBackdrop,
+                liquid = if (settings.liquidGlass) barLiquidBackdrop else null,
+                blurEnabled = settings.blurEnabled,
+                textureBlurEnabled = glassAvailable,
+                address = displayAddress,
+                loading = tab.loading,
+                // 首页（url 为空）后退不可点；阅读模式中「后退」= 退出阅读模式，所以即使没有历史也可点
+                atHome = tab.url.isEmpty(),
+                canGoBack = tab.canGoBack || tab.readerActive,
+                editing = editing,
+                compact = compact,
+                // 点小胶囊：恢复三段式，网页让出栏的位置
+                onExpand = {
+                    ui.barCompact = false
+                    ui.barOverlap = false
+                },
+                onChange = {
+                    address = it
+                    addressDirty = true
+                    editing = true
+                },
+                onGo = {
+                    if (address.isNotBlank()) {
+                        editing = false
+                        focus.clearFocus()
+                        tab.load(address)
+                    }
+                },
+                onFocusLost = { if (editing) editing = false },
+                onAddressTap = {
+                    if (!editing) {
+                        editing = true
+                        address = tab.url
+                    }
+                },
+                readerVisible = readerShown,
+                readerActive = tab.readerActive,
+                onReader = { tab.toggleReader(readerDark) },
+                scriptsRunning = addressScriptCount > 0,
+                onScripts = { quickRunner.run(MenuAction.ScriptMenu) },
+                download = addressDownload,
+                onDownload = {
+                    addressDownload.acknowledge()
+                    pushPage(AppRoute.Downloads)
+                },
+                translateVisible = tab.translate.iconVisible,
+                translateOriginal = tab.translate.showingOriginal,
+                onTranslateToggle = { tab.translate.toggleOriginal() },
+                onBack = { tab.goBack() },
+                onMore = { sheet = Sheet.Menu },
+                onRefresh = { tab.reload() },
+                onNewTab = { state.newTab(incognito = tab.incognito) },
+                onSwitchTab = { dir ->
+                    // 只在同一类标签（普通 / 无痕）里切换，不绕回，也不在两端新建
+                    val same = state.tabs.withIndex().filter { it.value.incognito == tab.incognito }.map { it.index }
+                    val target = same.getOrNull(same.indexOf(state.activeIndex) + dir)
+                    if (target != null) state.select(target)
+                },
+                onOpenTabs = {
+                    tabsPage = if (tab.incognito) 1 else 0
+                    // 打开标签页面板前刷新当前标签的缩略图
+                    tab.captureThumbnailNow()
+                    sheet = Sheet.Tabs
+                },
+            )
+            }
+        } else BottomBar(
+            drawSurface = false,
+            metrics = metrics,
             blurEnabled = settings.blurEnabled,
             liquid = if (settings.liquidGlass) barLiquidBackdrop else null,
             textureBlurEnabled = glassAvailable,
@@ -400,6 +544,8 @@ internal fun BoxScope.BrowserFloatingBar(
             onMore = { sheet = Sheet.Menu },
             onRefresh = { tab.reload() },
         )
+        }
+        }
             }
             } // end else (!barMinimized)
         }

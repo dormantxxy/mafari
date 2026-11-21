@@ -12,6 +12,12 @@ import androidx.compose.runtime.LaunchedEffect
 internal fun BrowserUiState.BarAutoHideEffects(
     tab: BrowserTab,
     barFixed: Boolean,
+    /** 固定（停靠）栏所在的边；悬浮样式为 null */
+    dockedEdge: BarEdge?,
+    /** 停靠栏占掉网页区域的高度（像素；底栏含导航栏）。读取函数：取值依赖当前窗口 insets */
+    dockedBarPx: () -> Int,
+    /** 悬浮三段式：滑动页面时栏缩成小胶囊（[barCompact]），而不是隐藏；此时页面深入栏下（[barOverlap] 跟随 [barCompact]） */
+    compactOnScroll: Boolean = false,
 ) {
     // Gecko 视频全屏：应用自己的顶栏 / 底栏一并收起，退出全屏后恢复
     LaunchedEffect(tab.id, tab.geckoFullscreen) {
@@ -29,12 +35,22 @@ internal fun BrowserUiState.BarAutoHideEffects(
         if (barHidden && tab.url.isEmpty() && !tab.geckoFullscreen) barHidden = false
     }
 
-    // 切到「固定」立即把已收起的底栏显示出来（视频全屏除外）
+    // 切到「固定」立即把已收起的底栏显示出来（视频全屏除外）；离开固定样式则页面不再深入栏下
     LaunchedEffect(barFixed) {
-        if (barFixed) barHidden = tab.geckoFullscreen
+        if (barFixed) {
+            barHidden = tab.geckoFullscreen
+        } else {
+            barOverlap = false
+        }
     }
 
-    LaunchedEffect(tab.id, barFixed) {
+    // 离开 悬浮三段式：缩小状态复位
+    LaunchedEffect(compactOnScroll) {
+        if (!compactOnScroll) barCompact = false
+    }
+
+    LaunchedEffect(tab.id, barFixed, dockedEdge, compactOnScroll) {
+        if (compactOnScroll) barCompact = false // 换标签：先展开，再按新标签的滚动重新判定
         var last = 0
         var lastShow = 0
         var scrollDownAccum = 0f
@@ -45,9 +61,68 @@ internal fun BrowserUiState.BarAutoHideEffects(
                     barHidden = true
                     return@runCatching
                 }
-                // 固定模式：不做滚动隐藏
+                // 悬浮三段式：栏固定显示，但随滚动方向在「完整三段式」和「标题小胶囊」之间切换；
+                // 缩小时页面深入栏下（网页铺满屏幕），展开时让出栏的位置。阈值与自动隐藏一致
+                if (barFixed && compactOnScroll) {
+                    barHidden = false
+                    if (tab.url.isEmpty()) {
+                        barCompact = false
+                        barOverlap = false
+                        last = 0
+                        lastShow = 0
+                        scrollDownAccum = 0f
+                        scrollUpAccum = 0f
+                        return@runCatching
+                    }
+                    val offset = tab.scrollOffsetY.coerceAtLeast(0)
+                    val dy = offset - last
+                    when {
+                        offset <= 12 -> {
+                            barCompact = false
+                            lastShow = offset
+                            scrollDownAccum = 0f
+                            scrollUpAccum = 0f
+                        }
+                        dy > 0 -> {
+                            scrollUpAccum = 0f
+                            scrollDownAccum += dy
+                            if (scrollDownAccum >= 100f && offset - lastShow >= 96f) {
+                                barCompact = true
+                                scrollDownAccum = 0f
+                                scrollUpAccum = 0f
+                            }
+                        }
+                        dy < 0 -> {
+                            scrollDownAccum = 0f
+                            scrollUpAccum += -dy
+                            if (barCompact && scrollUpAccum >= 120f) {
+                                barCompact = false
+                                lastShow = offset
+                                scrollUpAccum = 0f
+                            } else if (!barCompact) {
+                                lastShow = offset
+                            }
+                        }
+                    }
+                    last = offset
+                    barOverlap = barCompact
+                    return@runCatching
+                }
+                // 固定模式：不做滚动隐藏；但页面要随滚动位置深入 / 退出栏下（判定见 BarOverlap）。
+                // 主页（没有滚动）、视频全屏以外才判定；换页后偏移被重置，回到顶部自然恢复
                 if (barFixed) {
                     barHidden = false
+                    barOverlap = if (dockedEdge == null || tab.url.isEmpty()) {
+                        false
+                    } else {
+                        BarOverlap.next(
+                            edge = dockedEdge,
+                            overlapped = barOverlap,
+                            scrollY = tab.scrollOffsetY,
+                            remaining = tab.scrollRemainingY,
+                            barPx = dockedBarPx(),
+                        )
+                    }
                     return@runCatching
                 }
                 // 主页（页面被盖住）上：引擎里的页面可能还在惯性滚动 / 回调滚动事件，

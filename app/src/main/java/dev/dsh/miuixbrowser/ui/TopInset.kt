@@ -1,8 +1,10 @@
 package dev.dsh.miuixbrowser.ui
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.offset
 
 /**
@@ -17,4 +19,29 @@ internal fun Modifier.topInsetPx(top: Density.() -> Int): Modifier = layout { me
     val placeable = measurable.measure(constraints.offset(vertical = -t))
     val h = (placeable.height + t).coerceIn(constraints.minHeight, constraints.maxHeight)
     layout(placeable.width, h) { placeable.placeRelative(0, t) }
+}
+
+/**
+ * 与 `Modifier.padding(bottom = …)` 等价，但底部留白在「布局阶段」才读取（同 [topInsetPx]）。
+ * 用于停靠在底部的导航栏：网页在栏上面结束；栏被收起（Gecko 视频全屏）时留白随动画归零，不触发重组。
+ */
+internal fun Modifier.bottomInsetPx(bottom: Density.() -> Int): Modifier = layout { measurable, constraints ->
+    val b = bottom().coerceAtLeast(0)
+    val placeable = measurable.measure(constraints.offset(vertical = -b))
+    val h = (placeable.height + b).coerceIn(constraints.minHeight, constraints.maxHeight)
+    layout(placeable.width, h) { placeable.placeRelative(0, 0) }
+}
+
+/**
+ * 把 [base] 的底部留白乘以 [factor]（0..1），其余三边原样返回。
+ * 用于停靠在底部的栏：页面深入栏下时，导航栏那一段留白也要平滑归零；[factor] 只会在布局阶段被读取。
+ */
+internal class ScaledBottomInsets(
+    private val base: WindowInsets,
+    private val factor: () -> Float,
+) : WindowInsets {
+    override fun getLeft(density: Density, layoutDirection: LayoutDirection): Int = base.getLeft(density, layoutDirection)
+    override fun getTop(density: Density): Int = base.getTop(density)
+    override fun getRight(density: Density, layoutDirection: LayoutDirection): Int = base.getRight(density, layoutDirection)
+    override fun getBottom(density: Density): Int = (base.getBottom(density) * factor().coerceIn(0f, 1f)).toInt()
 }

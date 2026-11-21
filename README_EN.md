@@ -145,13 +145,7 @@ bash tools/miuix-sync.sh   # clones miuix into third_party/miuix and applies too
 It follows miuix `main` by default. To pin a version, set `commit=` in `miuix.ref` (or run `bash tools/miuix-sync.sh --pin` to write the current commit).
 
 For full build instructions, build variants, the release pipeline, and code structure, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (written in Chinese).
-
-## License
-
-Released under the [Apache License 2.0](LICENSE). The miuix upstream fetched at build time is also Apache-2.0 (see its LICENSE); local changes live as patches in `tools/miuix-patches/`.
-
-Project page: <https://github.com/rosenii/mafari>
-
+l
 ## Donate
 
 Mafari is developed and maintained in the author's spare time. It is completely free and ad-free. If it helps you, consider buying the developer a coffee ☕ — it helps the project last longer.

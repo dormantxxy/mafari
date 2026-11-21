@@ -1,8 +1,9 @@
 package dev.dsh.miuixbrowser.ext
 
 import android.content.Context
-import dev.dsh.miuixbrowser.data.HistoryStore
 import android.webkit.WebResourceResponse
+import dev.dsh.miuixbrowser.data.HistoryStore
+import dev.dsh.miuixbrowser.script.ExtensionStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,6 +14,7 @@ import java.util.concurrent.Executors
 
 /**
  * 拓展系统的组装入口（WebView 内核）：一个应用一个实例，建议放进 AppContainer。
+ * 可选接入 Mafari 原生 UserscriptStore，为声明 mafariScripts 的可信拓展开放管理 API。
  *
  * 目录布局（[baseDir] 下）：packages/ state/ data/ 由 [FileExtensionRepository] 管；work/ 是安装暂存。
  *
@@ -28,6 +30,7 @@ import java.util.concurrent.Executors
 class ExtensionSystem(
     private val context: Context,
     baseDir: File,
+    private val nativeScripts: () -> ExtensionStore? = { null },
     private val log: (String) -> Unit = {},
 ) {
     val repo = FileExtensionRepository(baseDir) { id, e -> log("ext $id: 读取失败 ${e.message}") }
@@ -35,7 +38,7 @@ class ExtensionSystem(
 
     private val router = ApiRouter()
     private val historyStore by lazy { HistoryStore(context.applicationContext) }
-    val broker = MessageBroker()
+    val broker = MessageBroker().also { it.log = log }
     private val dynamicScripts = DynamicContentScriptStore()
     private val sinks = CompositeEventSink()
     /** 用户点击拓展后临时授予的「当前标签」访问（activeTab），只存内存 */
@@ -58,7 +61,8 @@ class ExtensionSystem(
     private val webNavigation = WebNavigationApi(pages, { webViewExtensions() }) { tabs.bridgeOrNull() }
     val contextMenus = ContextMenusApi(pages)
     val actionApi = ActionApi()
-    private val webRequest = WebRequestApi(pages) { webViewExtensions() }
+    private val webRequest = WebRequestApi(pages, { webViewExtensions() })
+    private val declarativeNetRequest = DeclarativeNetRequestApi({ id -> repo.dataDir(id) }) { webViewExtensions() }
 
     /** scripting.*：与 tabs 共用同一个标签桥接（[TabsApi.bridgeOrNull]），attach 之前同样回 UNSUPPORTED */
     private val scripting = ScriptingApi(
@@ -84,6 +88,7 @@ class ExtensionSystem(
 
     init {
         pages.externalLinkHandler = { extId, url -> openExternalLink(extId, url) }
+        pages.onPageDestroyed = { _, contextId -> webRequest.forgetContext(contextId) }
         RuntimeApi(broker) { tabs.bridgeOrNull() }.register(router)
         broker.register(router)
         storage.register(router)
@@ -91,9 +96,12 @@ class ExtensionSystem(
         tabs.register(router)
         webNavigation.register(router)
         webRequest.register(router)
+        declarativeNetRequest.register(router)
         contextMenus.register(router)
         actionApi.register(router)
         scripting.register(router)
+        UserScriptsApi(dynamicScripts) { id -> tabHost.refreshDynamicScripts(id) }.register(router)
+        OffscreenApi(pages).register(router)
         permissions.register(router)
         ClipboardApi(context.applicationContext).register(router)
         NotificationsApi(context.applicationContext, pages).register(router)
@@ -101,6 +109,7 @@ class ExtensionSystem(
         HistoryApi(historyStore).register(router)
         DownloadsApi(context.applicationContext, pages).register(router)
         CookiesApi().register(router)
+        NativeScriptsApi(nativeScripts).register(router)
         pages.backgroundListener = lifecycle
         sinks.add(tabHost)
         sinks.add(pages)
@@ -137,7 +146,9 @@ class ExtensionSystem(
     fun contextMenuItems(context: String, documentUrl: String, targetUrl: String? = null): List<Pair<InstalledExtension, List<ContextMenusApi.Item>>> =
         webViewExtensions().mapNotNull { ext -> contextMenus.matching(ext, context, documentUrl, targetUrl).takeIf { it.isNotEmpty() }?.let { ext to it } }
 
-    fun onWebRequestBefore(tabId: Int, request: android.webkit.WebResourceRequest) = webRequest.beforeRequest(tabId, request)
+    fun onWebRequestBefore(tabId: Int, request: android.webkit.WebResourceRequest): WebResourceResponse? =
+        declarativeNetRequest.intercept(tabId, request) ?: webRequest.beforeRequest(tabId, request)
+    fun onWebRequestMainFrameResponseStarted(tabId: Int, url: String) = webRequest.mainFrameResponseStarted(tabId, url)
     fun onWebRequestMainFrameCompleted(tabId: Int, url: String) = webRequest.mainFrameCompleted(tabId, url)
     fun onWebRequestMainFrameFailed(tabId: Int, url: String, error: String) = webRequest.mainFrameFailed(tabId, url, error)
 
@@ -257,6 +268,7 @@ class ExtensionSystem(
         storage.forget(extId)
         contextMenus.forget(extId)
         actionApi.states.remove(extId)
+        declarativeNetRequest.forget(extId)
         repo.remove(extId)
     }
 }

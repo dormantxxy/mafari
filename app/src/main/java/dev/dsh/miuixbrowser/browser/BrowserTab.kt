@@ -113,6 +113,8 @@ class BrowserTab(
     var loading by mutableStateOf(false)
     var canGoBack by mutableStateOf(false)
     var canGoForward by mutableStateOf(false)
+    /** 页面自己带固定在底部的整宽栏（如 YouTube 的「首页 / 我」）：悬浮三段式据此决定是否让位。WebView 轮询检测，Gecko 由内容脚本回报 */
+    var pageHasBottomBar by mutableStateOf(false)
     var errorText by mutableStateOf<String?>(null)
     /** 应用当前深浅色：访问失败页按它配色 */
     @Volatile internal var displayDark = false
@@ -576,6 +578,23 @@ class BrowserTab(
     val scrollOffsetY: Int
         get() = ops.scrollY
 
+    /** 距页面底部还剩多少像素（0 = 已到底，-1 = 引擎给不出来）：固定在底部的导航栏据此决定何时让出位置 */
+    val scrollRemainingY: Int
+        get() = ops.scrollRemaining
+
+    /** Gecko：内容脚本回报页面是否有固定在底部的整宽栏（主线程） */
+    internal fun geckoBottomBar(has: Boolean) {
+        if (closed || destroyed) return
+        pageHasBottomBar = has
+    }
+
+    /** Gecko：内容脚本回报距页面底部的剩余像素（主线程）。顺手补发一次滚动信号，底栏判定是事件驱动的 */
+    internal fun geckoScrollRemaining(px: Int) {
+        if (closed || destroyed) return
+        geckoEngine?.updateScrollRemaining(px)
+        scrollSignal.trySend(Unit)
+    }
+
     /** 引擎当前的页面标题（切换地址时用来清掉旧标题） */
     fun currentPageTitle(): String = ops.pageTitle()
 
@@ -687,6 +706,7 @@ class BrowserTab(
 
     internal fun geckoPageStart(u: String) {
         if (closed || destroyed) return
+        geckoEngine?.updateScrollRemaining(-1) // 新文档：旧页面的剩余距离作废，新页面的内容脚本连上后再回报
         if (ErrorPages.isProceedUrl(u)) return
         if (u == geckoErrorUri) { loading = true; return } // 错误页自身的加载：保留失败地址与错误信息
         geckoShowingError = false
@@ -887,14 +907,15 @@ class BrowserTab(
 
     /**
      * Gecko 版：页面无手势自动唤起其他应用（intent:// weixin:// 等），套用独立的「打开其他应用」权限，
-     * 规则与 [interceptRedirect]（external = true）一致：空白页 / 首次加载上的唤起不算；总是允许 → 直接唤起；
+     * 规则与 [interceptRedirect]（external = true）一致：空白页 / 首次加载上的唤起同样要走权限；总是允许 → 直接唤起；
      * 总是拒绝 → 提示已拦截；询问 → 弹窗，同意才唤起。当前页面始终原地不动。
      */
     internal fun geckoExternalRequest(uri: Uri) {
-        val from = pageHost
+        // 空白页 / 首次加载（还没有 host）也要走权限，否则新标签里首个请求 302 到 weixin:// 就能绕过
+        val from = pageHost.ifEmpty { runCatching { Uri.parse(url).host }.getOrNull().orEmpty() }
         // 例外网站优先（与 WebView 一致）；带 permKey 才能在弹窗里「记住此网站的选择」
         val mode = effExternalAppMode()
-        if (from.isEmpty() || mode == 1) {
+        if (mode == 1) {
             launchExternalApp(uri)
             return
         }
@@ -903,7 +924,7 @@ class BrowserTab(
             return
         }
         if (promptBusy()) return
-        askRedirect(from, tr("打开其他应用"), GeckoSitePerms.EXTERNAL_APP) { allow ->
+        askRedirect(from.ifEmpty { "about:blank" }, tr("打开其他应用"), GeckoSitePerms.EXTERNAL_APP.takeIf { from.isNotEmpty() }) { allow ->
             if (allow) launchExternalApp(uri) else notifyRedirectBlocked(true, "")
         }
     }

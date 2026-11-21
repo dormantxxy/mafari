@@ -1,7 +1,11 @@
 package dev.dsh.miuixbrowser
 
 import dev.dsh.miuixbrowser.adblock.AdBlock
+import dev.dsh.miuixbrowser.data.AppDatabase
+import dev.dsh.miuixbrowser.data.RestoreMode
+import dev.dsh.miuixbrowser.data.TabDb
 import dev.dsh.miuixbrowser.engine.webview.WebViewDebug
+import dev.dsh.miuixbrowser.browser.AppShortcuts
 import dev.dsh.miuixbrowser.browser.CacheCleaner
 import dev.dsh.miuixbrowser.browser.CookieControl
 import dev.dsh.miuixbrowser.download.Downloader
@@ -43,6 +47,9 @@ internal object StartupCoordinator {
 
     /** WebView 拓展的后台页是隐藏 WebView，创建有开销：首帧之后再起，别和首屏抢主线程。 */
     private const val EXT_BACKGROUND_DELAY_MS = 1_500L
+
+    /** 长按图标的快捷方式在界面出来之后再发布。 */
+    private const val SHORTCUTS_DELAY_MS = 2_000L
 
     /** 下载列表（读库 + 清理已完成任务的临时目录）不是首屏必需：首帧之后再恢复。 */
     private const val DOWNLOADS_INIT_DELAY_MS = 300L
@@ -87,7 +94,15 @@ internal object StartupCoordinator {
 
     /** 阶段 3：挂起直到库就绪（在 IO 线程等，不卡主线程）。 */
     suspend fun awaitContentReady(context: Context) {
-        withContext(Dispatchers.IO) { StartupWarmup.awaitDb(context) }
+        withContext(Dispatchers.IO) {
+            StartupWarmup.awaitDb(context)
+            // 顺手把标签列表读好：BrowserState 初始化（主线程）就不必再读库，只管建界面要用的那一个标签
+            runCatching {
+                if (context.appContainer.settings.restoreTabsMode != RestoreMode.NONE) {
+                    AppDatabase.get(context)?.let { TabDb.preload(it) }
+                }
+            }
+        }
     }
 
     /**
@@ -106,6 +121,10 @@ internal object StartupCoordinator {
                 runCatching { app.appContainer.webExtensions.startAll() }
                     .onFailure { Diag.log("web extensions: start backgrounds failed ${it.message}") }
             }, EXT_BACKGROUND_DELAY_MS)
+        }
+        // 长按应用图标的快捷方式：界面出来后再发布，不占冷启动
+        activity.window.decorView.post {
+            Handler(Looper.getMainLooper()).postDelayed({ AppShortcuts.publish(app) }, SHORTCUTS_DELAY_MS)
         }
         if (!EngineSupport.SYNC_BUNDLED) return
         activity.window.decorView.post {

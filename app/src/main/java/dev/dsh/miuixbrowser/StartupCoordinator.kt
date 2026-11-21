@@ -77,6 +77,7 @@ internal object StartupCoordinator {
         }
         Diag.log("MainActivity.onCreate")
         WebViewDebug.load(activity) // 远程调试是进程级静态开关，须在创建任何 WebView 之前设置
+        dev.dsh.miuixbrowser.engine.webview.WebViewSpeculative.load(activity)
         AdBlock.init(activity)
         // Firefox 同步不占冷启动：这里什么都不做，界面出来后由 [onContentShown] 延迟预热（仅「上次已知已登录」才初始化，
         // 没登录过的用户零开销）；打开「Firefox帐户同步」页（FxaScreen）/ 系统分享面板发标签页（SendTabActivity）时仍会按需 init

@@ -68,6 +68,7 @@ import dev.dsh.miuixbrowser.util.toUrl
  */
 @SuppressLint("SetJavaScriptEnabled")
 internal fun BrowserTab.setupWebView() {
+    dev.dsh.miuixbrowser.engine.webview.WebViewSpeculative.noteWebViewCreated()
     // 显式开启 WebView 的硬件层：WebView 内容进 GPU 离屏层后，被 layerBackdrop 录制并送入 RuntimeShader
     // 时不再整页闪烁 / 崩溃，底栏、弹窗才能在网页态下采样 WebView 使用高级材质（miuix-glass / 液态玻璃）。
     webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)

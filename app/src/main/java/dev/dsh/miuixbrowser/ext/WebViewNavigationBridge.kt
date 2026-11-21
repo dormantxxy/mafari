@@ -11,6 +11,7 @@ import androidx.webkit.Page
 import androidx.webkit.PageState
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import dev.dsh.miuixbrowser.engine.webview.WebViewPerf
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executor
@@ -179,6 +180,25 @@ object WebViewNavigationBridge {
             if (stateMode) loaded()
         }
 
+        // ---- 页面性能：FCP / LCP（1.16 起有 Page 重载，1.19.0-alpha01 起改为 PageState 重载，旧的标为废弃） ----
+        // 两个重载都接，写入是「覆盖最新一条」，同一事件被两边各送一次也不会重复计数；都不调 super。
+        // 事件可能被批量延迟送达，所以是记在「最近提交的主文档」上，不依赖它是否仍是前台页面。
+        override fun onFirstContentfulPaintMillis(pageState: PageState, durationMillis: Long) {
+            WebViewPerf.onFcp(tabId, durationMillis)
+        }
+
+        override fun onLargestContentfulPaintMillis(pageState: PageState, durationMillis: Long) {
+            WebViewPerf.onLcp(tabId, durationMillis)
+        }
+
+        override fun onFirstContentfulPaintMillis(page: Page, durationMillis: Long) {
+            WebViewPerf.onFcp(tabId, durationMillis)
+        }
+
+        override fun onLargestContentfulPaintMillis(page: Page, durationMillis: Long) {
+            WebViewPerf.onLcp(tabId, durationMillis)
+        }
+
         // ---- 档 2：旧的 Navigation / Page 重载（1.19.0-alpha02 起废弃，旧系统 WebView 仍只会调这些） ----
         override fun onNavigationStarted(navigation: Navigation) {
             if (!stateMode) started(navigation)
@@ -240,6 +260,7 @@ object WebViewNavigationBridge {
             headers = hdrs
             domReported = false
             loadReported = false
+            WebViewPerf.begin(tabId, url)
             sink.committed(
                 tabId, url,
                 NavigationMapping.transitionType(nav.isReload, nav.wasInitiatedByPage()),

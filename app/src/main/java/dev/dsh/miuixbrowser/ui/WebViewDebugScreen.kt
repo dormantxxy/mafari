@@ -4,6 +4,9 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import dev.dsh.miuixbrowser.i18n.tr
 
 import dev.dsh.miuixbrowser.engine.webview.WebViewDebug
+import dev.dsh.miuixbrowser.engine.webview.WebViewPerf
+import dev.dsh.miuixbrowser.engine.webview.WebViewSpeculative
+import dev.dsh.miuixbrowser.util.hostOf
 import dev.dsh.miuixbrowser.util.Diag
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -54,7 +57,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 fun WebViewDebugScreen(onBack: () -> Unit, blurEnabled: Boolean = true) {
     val context = LocalContext.current
-    LaunchedEffect(Unit) { WebViewDebug.load(context) }
+    LaunchedEffect(Unit) {
+        WebViewDebug.load(context)
+        WebViewSpeculative.load(context)
+    }
     val d = WebViewDebug
 
     val backdrop = rememberLayerBackdrop()
@@ -124,6 +130,30 @@ fun WebViewDebugScreen(onBack: () -> Unit, blurEnabled: Boolean = true) {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    item { SmallTitle(text = tr("页面性能")) }
+                    item { PerfCard() }
+                    item {
+                        WebViewDebugGroup {
+                            ArrowPreference(
+                                title = tr("清空性能记录"),
+                                summary = tr("只清内存里的记录；无痕标签不会被记录"),
+                                onClick = { WebViewPerf.clear() },
+                            )
+                        }
+                    }
+
+                    item { SmallTitle(text = tr("加速")) }
+                    item {
+                        WebViewDebugGroup {
+                            AppSwitchPreference(
+                                title = tr("预连接"),
+                                summary = tr("进入地址栏、输入完整网址或按下主页快捷方式时，提前完成 DNS / TLS 握手，缩短首次加载；只建连接不发请求。需要系统 WebView 支持"),
+                                checked = WebViewSpeculative.enabled,
+                                onCheckedChange = { WebViewSpeculative.updateEnabled(it) },
+                            )
                         }
                     }
 
@@ -204,6 +234,51 @@ fun WebViewDebugScreen(onBack: () -> Unit, blurEnabled: Boolean = true) {
             }
         }
     }
+}
+
+@Composable
+private fun PerfCard() {
+    val rows = WebViewPerf.entries.take(15)
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        if (rows.isEmpty()) {
+            Text(
+                text = tr("还没有记录：打开一个网页后，这里会显示首次内容绘制（FCP）和最大内容绘制（LCP）。系统 WebView 不支持导航监听时不会有数据"),
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            return@Card
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            rows.forEach { e ->
+                Column {
+                    Text(
+                        text = hostOf(e.url) + android.net.Uri.parse(e.url).path.orEmpty().take(40),
+                        fontSize = 13.sp,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = "FCP " + perfText(WebViewPerf.Metric.FCP, e.fcpMs) + "  ·  LCP " + perfText(WebViewPerf.Metric.LCP, e.lcpMs),
+                        fontSize = 12.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun perfText(metric: WebViewPerf.Metric, ms: Long?): String {
+    if (ms == null) return "—"
+    val tag = when (WebViewPerf.rate(metric, ms)) {
+        WebViewPerf.Rating.GOOD -> ""
+        WebViewPerf.Rating.NEEDS_IMPROVEMENT -> tr("（待优化）")
+        WebViewPerf.Rating.POOR -> tr("（较慢）")
+    }
+    return WebViewPerf.format(ms) + tag
 }
 
 @Composable

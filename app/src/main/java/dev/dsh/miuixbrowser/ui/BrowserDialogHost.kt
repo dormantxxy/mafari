@@ -346,6 +346,26 @@ BrowserChunk {
                 )
             }
 
+            run {
+                val extSystem = context.appContainer.webExtensions
+                var optionsRequest by remember { mutableStateOf<ExtPageRequest?>(null) }
+                DisposableEffect(extSystem) {
+                    extSystem.pages.openOptionsHandler = { extId ->
+                        val ext = extSystem.repo.get(extId)
+                        if (ext != null && ext.enabled) {
+                            optionsRequest = ExtPageRequest(extId, ext.spec.name, ExtPageRequest.Kind.OPTIONS)
+                        }
+                    }
+                    onDispose { extSystem.pages.openOptionsHandler = null }
+                }
+                WebViewExtPageSheet(
+                    system = extSystem,
+                    request = optionsRequest,
+                    backdrop = if (glassAvailable && settings.blurEnabled) glassBackdrop else null,
+                    onDismiss = { optionsRequest = null },
+                )
+            }
+
             WebViewExtMenuSheet(
                 show = webViewExtSheetShow,
                 backdrop = if (glassAvailable && settings.blurEnabled) glassBackdrop else null,

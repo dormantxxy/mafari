@@ -89,7 +89,17 @@ class ExtensionSystem(
     init {
         pages.externalLinkHandler = { extId, url -> openExternalLink(extId, url) }
         pages.onPageDestroyed = { _, contextId -> webRequest.forgetContext(contextId) }
-        RuntimeApi(broker) { tabs.bridgeOrNull() }.register(router)
+        RuntimeApi(
+            broker,
+            { tabs.bridgeOrNull() },
+            openOptions = { extId ->
+                val handler = pages.openOptionsHandler
+                if (handler == null) false else {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { handler(extId) }
+                    true
+                }
+            },
+        ).register(router)
         broker.register(router)
         storage.register(router)
         alarms.register(router)
@@ -308,6 +318,7 @@ class ExtensionSystem(
         contextMenus.forget(extId)
         actionApi.states.remove(extId)
         declarativeNetRequest.forget(extId)
+        ExtensionProfiles.delete(extId)
         repo.remove(extId)
     }
 }

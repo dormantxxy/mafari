@@ -133,6 +133,8 @@ data class TabUpdateOptions(
     val active: Boolean? = null,
     /** true / false = 静音 / 取消静音；系统 WebView 不支持静音时是空操作。null = 不改 */
     val muted: Boolean? = null,
+    /** true = 加载 [url] 时替换当前历史项（Firefox `loadReplace`）；用 `WebViewCompat.navigate`，系统 WebView 不支持时忽略 */
+    val loadReplace: Boolean? = null,
 )
 
 /**

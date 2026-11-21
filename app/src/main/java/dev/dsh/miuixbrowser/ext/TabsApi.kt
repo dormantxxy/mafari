@@ -156,7 +156,7 @@ class TabsApi(
             // highlighted:true 在单窗口里等同于激活；muted 在支持 MUTE_AUDIO 的系统 WebView 上生效，否则空操作；
             // pinned / autoDiscardable 等没有对应概念，按空操作处理
             val active = p.boolOrNull("active") ?: p.boolOrNull("selected") ?: p.boolOrNull("highlighted")
-            val tab = bridge().update(id, TabUpdateOptions(url, active, p.boolOrNull("muted"))) ?: throw noTab(id)
+            val tab = bridge().update(id, TabUpdateOptions(url, active, p.boolOrNull("muted"), p.boolOrNull("loadReplace"))) ?: throw noTab(id)
             toJson(ctx.ext, tab, activeGranted(ctx.ext, tab))
         }
         router.register("tabs.duplicate") { ctx, a ->

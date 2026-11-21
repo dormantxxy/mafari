@@ -135,7 +135,7 @@ class BrowserStateTabBridge(
     override suspend fun update(tabId: Int, options: TabUpdateOptions): TabInfo? = onMain {
         val tab = find(tabId) ?: return@onMain null
         // url 已由 tabs 模块过滤；load 会处理「标签正显示主页」的情况（从主页进入新页面）
-        options.url?.let { tab.load(it) }
+        options.url?.let { tab.load(it, replace = options.loadReplace == true) }
         if (options.active == true) {
             val i = state.tabs.indexOf(tab)
             if (i >= 0) state.select(i)

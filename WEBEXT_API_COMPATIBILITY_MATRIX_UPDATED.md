@@ -26,8 +26,9 @@
 | `storage` | PARTIAL | local/session CRUD 与事件已实现；sync 是独立本地持久化，不是真正跨设备同步 |
 | `alarms` | PARTIAL（本轮不修改） | 有 create/get/getAll/clear/clearAll；进程被杀期间不能准点执行，启动后补发 |
 | `permissions` | PARTIAL | getAll/contains/request/remove、用户确认、持久化与权限事件已实现；复杂 host pattern 子集边界仍有限 |
-| `tabs` | PARTIAL | query/get/create/update/remove/reload/history/sendMessage/move/duplicate/captureVisibleTab 与基础事件已实现；单窗口、主框架限制及 WebView 截图精度限制 |
+| `tabs` | PARTIAL | query/get/create/update（含 `loadReplace`，走 `WebViewCompat.navigate`）/remove/reload/history/sendMessage/move/duplicate/captureVisibleTab 与基础事件已实现；单窗口、主框架限制及 WebView 截图精度限制 |
 | `scripting` | PARTIAL | executeScript/insertCSS/removeCSS 与动态注册系列已实现；无真正 isolated world，frameId 仅支持 0；拒绝 allFrames/documentIds 与 USER CSS origin |
+| 存储隔离 | 已实现 | 每个拓展页面使用独立原生 `Profile`（`WebViewCompat.setProfile`，MULTI_PROFILE），与标签页及其他拓展互不可见；不支持时退回默认 Profile |
 | `i18n` | FULL（需边界测试） | 已有本地化消息表和 manifest 本地化 |
 | 其余 Firefox API | NONE 或 MANIFEST | 尚未接入原生 API handler / 浏览器宿主 |
 

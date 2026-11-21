@@ -562,10 +562,10 @@ class BrowserTab(
 
     private fun engineReload() = ops.reload()
 
-    internal fun engineLoad(target: String) {
+    internal fun engineLoad(target: String, replace: Boolean = false) {
         proceedTarget = null // 换了地址：之前错误页上的「继续」不再有效
         pendingSsl = null
-        ops.load(target)
+        if (replace) ops.loadReplacing(target) else ops.load(target)
     }
 
     /** 强制刷新（下拉刷新 / 脚本开关后刷新）：不像 [reload] 那样在加载中变成「停止」 */
@@ -1029,7 +1029,8 @@ class BrowserTab(
         }
     }
 
-    fun load(input: String) {
+    /** [replace]：替换当前历史项而不是新增（拓展 tabs.update 的 loadReplace；仅 WebView 且系统支持 navigate 时生效） */
+    fun load(input: String, replace: Boolean = false) {
         restore.dropPending()
         val target = toUrl(input, searchTemplate)
         if (url.isEmpty() && !openedFromLink) {
@@ -1048,7 +1049,7 @@ class BrowserTab(
         parked = false
         url = target
         fpInjector?.prepare(target)
-        engineLoad(target)
+        engineLoad(target, replace)
         syncNav()
     }
 

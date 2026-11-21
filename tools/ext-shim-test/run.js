@@ -177,6 +177,58 @@ test('run_at scheduling', () => {
   assert.strictEqual(idle.sandbox.n, 1);
 });
 
+test('run_at with native document-end hook (isolated world)', () => {
+  const HOOK = '__mend_test';
+  const nc = () => cfg({ isolatedWorld: true, nativeEnd: HOOK });
+
+  // document_end：不再监听 DOMContentLoaded，等宿主的 document-end 脚本调钩子
+  const end = makeEnv();
+  end.run(assemble(nc(), entry(['window.hit = (window.hit || 0) + 1'], { at: 'document_end' })));
+  assert.strictEqual(typeof end.sandbox[HOOK], 'function');
+  assert.strictEqual((end.docListeners['DOMContentLoaded'] || []).length, 0);
+  assert.strictEqual(end.sandbox.hit, undefined);
+  end.sandbox[HOOK]();
+  assert.strictEqual(end.sandbox.hit, 1);
+  assert.strictEqual(end.sandbox[HOOK], undefined); // 触发后钩子被摘掉
+  end.fireWin('load'); // load 兜底不会重复执行
+  assert.strictEqual(end.sandbox.hit, 1);
+
+  // 钩子没来：window.load 兜底
+  const fallback = makeEnv();
+  fallback.run(assemble(nc(), entry(['window.hit = (window.hit || 0) + 1'], { at: 'document_end' })));
+  fallback.fireWin('load');
+  assert.strictEqual(fallback.sandbox.hit, 1);
+
+  // 脚本启动时文档已过 loading：立即执行
+  const late = makeEnv({ readyState: 'interactive' });
+  late.run(assemble(nc(), entry(['window.hit = 1'], { at: 'document_end' })));
+  assert.strictEqual(late.sandbox.hit, 1);
+
+  // document_idle：钩子之后再等 load 或 200ms
+  const idle = makeEnv();
+  idle.run(assemble(nc(), entry(['window.n = (window.n || 0) + 1'], { at: 'document_idle' })));
+  idle.sandbox[HOOK]();
+  assert.strictEqual(idle.sandbox.n, undefined);
+  idle.runTimers();
+  idle.fireWin('load');
+  assert.strictEqual(idle.sandbox.n, 1);
+
+  // 多个条目按声明顺序执行；一个抛错不影响后一个
+  const order = makeEnv();
+  const two = entry(['window.o = (window.o || "") + "a"; throw new Error("x")'], { at: 'document_end' }).slice(0, -1) + ',' +
+    entry(['window.o = (window.o || "") + "b"'], { at: 'document_end' }).slice(1);
+  order.run(assemble(nc(), two));
+  order.sandbox[HOOK]();
+  assert.strictEqual(order.sandbox.o, 'ab');
+
+  // 没设 nativeEnd（页面世界 / 旧路径）：仍然自己监听 DOMContentLoaded
+  const legacy = makeEnv();
+  legacy.run(assemble(cfg(), entry(['window.hit = 1'], { at: 'document_end' })));
+  assert.strictEqual(legacy.sandbox[HOOK], undefined);
+  legacy.fireDoc('DOMContentLoaded');
+  assert.strictEqual(legacy.sandbox.hit, 1);
+});
+
 test('css is inserted; defers when document has no head yet', () => {
   const a = makeEnv();
   a.run(assemble(cfg(), entry([''], { css: ['body{color:red}'] })));

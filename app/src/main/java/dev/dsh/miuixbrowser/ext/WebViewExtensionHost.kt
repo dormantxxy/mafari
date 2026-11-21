@@ -46,6 +46,9 @@ class WebViewExtensionHost(
     private companion object {
         /** `WebViewCompat.addJavaScriptOnEvent` 的「文档刚创建、页面脚本之前」事件，与 addDocumentStartJavaScript 同时机 */
         const val EVENT_DOCUMENT_START = WebViewCompat.INJECTION_EVENT_DOCUMENT_START
+
+        /** `addJavaScriptOnEvent` 的 document-end 事件（1.16 起；官方文档写明对应 DOMContentLoaded），用来驱动 run_at: document_end / document_idle */
+        const val EVENT_DOCUMENT_END = WebViewCompat.INJECTION_EVENT_DOCUMENT_END
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -239,6 +242,10 @@ class WebViewExtensionHost(
             }
             worldListeners.add(WorldListener(plan.bridgeName, world))
             handlers.add(WebViewCompat.addJavaScriptOnEvent(webView, script, EVENT_DOCUMENT_START, plan.isolatedOriginRules, world))
+            // document_end / document_idle 条目：shim 在 document-start 时只登记，等这个 document-end 事件来触发（window.load 兜底）
+            plan.isolatedEndScript?.let { end ->
+                handlers.add(WebViewCompat.addJavaScriptOnEvent(webView, end, EVENT_DOCUMENT_END, plan.isolatedOriginRules, world))
+            }
             log("ext ${plan.extId}: tab $tabId isolated world '${plan.worldName}' rules=${plan.isolatedOriginRules.take(4)} script=${script.length}B")
         }
         plan.mainScript?.let { script ->

@@ -987,14 +987,36 @@ function (CFG, ENTRIES) {
     if (doc.head || doc.documentElement) go(); else docAdd('DOMContentLoaded', go, { once: true });
   }
 
+  // 原生 document_end（只在隔离世界，CFG.nativeEnd 由宿主设置）：宿主在这个世界里另注册了一段
+  // INJECTION_EVENT_DOCUMENT_END（对应 DOMContentLoaded）脚本，到点调用这里挂的世界私有钩子。
+  // 钩子没被调用时（注册失败 / 事件没来）靠 window.load 兜底，保证条目一定会跑；文档已过了 loading 阶段则立即触发。
+  var endFired = false, endQueue = [];
+  function fireEnd() {
+    if (endFired) return;
+    endFired = true;
+    try { delete win[CFG.nativeEnd]; } catch (e) { }
+    var q = endQueue;
+    endQueue = [];
+    q.forEach(function (f) { try { f(); } catch (e) { cerr(e); } });
+  }
+  if (CFG.nativeEnd) {
+    try { Object.defineProperty(win, CFG.nativeEnd, { value: fireEnd, configurable: true }); } catch (e) { }
+    if (doc.readyState !== 'loading') fireEnd(); else winAdd('load', fireEnd, { once: true });
+  }
+  function whenEnd(f) {
+    if (!CFG.nativeEnd) {
+      // 页面世界 / 旧路径：自己监听 DOMContentLoaded
+      if (doc.readyState !== 'loading') f(); else docAdd('DOMContentLoaded', f, { once: true });
+      return;
+    }
+    if (endFired) f(); else endQueue.push(f);
+  }
+
   function runWhen(at, fn) {
     if (at === 'document_start') { fn(); return; }
-    var afterDcl = function (f) {
-      if (doc.readyState !== 'loading') f(); else docAdd('DOMContentLoaded', f, { once: true });
-    };
-    if (at === 'document_end') { afterDcl(fn); return; }
-    // document_idle：DOMContentLoaded 之后，load 或 200ms 先到者
-    afterDcl(function () {
+    if (at === 'document_end') { whenEnd(fn); return; }
+    // document_idle：document_end 之后，load 或 200ms 先到者
+    whenEnd(function () {
       var ran = false;
       var go = function () { if (!ran) { ran = true; fn(); } };
       if (doc.readyState === 'complete') { ST(go, 0); return; }

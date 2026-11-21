@@ -99,7 +99,7 @@
 | MV2 / MV3 基础解析 | PARTIAL | `ManifestParser` 归一化部分 MV2/MV3 字段；不代表所有字段均支持 |
 | `permissions` / `optional_permissions` | PARTIAL | 能拆分必需 / 可选权限；运行时 request/remove 只允许拓展页面发起，并由浏览器弹窗确认 |
 | `host_permissions` / `optional_host_permissions` | PARTIAL | 可选 host 权限支持动态授予 / 撤销；复杂路径通配符覆盖判定仍采用保守策略 |
-| 静态 `content_scripts` | PARTIAL | 支持匹配、排除、JS/CSS、run_at、all_frames 等部分字段；WebView frame/world 行为有边界 |
+| 静态 `content_scripts` | PARTIAL | 支持匹配、排除、JS/CSS、run_at、all_frames 等部分字段；隔离世界路径下 document_start 走 INJECTION_EVENT_DOCUMENT_START，document_end / document_idle 由 INJECTION_EVENT_DOCUMENT_END（官方文档：对应 DOMContentLoaded，1.16 起）触发，window.load 兜底；MAIN 世界和不支持隔离世界的旧路径仍由 shim 监听 DOMContentLoaded；WebView frame/world 行为有边界 |
 | `background.scripts` / `background.page` | PARTIAL | 使用扩展后台页宿主，生命周期与 Firefox 不完全一致 |
 | `background.service_worker` | PARTIAL | 通过隐藏页面模拟，不是原生 MV3 extension service worker |
 | `action` / `browser_action` / `page_action` | MANIFEST | 配置可解析，不代表完整按钮 API 已实现 |

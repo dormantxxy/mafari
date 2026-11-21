@@ -26,6 +26,8 @@ class TabsApi(
     private val messages: MessageBroker,
     /** 用户点击拓展后临时授予的「当前标签」访问：让 url / title 对该标签可见；null = 不支持 activeTab */
     private val activeTab: ActiveTabGrants? = null,
+    /** 拓展打开自己的页面时的出口（(拓展, 完整网址) → 是否已接管）；null / false = 照常走标签 */
+    private val openOwnPage: ((InstalledExtension, String) -> Boolean)? = null,
 ) : TabEventListener {
 
     @Volatile private var bridge: TabBridge? = null
@@ -146,6 +148,14 @@ class TabsApi(
             val active = p.boolOrNull("active") ?: p.boolOrNull("selected") ?: true
             val opener = p.intOrNull("openerTabId")
             if (opener != null && bridge().get(opener) == null) throw noTab(opener)
+            if (url != null && openOwnPage?.invoke(ctx.ext, url) == true) {
+                // 页面在拓展 Sheet 里，不是浏览器标签：按 Chrome 约定回 TAB_ID_NONE(-1) 的占位
+                return@register toJson(
+                    ctx.ext,
+                    TabInfo(id = -1, index = -1, active = true, url = url, title = "", favIconUrl = null, loading = false, openerTabId = null),
+                    false,
+                )
+            }
             val tab = bridge().create(TabCreateOptions(url, active, opener))
             toJson(ctx.ext, tab, activeGranted(ctx.ext, tab))
         }
@@ -156,6 +166,10 @@ class TabsApi(
             // highlighted:true 在单窗口里等同于激活；muted 在支持 MUTE_AUDIO 的系统 WebView 上生效，否则空操作；
             // pinned / autoDiscardable 等没有对应概念，按空操作处理
             val active = p.boolOrNull("active") ?: p.boolOrNull("selected") ?: p.boolOrNull("highlighted")
+            if (url != null && openOwnPage?.invoke(ctx.ext, url) == true) {
+                val current = bridge().get(id) ?: throw noTab(id)
+                return@register toJson(ctx.ext, current, activeGranted(ctx.ext, current))
+            }
             val tab = bridge().update(id, TabUpdateOptions(url, active, p.boolOrNull("muted"), p.boolOrNull("loadReplace"))) ?: throw noTab(id)
             toJson(ctx.ext, tab, activeGranted(ctx.ext, tab))
         }

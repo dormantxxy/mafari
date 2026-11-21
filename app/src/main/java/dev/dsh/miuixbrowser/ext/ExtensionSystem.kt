@@ -57,7 +57,20 @@ class ExtensionSystem(
      * tabs.*：事件只发往拓展自己的页面（[pages]），不走 [sinks]——后者包含标签页里的 content script，
      * 标签的网址不能推到网页里去。浏览器界面建好后调用 [attachTabs] 接上真实的标签桥接（BrowserScreen 里接），之前调用回 UNSUPPORTED。
      */
-    private val tabs = TabsApi(pages, { webViewExtensions() }, broker, activeTab)
+    private val tabs = TabsApi(pages, { webViewExtensions() }, broker, activeTab, ::openOwnPageInSheet)
+
+    /**
+     * 拓展用 tabs.create / tabs.update 打开自己的页面（如 popup 里的「设置」）：普通标签里没有拓展消息桥，
+     * 且只放行 web_accessible_resources（其余 404），所以改在拓展页面 Sheet 里打开。返回 false = 不是自己的页面或没有 UI。
+     */
+    private fun openOwnPageInSheet(ext: InstalledExtension, url: String): Boolean {
+        val prefix = ExtensionOrigins.originFor(ext.spec.id) + "/"
+        if (!url.startsWith(prefix, ignoreCase = true)) return false
+        val path = url.substring(prefix.length)
+        val handler = pages.openOptionsHandler ?: return false
+        android.os.Handler(android.os.Looper.getMainLooper()).post { handler(ext.spec.id, path) }
+        return true
+    }
     private val webNavigation = WebNavigationApi(pages, { webViewExtensions() }) { tabs.bridgeOrNull() }
     val contextMenus = ContextMenusApi(pages)
     val actionApi = ActionApi()
@@ -95,7 +108,7 @@ class ExtensionSystem(
             openOptions = { extId ->
                 val handler = pages.openOptionsHandler
                 if (handler == null) false else {
-                    android.os.Handler(android.os.Looper.getMainLooper()).post { handler(extId) }
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { handler(extId, null) }
                     true
                 }
             },

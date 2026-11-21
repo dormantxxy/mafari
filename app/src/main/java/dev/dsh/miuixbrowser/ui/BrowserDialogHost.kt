@@ -349,11 +349,20 @@ BrowserChunk {
             run {
                 val extSystem = context.appContainer.webExtensions
                 var optionsRequest by remember { mutableStateOf<ExtPageRequest?>(null) }
+                var pendingOptions by remember { mutableStateOf<ExtPageRequest?>(null) }
+                // 先收起功能菜单 Sheet，再开拓展页 Sheet（两层 Sheet 同时切换时后一层会被宿主吞掉）
+                androidx.compose.runtime.LaunchedEffect(pendingOptions) {
+                    val req = pendingOptions ?: return@LaunchedEffect
+                    webViewExtSheetShow = false
+                    kotlinx.coroutines.delay(250)
+                    optionsRequest = req
+                    pendingOptions = null
+                }
                 DisposableEffect(extSystem) {
-                    extSystem.pages.openOptionsHandler = { extId ->
+                    extSystem.pages.openOptionsHandler = { extId, path ->
                         val ext = extSystem.repo.get(extId)
                         if (ext != null && ext.enabled) {
-                            optionsRequest = ExtPageRequest(extId, ext.spec.name, ExtPageRequest.Kind.OPTIONS)
+                            pendingOptions = ExtPageRequest(extId, ext.spec.name, ExtPageRequest.Kind.OPTIONS, path)
                         }
                     }
                     onDispose { extSystem.pages.openOptionsHandler = null }

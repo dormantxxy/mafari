@@ -124,30 +124,31 @@ internal fun BrowserTab.setupWebView() {
         }
     }.onFailure { Diag.log("adblock: document-start install failed ${it.message}") }
     runCatching {
-        webView.addJavascriptInterface(
-            GmBridge(
-                appContext,
-                { webView },
-                { id, target, active -> onGmOpenTab?.invoke(id, target, active) },
-                { link, name, onResult ->
-                    val gm = onGmDownload
-                    if (gm != null) {
-                        gm(link, name, onResult)
-                    } else {
-                        onDownload?.invoke(
-                            link,
-                            null,
-                            if (name.isBlank()) null else "attachment; filename=\"$name\"",
-                            null,
-                        )
-                        onResult?.invoke(false, "unsupported")
-                    }
-                },
-                { id -> onGmCloseTab?.invoke(id) },
-                { resolveActivity() },
-            ),
-            "MafariGM",
-        )
+        // 旧桥：页面世界里的 MafariGM。支持隔离世界的 WebView 上，脚本改走 GmChannel（见 TabScripts.sync），
+        // 但通道的原生实现复用这个实例（xhr / 下载 / 通知 / 文件流），所以仍要先建出来并交给 tab.gmBridge
+        val gmBridge = GmBridge(
+            appContext,
+            { webView },
+            { id, target, active -> onGmOpenTab?.invoke(id, target, active) },
+            { link, name, onResult ->
+                val gm = onGmDownload
+                if (gm != null) {
+                    gm(link, name, onResult)
+                } else {
+                    onDownload?.invoke(
+                        link,
+                        null,
+                        if (name.isBlank()) null else "attachment; filename=\"$name\"",
+                        null,
+                    )
+                    onResult?.invoke(false, "unsupported")
+                }
+            },
+            { id -> onGmCloseTab?.invoke(id) },
+            { resolveActivity() },
+            )
+        this.gmBridge = gmBridge
+        webView.addJavascriptInterface(gmBridge, "MafariGM")
     }
     webView.settings.apply {
         javaScriptEnabled = true

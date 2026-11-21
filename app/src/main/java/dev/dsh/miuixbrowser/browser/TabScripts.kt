@@ -2,6 +2,7 @@ package dev.dsh.miuixbrowser.browser
 
 import android.webkit.WebView
 import dev.dsh.miuixbrowser.engine.gecko.GeckoGm
+import dev.dsh.miuixbrowser.script.GmChannel
 import dev.dsh.miuixbrowser.script.ScriptResources
 import dev.dsh.miuixbrowser.script.UserscriptEngine
 import dev.dsh.miuixbrowser.util.Diag
@@ -17,6 +18,32 @@ internal class TabScripts(private val tab: BrowserTab) {
     private var installedScriptsSignature = ""
     private var prefetchingScripts = false
 
+    /**
+     * 隔离世界通道（WebView 支持 JS_INJECTION_IN_FRAME_AND_WORLD 时）：脚本 handler 由它自己管理，
+     * 此时 [scriptHandlers] 为空。不支持 / 安装失败时为 null，沿用旧的 addDocumentStartJavaScript + MafariGM 路径。
+     */
+    private var channel: GmChannel? = null
+
+    /** 标签销毁：摘掉通道（监听器 / 中继 / 脚本 handler）。主线程 */
+    fun release() {
+        channel?.close()
+        channel = null
+        scriptHandlers.forEach { handler -> runCatching { handler.remove() } }
+        scriptHandlers.clear()
+        installedScriptsSignature = ""
+    }
+
+    /** 通道版安装：true = 已由通道接管（脚本 handler 都在通道里），false = 调用方走旧路径 */
+    private fun syncViaChannel(enabled: List<dev.dsh.miuixbrowser.script.UserScript>): Boolean {
+        val bridge = tab.gmBridge ?: return false
+        if (!GmChannel.isSupported()) return false
+        val ch = channel ?: GmChannel(tab.appContext, tab.webView, bridge) { Diag.log(it) }.also { channel = it }
+        if (ch.sync(enabled)) return true
+        ch.close() // 装到一半失败：sync 已清理，这里确保实例不再留着
+        channel = null
+        return false
+    }
+
     /** 当前标签是否应运行油猴脚本：网页增强、脚本总开关、无痕范围三者都允许 */
     fun active(): Boolean =
         tab.pageEnhancements && tab.scriptsEnabled && (!tab.incognito || tab.scriptsInIncognito)
@@ -31,9 +58,7 @@ internal class TabScripts(private val tab: BrowserTab) {
         if (tab.isGecko) { syncGecko(); return }
         if (tab.destroyed) return
         if (!active()) {
-            scriptHandlers.forEach { handler -> runCatching { handler.remove() } }
-            scriptHandlers.clear()
-            installedScriptsSignature = ""
+            release()
             return
         }
         val enabled = tab.userScripts.filter { it.enabled }
@@ -59,6 +84,15 @@ internal class TabScripts(private val tab: BrowserTab) {
         scriptHandlers.clear()
         installedScriptsSignature = signature
         if (!androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            return
+        }
+        if (enabled.isEmpty()) {
+            channel?.close()
+            channel = null
+            return
+        }
+        if (syncViaChannel(enabled)) {
+            Diag.log("userscript: isolated-world channel scripts=${enabled.size}")
             return
         }
         enabled.forEach { script ->

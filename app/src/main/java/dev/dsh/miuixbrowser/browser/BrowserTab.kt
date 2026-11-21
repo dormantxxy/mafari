@@ -392,6 +392,9 @@ class BrowserTab(
     /** 长按元素检测 / 手动标记广告（仅 WebView），见 [TabElementInspector] */
     internal val inspector = TabElementInspector(this)
 
+    /** 本标签 WebView 的油猴原生能力实现（旧桥 MafariGM 与隔离世界通道 [GmChannel] 共用），由 setupWebView 创建 */
+    internal var gmBridge: GmBridge? = null
+
     /** 打开新标签页（GM_openInTab 用）：桥生成的 [id]、地址、是否切到前台 */
     var onGmOpenTab: ((id: String, url: String, active: Boolean) -> Unit)? = null
 
@@ -1545,6 +1548,7 @@ class BrowserTab(
         runCatching { fpInjector?.clear() }
         runCatching { extInstallation?.close() }
         extInstallation = null
+        runCatching { scripts.release() }
         if (isGecko) {
             // 引擎从没建过（延迟创建的后台标签）就没有东西要销毁
             geckoEngine?.let { g ->

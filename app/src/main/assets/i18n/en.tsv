@@ -1340,7 +1340,8 @@ LOGO 标识	LOGO
 长按进入「拓展」管理页，单击是拓展快捷菜单	Long-press opens the "Extensions" management page; a tap opens the extension quick menu
 试一试	Try it
 这里只是预览，进入浏览器后点开「更多」即可使用	This is only a preview; open "More" in the browser to use it
-长按任意图标并拖动：松手前拖到分割线下方就是隐藏，再拖回上方即恢复。「设置」不能隐藏，以免找不到入口。	Long-press any icon and drag: dropping it below the divider hides it, and dragging it back above restores it. "Settings" can't be hidden so you can always find the entry.
+长按任意图标进入编辑：拖到分割线下方或点右上角的 × 即隐藏，拖回上方（或点 +）即恢复，点「完成」退出。「设置」不能隐藏，以免找不到入口。	Long-press any icon to edit: drag it below the divider or tap the × to hide it, drag it back up (or tap +) to restore it, and tap "Done" to exit. "Settings" can't be hidden so you can always find the entry.
+拖动排序，点 × 隐藏	Drag to reorder, tap × to hide
 长按还能做什么	What long-press can do
 备份方式	Backup methods
 本地加密备份文件	Local encrypted backup file

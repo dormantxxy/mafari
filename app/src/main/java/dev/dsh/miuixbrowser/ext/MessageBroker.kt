@@ -59,7 +59,7 @@ class MessageBroker(
 
     private class Reply(val value: Any?)
 
-    private class Pending(val extId: String) {
+    private class Pending(val extId: String, val shape: String = "") {
         val result = CompletableDeferred<Reply>()
         val cids = HashSet<String>()
         var outstanding = 0
@@ -169,6 +169,7 @@ class MessageBroker(
         if (c.extId != ctx.ext.spec.id || (senderId != c.leftContext && senderId !in c.rightContexts)) {
             throw ApiException(ErrorCodes.DENIED_PERMISSION, "无权使用此 Port")
         }
+        log("ext ${c.extId} port ${portId.take(8)} name='${c.name}' ${if (senderId == c.leftContext) "caller" else "target"} posts msg=${shapeOf(message)}")
         if (senderId == c.leftContext) {
             val liveTargets = c.rightContexts.toList()
             var delivered = 0
@@ -274,7 +275,7 @@ class MessageBroker(
         sender: JSONObject,
     ): Any? {
         if (targets.isEmpty()) throw noReceiver()
-        val state = Pending(extId)
+        val state = Pending(extId, shapeOf(message))
         for (t in targets) {
             val cid = newCid()
             synchronized(state) {
@@ -317,7 +318,7 @@ class MessageBroker(
             state.result.completeExceptionally(ApiException(ErrorCodes.INTERNAL, error))
             return
         }
-        if (noResponse) log("ext $extId runtime.sendMessage: 目标页面有 onMessage 监听器但没有响应（没 sendResponse / 没 return true）")
+        if (noResponse) log("ext $extId runtime.sendMessage: 目标页面有 onMessage 监听器但没有响应（没 sendResponse / 没 return true） msg=${state.shape}")
         if (noReceiver || noResponse) {
             // noResponse：该上下文有监听器但没响应；noReceiver：该上下文根本没有监听器
             settleWithoutReply(cid, hadListener = noResponse)
@@ -441,6 +442,28 @@ class MessageBroker(
             }
         return out
     }
+
+    /** 诊断用：只记消息的形状（键名与类型，加几个常见的分发字段的短值），不记内容 */
+    private fun shapeOf(m: Any?): String = try {
+        when (m) {
+            null, JSONObject.NULL -> "null"
+            is JSONObject -> {
+                val parts = ArrayList<String>()
+                val it = m.keys()
+                while (it.hasNext() && parts.size < 12) {
+                    val k = it.next()
+                    val v = m.opt(k)
+                    val t = when (v) { null, JSONObject.NULL -> "null"; is JSONObject -> "obj"; is org.json.JSONArray -> "arr${v.length()}"; is String -> "str${v.length}"; is Number -> "num"; is Boolean -> "bool"; else -> "?" }
+                    val tag = if (v is String && k in setOf("method", "type", "action", "cmd", "name", "event", "op")) "=" + v.take(40) else ""
+                    parts.add("$k:$t$tag")
+                }
+                "{" + parts.joinToString(",") + "}"
+            }
+            is org.json.JSONArray -> "arr${m.length()}"
+            is String -> "str${m.length}"
+            else -> m.javaClass.simpleName
+        }
+    } catch (_: Exception) { "?" }
 
     private fun noReceiver() =
         ApiException(ErrorCodes.NO_RECEIVER, "Could not establish connection. Receiving end does not exist.")

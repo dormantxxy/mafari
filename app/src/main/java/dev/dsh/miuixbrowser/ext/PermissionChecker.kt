@@ -39,6 +39,8 @@ object PermissionChecker {
         // tabs.query / create / update / sendMessage 本身不要权限；url、title 等敏感字段由 tabs 实现按 canSeeTabDetails 裁剪
         "tabs." to emptySet(),
         "scripting." to setOf("scripting"),
+        // Firefox MV2 的 contentScripts.register 不需要 API 权限；能注册到哪些站点由 parseDynamic 按 host 授权校验
+        "contentScripts." to emptySet(),
         "contextMenus." to setOf("contextMenus", "menus"),
         "menus." to setOf("menus", "contextMenus"),
         "alarms." to setOf("alarms"),

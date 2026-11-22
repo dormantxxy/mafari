@@ -379,7 +379,12 @@ function (CFG, ENTRIES) {
     onBrowserUpdateAvailable: inertEvent('runtime.onBrowserUpdateAvailable', true),
     onMessageExternal: inertEvent('runtime.onMessageExternal', true),
     onConnectExternal: inertEvent('runtime.onConnectExternal', true),
-    setUninstallURL: unsupported('runtime.setUninstallURL'),
+    // 卸载后打开的页面：WebView 适配层没有这个入口，接受并忽略（拓展只是想统计 / 问卷，失败不该拖垮后台页）
+    setUninstallURL: promised(function () { return P.resolve(); }),
+    // Firefox 专有；Tampermonkey 等在后台页启动时就会调，缺失会让启动流程中断
+    getBrowserInfo: promised(function () {
+      return P.resolve({ name: 'Mafari', vendor: 'Mafari', version: String(CFG.appVersion || '1.0.0'), buildID: '' });
+    }),
     requestUpdateCheck: unsupported('runtime.requestUpdateCheck'),
     reload: unsupported('runtime.reload'),
     // 只有后台页自己能拿到自己的 window；别的页面在另一个 WebView 里，跨 WebView 拿不到
@@ -512,9 +517,16 @@ function (CFG, ENTRIES) {
         return rpc('tabs.sendMessage', [tabId, message === undefined ? null : message, nul(options)]);
       }),
       // MV2 注入接口：WebView 上注入的代码拿不到 browser / chrome，不能照 Firefox 语义工作，明确拒绝
-      executeScript: unsupported('tabs.executeScript'),
-      insertCSS: unsupported('tabs.insertCSS'),
-      removeCSS: unsupported('tabs.removeCSS'),
+      // MV2 注入：只支持主框架、file 形式（insertCSS 另支持 code）；host 权限由原生按目标标签校验
+      executeScript: promised(function (a, b) {
+        return isObj(a) ? rpc('tabs.executeScript', [null, a]) : rpc('tabs.executeScript', [nul(a), nul(b)]);
+      }),
+      insertCSS: promised(function (a, b) {
+        return isObj(a) ? rpc('tabs.insertCSS', [null, a]) : rpc('tabs.insertCSS', [nul(a), nul(b)]);
+      }),
+      removeCSS: promised(function (a, b) {
+        return isObj(a) ? rpc('tabs.removeCSS', [null, a]) : rpc('tabs.removeCSS', [nul(a), nul(b)]);
+      }),
       detectLanguage: unsupported('tabs.detectLanguage'),
       captureVisibleTab: promised(function (windowId, options) {
         if (isObj(windowId)) return rpc('tabs.captureVisibleTab', [windowId]);
@@ -569,6 +581,24 @@ function (CFG, ENTRIES) {
       getRegisteredContentScripts: promised(function (filter) { return rpc('scripting.getRegisteredContentScripts', [sn(filter)]); }),
       updateContentScripts: promised(function (list) { return rpc('scripting.updateContentScripts', [sn(list)]); }),
       unregisterContentScripts: promised(function (filter) { return rpc('scripting.unregisterContentScripts', [sn(filter)]); })
+    };
+  }
+
+  // contentScripts.register：Firefox MV2 专有（uBlock Origin 等在后台页启动时就用）。只在拓展自己的页面提供，
+  // 转成原生的动态脚本注册（不持久化，进程内有效）；只支持 { file } 形式的 js / css，内联 code 会被拒绝。
+  var contentScripts = null;
+  if (CFG.page && Number(CFG.manifest && CFG.manifest.manifest_version) < 3) {
+    var csSeq = 1;
+    contentScripts = {
+      register: promised(function (details) {
+        if (details === null || typeof details !== 'object') return P.reject(new E('contentScripts.register: details must be an object'));
+        var d = {}; OK(details).forEach(function (k) { d[k] = details[k]; });
+        d.id = 'mafari-cs-' + (csSeq++) + '-' + Math.random().toString(36).slice(2, 8);
+        return rpc('contentScripts.register', [d]).then(function (id) {
+          var done = false;
+          return { unregister: promised(function () { if (done) return P.resolve(); done = true; return rpc('contentScripts.unregister', [id]); }) };
+        });
+      })
     };
   }
 
@@ -888,6 +918,7 @@ function (CFG, ENTRIES) {
   if (!CFG.offscreen && alarms) browser.alarms = alarms;
   if (!CFG.offscreen && tabs) browser.tabs = tabs;
   if (!CFG.offscreen && scripting) browser.scripting = scripting;
+  if (!CFG.offscreen && contentScripts) browser.contentScripts = contentScripts;
   if (!CFG.offscreen && webNavigation) browser.webNavigation = webNavigation;
   if (!CFG.offscreen && webRequest) browser.webRequest = webRequest;
   if (!CFG.offscreen && declarativeNetRequest) browser.declarativeNetRequest = declarativeNetRequest;
@@ -1035,9 +1066,11 @@ function (CFG, ENTRIES) {
   if (CFG.isolatedWorld) {
     // 只在隔离世界里挂：页面世界看不到这个世界的全局
     globalThis.__mafariModDefine = function (path, fn) { modFns[path] = fn; };
-    // 隔离世界里的 fetch 同样受页面 CSP 的 connect-src 约束（github 等站点会拦 https://<拓展>.ext.mafari.internal/...），
-    // content script 读自己的 default_config.json 之类就会失败。指向拓展 origin 的 GET 改走桥读文件（仅 web_accessible 资源），
-    // 其余请求原样交给原生 fetch。
+  }
+  // content script 里的 fetch 受页面 CSP 的 connect-src 约束（github、browsercheck.net 等站点会拦 https://<拓展>.ext.mafari.internal/...），
+  // content script 读自己的 default_config.json 之类就会失败。指向拓展 origin 的 GET 改走桥读文件（仅 web_accessible 资源），
+  // 其余请求原样交给原生 fetch。隔离世界和旧的页面世界路径（不支持隔离世界 / 首次加载走旧路径）都要装；MAIN 世界没有桥，不装。
+  if (CFG.isolatedWorld || (!CFG.page && !MAIN)) {
     var nativeFetch = globalThis.fetch;
     if (typeof nativeFetch === 'function') {
       globalThis.fetch = function (input, init) {

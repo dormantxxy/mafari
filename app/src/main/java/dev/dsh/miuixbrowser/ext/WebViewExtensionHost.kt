@@ -414,7 +414,8 @@ class WebViewExtensionHost(
      */
     private fun handleResourceRead(req: ApiRequest, reply: JavaScriptReplyProxy, viaWorld: Boolean, tabId: Int?, frameUrl: String) {
         val path = req.args.optString(0)
-        val ext = if (viaWorld && tabId != null) {
+        // 旧的页面世界路径同样允许：连接已绑定到这个拓展，且只放行 web_accessible_resources，与网页直接请求拓展地址的规则一致
+        val ext = if (tabId != null) {
             synchronized(bindings) { bindings[tabId]?.exts?.firstOrNull { it.spec.id == req.extId } }
         } else {
             null

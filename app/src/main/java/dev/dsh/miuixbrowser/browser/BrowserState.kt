@@ -555,15 +555,16 @@ class BrowserState(private val context: Context, initialUserAgent: String = "") 
 
     /**
      * 从主页 / 外部 / 应用内打开网址：
-     * 1. 已有同站标签 → 直接切过去显示它原来的页面，不新建、不重新加载；
-     *    仅当 [navigateIfDeepLink] 为 true 且目标是带具体路径的深链、且与该标签当前页不同，才在该标签里跳转。
+     * 1. 已有同站标签 → 切过去；目标是站点根地址时直接显示它原来的页面，不重新加载；
+     *    目标是带具体路径的深链、且与该标签当前页不同时，在该标签里跳转到它（默认开启：
+     *    从主页收藏 / 分组弹窗打开 github.com/xxx/yyy 时，已有的 github.com/xxx 标签也要跳过去，而不是停在原页）。
      * 2. 没有同站标签 → 当前是空白/主页就地加载，否则新开标签。
      * 切走后遗留的空白标签会被清掉，避免多出一张空卡片。
      */
     fun openOrReuse(
         target: String,
         incognito: Boolean = activeTab.incognito,
-        navigateIfDeepLink: Boolean = false,
+        navigateIfDeepLink: Boolean = true,
         fromStartPage: Boolean = false,
     ) {
         if (target.isBlank()) return

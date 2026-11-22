@@ -147,6 +147,7 @@ class MessageBroker(
             id, extId, caller.contextId, CopyOnWriteArraySet(), name, sender,
         )
         ports[id] = connection
+        log("ext $extId runtime.connect name='${name}' port=${id.take(8)} from=${caller.kind.name.lowercase()} targets=${targets.joinToString { it.contextType.lowercase() }}")
         targets.forEach { target ->
             // Register before delivery so an immediately responding endpoint is already authorized.
             connection.rightContexts.add(target.contextId)
@@ -178,6 +179,7 @@ class MessageBroker(
                 }.getOrDefault(false)
                 if (ok) delivered++ else c.rightContexts.remove(targetId)
             }
+            log("ext ${c.extId} port ${portId.take(8)} name='${c.name}' caller→targets delivered=$delivered/${liveTargets.size}")
             if (delivered == 0) {
                 closePort(portId, notifyContexts = emptySet())
                 throw ApiException(ErrorCodes.NO_RECEIVER, "Port 接收端已关闭")
@@ -187,6 +189,7 @@ class MessageBroker(
             val ok = target != null && runCatching {
                 target.deliverPort("portMessage", portId, c.name, c.sender, message)
             }.getOrDefault(false)
+            log("ext ${c.extId} port ${portId.take(8)} name='${c.name}' target→caller delivered=$ok")
             if (!ok) {
                 closePort(portId, notifyContexts = emptySet())
                 throw ApiException(ErrorCodes.NO_RECEIVER, "Port 调用端已关闭")
@@ -302,9 +305,18 @@ class MessageBroker(
     }
 
     /** `runtime.reply`：页面把 onMessage 的结果送回来。[noReceiver] 表示该上下文没有监听器 */
-    fun reply(extId: String, cid: String, value: Any?, noReceiver: Boolean, noResponse: Boolean = false) {
+    fun reply(extId: String, cid: String, value: Any?, noReceiver: Boolean, noResponse: Boolean = false, error: String? = null) {
         val state = pending[cid] ?: return
         if (state.extId != extId) return
+        if (error != null) {
+            // 监听器返回的 Promise 被 reject：Firefox 里发送方会收到这个错误，而不是静默得到 undefined
+            if (pending.remove(cid) == null) return
+            pendingOwner.remove(cid)
+            synchronized(state) { state.cids.remove(cid) }
+            log("ext $extId runtime.sendMessage: 目标页面的 onMessage 监听器 reject：${error.take(200)}")
+            state.result.completeExceptionally(ApiException(ErrorCodes.INTERNAL, error))
+            return
+        }
         if (noResponse) log("ext $extId runtime.sendMessage: 目标页面有 onMessage 监听器但没有响应（没 sendResponse / 没 return true）")
         if (noReceiver || noResponse) {
             // noResponse：该上下文有监听器但没响应；noReceiver：该上下文根本没有监听器
@@ -347,6 +359,7 @@ class MessageBroker(
                 ctx.ext.spec.id, cid, a.argOrNull(1),
                 noReceiver = opts?.optBoolean("noReceiver", false) == true,
                 noResponse = opts?.optBoolean("noResponse", false) == true,
+                error = opts?.optString("error", "")?.takeIf { it.isNotEmpty() },
             )
             null
         }

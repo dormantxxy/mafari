@@ -175,10 +175,10 @@ function (CFG, ENTRIES) {
     var done = false;
     // opts: 'noReceiver' = 这个上下文根本没有 onMessage 监听器；'noResponse' = 有监听器但没有给出响应。
     // 两者对发送方的结果不同（Firefox）：前者 reject「Receiving end does not exist」，后者 resolve undefined。
-    function reply(v, opt) {
+    function reply(v, opt, msg) {
       if (done) return;
       done = true;
-      var o = opt === 'noReceiver' ? { noReceiver: true } : opt === 'noResponse' ? { noResponse: true } : null;
+      var o = opt === 'noReceiver' ? { noReceiver: true } : opt === 'noResponse' ? { noResponse: true } : opt === 'error' ? { error: msg || 'error' } : null;
       rpc('runtime.reply', [m.cid, v === undefined ? null : v, o]).catch(function () { });
     }
     if (!listeners.length) { reply(undefined, 'noReceiver'); return; }
@@ -187,7 +187,7 @@ function (CFG, ENTRIES) {
       var r;
       try { r = f(m.message, m.sender || {}, function (v) { reply(v); }); } catch (e) { cerr(e); return; }
       if (r === true) async = true;
-      else if (r && typeof r.then === 'function') { async = true; r.then(function (v) { reply(v); }, function () { reply(undefined); }); }
+      else if (r && typeof r.then === 'function') { async = true; r.then(function (v) { reply(v); }, function (e) { cerr(e); reply(undefined, 'error', e && e.message ? String(e.message) : String(e)); }); }
     });
     // 监听器收到了消息但既没同步 sendResponse、也没返回 true / Promise：不是「没有接收端」。
     // 交给 broker 汇总——所有目标都没响应时，发送方 resolve undefined（Firefox 语义），而不是 NO_RECEIVER。
@@ -226,6 +226,7 @@ function (CFG, ENTRIES) {
       _id: id || null,
       _queue: [],
       _closed: false,
+      _hasMessageListeners: function () { return msgListeners.length > 0; },
       _message: function (message) { if (!p._closed) notify(msgListeners, [message, p]); },
       _close: function (notifyLocal) {
         if (p._closed) return;
@@ -240,12 +241,16 @@ function (CFG, ENTRIES) {
   function receivePortConnect(m) {
     if (!m.portId || ports[m.portId]) return;
     var p = makePort(m.portId, m.name, m.sender, true);
+    if (!(L['runtime.onConnect'] || []).length) cwarnPort('[mafari] onConnect arrived with no listener (buffered), port name=' + (m.name || ''));
     deliverEvent('runtime.onConnect', [p]);
   }
   function receivePortMessage(m) {
     var p = ports[m.portId];
-    if (p) p._message(m.message);
+    if (!p) { cwarnPort('[mafari] port message dropped: unknown port ' + m.portId + ' name=' + (m.name || '')); return; }
+    if (!p._hasMessageListeners()) cwarnPort('[mafari] port message dropped: no onMessage listener yet, port name=' + (p.name || ''));
+    p._message(m.message);
   }
+  function cwarnPort(t) { try { win.console.warn(t); } catch (e) { } }
   function receivePortDisconnect(m) {
     var p = ports[m.portId];
     if (p) p._close();
@@ -695,6 +700,16 @@ function (CFG, ENTRIES) {
       onBeforeSendHeaders: inertEvent('webRequest.onBeforeSendHeaders'),
       onSendHeaders: inertEvent('webRequest.onSendHeaders'),
       onAuthRequired: inertEvent('webRequest.onAuthRequired'),
+      // Firefox 里这些选项枚举是存在的（没有 EXTRA_HEADERS）：Violentmonkey 在后台页顶层直接读
+      // browser.webRequest.OnBeforeSendHeadersOptions.EXTRA_HEADERS，对象缺失会抛 TypeError，后台页整个起不来。
+      OnBeforeRequestOptions: { BLOCKING: 'blocking', REQUEST_BODY: 'requestBody' },
+      OnBeforeSendHeadersOptions: { BLOCKING: 'blocking', REQUEST_HEADERS: 'requestHeaders' },
+      OnSendHeadersOptions: { REQUEST_HEADERS: 'requestHeaders' },
+      OnHeadersReceivedOptions: { BLOCKING: 'blocking', RESPONSE_HEADERS: 'responseHeaders' },
+      OnAuthRequiredOptions: { BLOCKING: 'blocking', RESPONSE_HEADERS: 'responseHeaders', ASYNC_BLOCKING: 'asyncBlocking' },
+      OnResponseStartedOptions: { RESPONSE_HEADERS: 'responseHeaders' },
+      OnBeforeRedirectOptions: { RESPONSE_HEADERS: 'responseHeaders' },
+      OnCompletedOptions: { RESPONSE_HEADERS: 'responseHeaders' },
       handlerBehaviorChanged: promised(function () { return P.resolve(); }),
       MAX_HANDLER_BEHAVIOR_CHANGED_CALLS_PER_10_MINUTES: 20
     };

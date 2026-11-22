@@ -66,6 +66,18 @@ import dev.dsh.miuixbrowser.util.toUrl
  * 它用到的状态（页面主机名、SSL 例外、权限模式等）仍存放在 [BrowserTab] 里，已放宽为 internal。
  * 由 BrowserTab 的 init 在所有属性初始化完毕后调用（仅 WebView 内核）。
  */
+/**
+ * 给非无痕的 WebView 标签接上拓展的 NavigationListener（只接一次）。拓展就绪前（[dev.dsh.miuixbrowser.ext.ExtStartupGate]）
+ * 拓展系统不存在，什么都不做；就绪后由 [BrowserTab.applyWebExtensions] 补接。主线程调用。
+ */
+internal fun BrowserTab.attachWebNavigationIfNeeded() {
+    if (incognito || webNavAttached) return
+    val system = appContext.appContainer.webExtensionsOrNull ?: return
+    webNavAttached = true
+    runCatching { system.attachNavigationListener(webView, id) }
+        .onFailure { Diag.log("webnav: NavigationListener attach failed ${it.message}") }
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 internal fun BrowserTab.setupWebView() {
     dev.dsh.miuixbrowser.engine.webview.WebViewSpeculative.noteWebViewCreated()
@@ -74,7 +86,11 @@ internal fun BrowserTab.setupWebView() {
     webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
     // 原生滚动回调（API 23+）：底栏收起 / 展开由滚动事件唤醒，不再靠定时轮询
     webView.setOnScrollChangeListener { _, _, _, _, _ -> scrollSignal.trySend(Unit) }
-    runCatching { webView.addJavascriptInterface(AdBlockBridge { !incognito || adblockInIncognito }, "MafariAdblock") }
+    // 元素隐藏桥：优先 WebMessageListener（host 由系统按来源给出）；不支持时退回旧的同步桥
+    val cosmeticAllowed = { !incognito || adblockInIncognito }
+    if (!dev.dsh.miuixbrowser.engine.webview.CosmeticBridge.install(webView, cosmeticAllowed)) {
+        runCatching { webView.addJavascriptInterface(AdBlockBridge(cosmeticAllowed), "MafariAdblock") }
+    }
     runCatching { webView.addJavascriptInterface(blob.bridge, "MafariBlob") }
     // 页内翻译：页面脚本经它把待译文本交给原生（只在翻译进行中受理）。单向消息，优先 WebMessageListener
     // （只受理主框架 http(s) 来源）；系统 WebView 不支持时退回 addJavascriptInterface
@@ -118,8 +134,8 @@ internal fun BrowserTab.setupWebView() {
         if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
             // 社区通用：缓存 createObjectURL 的 Blob，extractBlob 直接读，避免 fetch blob: 失败
             runCatching {
-                val cacheJs = appContext.assets.open("mafari_blob_cache.js")
-                    .bufferedReader(Charsets.UTF_8).use { it.readText() }
+                // 全文只读一次（启动预热线程已提前读好，见 StartupWarmup），每个标签不再在主线程上打开 asset
+                val cacheJs = InjectAssets.read(appContext, "mafari_blob_cache.js") ?: error("mafari_blob_cache.js missing")
                 androidx.webkit.WebViewCompat.addDocumentStartJavaScript(webView, cacheJs, setOf("*"))
             }.onFailure { Diag.log("blob cache install failed: ${it.message}") }
             androidx.webkit.WebViewCompat.addDocumentStartJavaScript(webView, AdBlock.COSMETIC_JS, setOf("*"))
@@ -209,19 +225,17 @@ internal fun BrowserTab.setupWebView() {
 
     // 非无痕标签：主文档的 committed / completed / webRequest 响应交给 NavigationListener（系统 WebView 支持时）。
     // 必须在首次加载前注册；不支持就保持下面 WebViewClient 的近似路径。
-    if (!incognito) {
-        runCatching { appContext.appContainer.webExtensions.attachNavigationListener(webView, id) }
-            .onFailure { Diag.log("webnav: NavigationListener attach failed ${it.message}") }
-    }
+    // 拓展晚加载：冷启动期间拓展系统视为不存在（见 ExtStartupGate），这里不会创建它；就绪后由 applyWebExtensions 补接。
+    attachWebNavigationIfNeeded()
 
     var lastVisitedHistoryUrl: String? = url
     webView.webViewClient = object : WebViewClient() {
         override fun onPageStarted(view: WebView, pageUrl: String?, favicon: Bitmap?) {
-            WebViewDebug.logPage("start", pageUrl)
+            if (!incognito) WebViewDebug.logPage("start", pageUrl)
             if (!incognito && !pageUrl.isNullOrBlank()) {
-                val ext = appContext.appContainer.webExtensions
+                val ext = appContext.appContainer.webExtensionsOrNull
                 // loadUrl() 等程序化导航可能不会经过 shouldOverrideUrlLoading；这里补齐 beforeNavigate。
-                ext.onWebNavigationStarted(id, pageUrl)
+                ext?.onWebNavigationStarted(id, pageUrl)
                 lastVisitedHistoryUrl = pageUrl
             }
             requestLog.clear() // 换页：本页请求重新统计
@@ -257,16 +271,24 @@ internal fun BrowserTab.setupWebView() {
 
         override fun onPageCommitVisible(view: WebView, pageUrl: String?) {
             if (!incognito && !pageUrl.isNullOrBlank()) {
-                appContext.appContainer.webExtensions.onWebRequestMainFrameResponseStarted(id, pageUrl)
-                appContext.appContainer.webExtensions.onWebNavigationCommitted(id, pageUrl)
+                appContext.appContainer.webExtensionsOrNull?.onWebRequestMainFrameResponseStarted(id, pageUrl)
+                appContext.appContainer.webExtensionsOrNull?.onWebNavigationCommitted(id, pageUrl)
             }
         }
 
         override fun onPageFinished(view: WebView, pageUrl: String?) {
-            WebViewDebug.logPage("finish", pageUrl)
+            if (!incognito) WebViewDebug.logPage("finish", pageUrl)
+            // 拓展晚加载：第一个网页加载完成后才开始（已开闸则是空操作）
+            if (!dev.dsh.miuixbrowser.ext.ExtStartupGate.ready && !pageUrl.isNullOrBlank() && !pageUrl.startsWith("about:")) {
+                dev.dsh.miuixbrowser.ext.ExtStartupGate.scheduleOpen(
+                    appContext,
+                    dev.dsh.miuixbrowser.StartupCoordinator.EXT_AFTER_PAGE_FINISHED_DELAY_MS,
+                    "first page finished",
+                )
+            }
             if (!incognito && !pageUrl.isNullOrBlank()) {
-                appContext.appContainer.webExtensions.onWebNavigationCompleted(id, pageUrl)
-                appContext.appContainer.webExtensions.onWebRequestMainFrameCompleted(id, pageUrl)
+                appContext.appContainer.webExtensionsOrNull?.onWebNavigationCompleted(id, pageUrl)
+                appContext.appContainer.webExtensionsOrNull?.onWebRequestMainFrameCompleted(id, pageUrl)
             }
             if (!pageUrl.isNullOrBlank()) lastVisitedHistoryUrl = pageUrl
             if (!parked) pageUrl?.let { url = it }
@@ -299,9 +321,9 @@ internal fun BrowserTab.setupWebView() {
                 // WebView 没有暴露 pushState / replaceState 专用回调；只在同文档、非加载期报告近似事件。
                 if (!incognito && !loading && !isReload && sameOrigin) {
                     if (onlyFragmentChanged) {
-                        appContext.appContainer.webExtensions.onWebNavigationFragment(id, pageUrl)
+                        appContext.appContainer.webExtensionsOrNull?.onWebNavigationFragment(id, pageUrl)
                     } else {
-                        appContext.appContainer.webExtensions.onWebNavigationHistoryState(id, pageUrl)
+                        appContext.appContainer.webExtensionsOrNull?.onWebNavigationHistoryState(id, pageUrl)
                     }
                 }
             }
@@ -316,7 +338,7 @@ internal fun BrowserTab.setupWebView() {
         }
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-            val extensionBlocking = if (!incognito) appContext.appContainer.webExtensions.onWebRequestBefore(id, request) else null
+            val extensionBlocking = if (!incognito) appContext.appContainer.webExtensionsOrNull?.onWebRequestBefore(id, request) else null
             return extensionBlocking ?: webExtensionResource(request) ?:
             if (incognito && !adblockInIncognito) null
             else AdBlock.intercept(request, pageHost, blockTrackers, if (incognito || !AdBlock.requestLogOn) null else requestLog)
@@ -332,7 +354,7 @@ internal fun BrowserTab.setupWebView() {
             if (incognito) return null
             val host = request.url.host ?: return null
             if (!dev.dsh.miuixbrowser.ext.ExtensionOrigins.isExtensionHost(host)) return null
-            return appContext.appContainer.webExtensions.webAccessibleResponse(request.url.toString(), url)
+            return appContext.appContainer.webExtensionsOrNull?.webAccessibleResponse(request.url.toString(), url)
         }
 
         override fun onReceivedSslError(view: WebView, handler: android.webkit.SslErrorHandler, error: android.net.http.SslError) {
@@ -347,8 +369,8 @@ internal fun BrowserTab.setupWebView() {
             }
             handler.cancel()
             if (!incognito && (ErrorPages.sameUrl(errUrl, url) || ErrorPages.sameUrl(errUrl, view.url))) {
-                appContext.appContainer.webExtensions.onWebNavigationError(id, errUrl, "net::ERR_CERT_INVALID (${error.primaryError})")
-                appContext.appContainer.webExtensions.onWebRequestMainFrameFailed(id, errUrl, "net::ERR_CERT_INVALID (${error.primaryError})")
+                appContext.appContainer.webExtensionsOrNull?.onWebNavigationError(id, errUrl, "net::ERR_CERT_INVALID (${error.primaryError})")
+                appContext.appContainer.webExtensionsOrNull?.onWebRequestMainFrameFailed(id, errUrl, "net::ERR_CERT_INVALID (${error.primaryError})")
             }
             Diag.log("webview ssl error primary=${error.primaryError} url=$errUrl page=$url")
             // 主框架：直接在这里渲染引导页。取消之后系统不一定还会回调 onReceivedError，
@@ -368,8 +390,8 @@ internal fun BrowserTab.setupWebView() {
                 val failing = request.url.toString()
                 if (!incognito) {
                     val message = "${error.errorCode}: ${error.description ?: "net::ERR_FAILED"}"
-                    appContext.appContainer.webExtensions.onWebNavigationError(id, failing, message)
-                    appContext.appContainer.webExtensions.onWebRequestMainFrameFailed(id, failing, message)
+                    appContext.appContainer.webExtensionsOrNull?.onWebNavigationError(id, failing, message)
+                    appContext.appContainer.webExtensionsOrNull?.onWebRequestMainFrameFailed(id, failing, message)
                 }
                 val shownBySsl = ErrorPages.sameUrl(failing, sslPageShownFor) &&
                     android.os.SystemClock.uptimeMillis() - sslPageShownAt < 5_000
@@ -378,7 +400,7 @@ internal fun BrowserTab.setupWebView() {
                     showWebViewErrorPage(view, failing, ErrorPages.fromWebView(error.errorCode, error.description?.toString()))
                 }
             }
-            WebViewDebug.logLoadError(request, error)
+            if (!incognito) WebViewDebug.logLoadError(request, error)
         }
 
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
@@ -386,7 +408,7 @@ internal fun BrowserTab.setupWebView() {
             if (request.isForMainFrame && ErrorPages.shouldReplaceHttpError(errorResponse.statusCode, errorResponse.responseHeaders)) {
                 showWebViewErrorPage(view, request.url.toString(), ErrorPages.fromHttp(errorResponse.statusCode, errorResponse.reasonPhrase))
             }
-            WebViewDebug.logHttpError(request, errorResponse)
+            if (!incognito) WebViewDebug.logHttpError(request, errorResponse)
         }
 
         /**
@@ -427,7 +449,7 @@ internal fun BrowserTab.setupWebView() {
             }
             // 只在 Mafari 确认放行当前标签导航后发送 beforeNavigate；被重定向到新标签 / 外部应用的请求不发送。
             if (!incognito && request.isForMainFrame && !request.isRedirect && (scheme == "http" || scheme == "https")) {
-                appContext.appContainer.webExtensions.onWebNavigationBefore(
+                appContext.appContainer.webExtensionsOrNull?.onWebNavigationBefore(
                     id, target, if (request.hasGesture()) "link" else "generated",
                 )
             }
@@ -469,7 +491,7 @@ internal fun BrowserTab.setupWebView() {
         }
 
         override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
-            WebViewDebug.logConsole(message)
+            if (!incognito) WebViewDebug.logConsole(message)
             return super.onConsoleMessage(message)
         }
 

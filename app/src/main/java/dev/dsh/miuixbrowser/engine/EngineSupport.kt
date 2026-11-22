@@ -3,6 +3,7 @@ package dev.dsh.miuixbrowser.engine
 import dev.dsh.miuixbrowser.BuildConfig
 import dev.dsh.miuixbrowser.data.ENGINE_GECKO
 import dev.dsh.miuixbrowser.data.readBrowserEngine
+import dev.dsh.miuixbrowser.data.readPageEnhancements
 import android.content.Context
 import android.os.Build
 
@@ -36,4 +37,40 @@ object EngineSupport {
     /** 当前默认内核是否实际为 Gecko（设置选了 Gecko 且本机能用）。否则按 WebView 处理；备份 / 恢复 Cookie 据此选实现。 */
     fun defaultIsGecko(context: Context): Boolean =
         geckoAvailable() && readBrowserEngine(context.applicationContext) == ENGINE_GECKO
+
+    /**
+     * 本进程是否已经创建过 WebView（标签 / 轻应用）。默认内核是 Gecko 时，一切 WebView 相关的启动工作都不做；
+     * 只有用户中途切到 WebView、真的建出 WebView 之后，这个标志才为 true，需要「碰 WebView」的路径据此补做。
+     */
+    @Volatile
+    var webViewTouched: Boolean = false
+        private set
+
+    /** 创建第一个 WebView 之前调用（幂等）：记账，并补读只在 WebView 下才加载的调试开关（远程调试须在创建 WebView 前设置）。 */
+    fun markWebViewUsed(context: Context) {
+        if (webViewTouched) return
+        webViewTouched = true
+        val app = context.applicationContext
+        dev.dsh.miuixbrowser.engine.webview.WebViewDebug.load(app)
+        dev.dsh.miuixbrowser.engine.webview.WebViewSpeculative.load(app)
+    }
+
+    @Volatile private var enhanceCache = -1 // -1 = 还没读过，0 / 1 = 缓存值
+
+    /**
+     * 网页增强总开关（WebView 的脚本 / 去广告 / 拓展）。会在请求拦截这类热路径里被问，所以缓存；
+     * 设置里改动时由 [notePageEnhancements] 更新。关闭时一切增强相关的对象都不创建、不预热、不加载。
+     */
+    fun pageEnhancementsOn(context: Context): Boolean {
+        val c = enhanceCache
+        if (c >= 0) return c == 1
+        val v = readPageEnhancements(context.applicationContext)
+        enhanceCache = if (v) 1 else 0
+        return v
+    }
+
+    fun notePageEnhancements(on: Boolean) { enhanceCache = if (on) 1 else 0 }
+
+    /** 现在是否需要为 WebView 付出开销：默认内核是 WebView，或本进程已经建过 WebView（中途从 Gecko 切过来）。 */
+    fun webViewNeeded(context: Context): Boolean = webViewTouched || !defaultIsGecko(context)
 }

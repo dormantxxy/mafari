@@ -118,7 +118,14 @@ fun BrowserScreen(
     }
     // WebView 拓展的 tabs / scripting 要操作真实标签：界面建好后把标签桥接接到拓展系统上，界面销毁时摘掉。
     // 摘桥接时按身份比对：界面重建时旧界面晚到的 onDispose 不会把新界面刚接上的桥接摘掉
-    DisposableEffect(state, context) {
+    // 拓展晚加载：闸门开启前（冷启动首页加载期间）不创建拓展系统、不接标签桥接；就绪后 key 变化会重新进来
+    val extReady = dev.dsh.miuixbrowser.ext.ExtStartupGate.readyState.value
+    DisposableEffect(state, context, settings.browserEngine, settings.pageEnhancements, extReady) {
+        if (!extReady) return@DisposableEffect onDispose { }
+        // Gecko 默认且没建过 WebView：不创建 WebView 拓展系统（注册二十多个 API + 一个后台线程）。切到 WebView 后 key 变化会重新进来
+        // 网页增强关着：拓展整体不运行，不创建拓展系统；重新打开时 key 变化会重新进来
+        if (!settings.pageEnhancements) return@DisposableEffect onDispose { }
+        if (settings.geckoMode && !EngineSupport.webViewTouched) return@DisposableEffect onDispose { }
         val extSystem = context.appContainer.webExtensions
         // scripting.executeScript 的 ISOLATED 世界：借标签页宿主里该拓展的隔离世界桥执行（见 WebViewExtensionHost.executeInIsolatedWorld）
         val bridge = BrowserStateTabBridge(state) { extId, tabId, js, done ->
@@ -340,39 +347,15 @@ fun BrowserScreen(
     }
 
     LaunchedEffect(tab.id) {
+        // 拓展 contextMenus 的菜单项不再另弹对话框顶替原生菜单：始终打开原生长按菜单，
+        // 拓展项由 BrowserSheetHost 追加在原生项后面（见 ExtContextMenuRows）
         tab.onLongPressLink = { link ->
-            val extSystem = context.appContainer.webExtensions
-            val matches = runCatching { extSystem.contextMenuItems("link", tab.url, link) }.getOrDefault(emptyList())
-            if (matches.isNotEmpty()) {
-                val flat = matches.flatMap { (ext, items) -> items.map { ext to it } }
-                AlertDialog.Builder(context)
-                    .setItems(flat.map { (_, item) -> item.title }.toTypedArray()) { _, which ->
-                        val (ext, item) = flat[which]
-                        extSystem.onContextMenuClicked(ext.spec.id, item.id,
-                            org.json.JSONObject().put("linkUrl", link).put("pageUrl", tab.url).put("frameUrl", tab.url),
-                            org.json.JSONObject().put("id", tab.id).put("url", tab.url))
-                    }.show()
-            } else {
-                linkUrl = link
-                sheet = Sheet.Link
-            }
+            linkUrl = link
+            sheet = Sheet.Link
         }
         tab.onLongPressImage = { url ->
-            val extSystem = context.appContainer.webExtensions
-            val matches = runCatching { extSystem.contextMenuItems("image", tab.url, url) }.getOrDefault(emptyList())
-            if (matches.isNotEmpty()) {
-                val flat = matches.flatMap { (ext, items) -> items.map { ext to it } }
-                AlertDialog.Builder(context)
-                    .setItems(flat.map { (_, item) -> item.title }.toTypedArray()) { _, which ->
-                        val (ext, item) = flat[which]
-                        extSystem.onContextMenuClicked(ext.spec.id, item.id,
-                            org.json.JSONObject().put("srcUrl", url).put("pageUrl", tab.url).put("frameUrl", tab.url),
-                            org.json.JSONObject().put("id", tab.id).put("url", tab.url))
-                    }.show()
-            } else {
-                imageUrl = url
-                sheet = Sheet.Image
-            }
+            imageUrl = url
+            sheet = Sheet.Image
         }
         tab.onElementLongPress = { hit ->
             elementHit = hit
@@ -495,9 +478,12 @@ fun BrowserScreen(
     // 停靠在顶部的栏占掉网页区域顶部一段：网页从「状态栏 + 栏」下面开始，而不是被悬浮的栏盖住
     val dockedTopBody = if (barLayout.reservesTop) barLayout.style.metrics.height else 0.dp
     val topReserved = statusBarHeight + dockedTopBody
+    // 悬浮三段式：栏不隐藏（barHidden 恒为 false），而是缩成小胶囊（barCompact，阈值与自动隐藏一致）；
+    // 缩小时与默认导航栏样式的「沉浸浏览」一致：顶部状态栏留白随滑动收起，网页铺到屏幕顶，上滑展开后恢复
+    val topInsetCollapsed = barHidden || (barLayout.style.splitPills && ui.barCompact && tab.url.isNotEmpty())
     val animatedTopPadding by animateDpAsState(
         // 顶栏停靠且页面已深入栏下：留白归零，网页铺到屏幕顶（栏的玻璃盖在网页上）
-        targetValue = if (barHidden || (barLayout.reservesTop && ui.barOverlap)) 0.dp else topReserved,
+        targetValue = if (topInsetCollapsed || (barLayout.reservesTop && ui.barOverlap)) 0.dp else topReserved,
         animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow),
         label = "statusInset",
     )
@@ -616,7 +602,12 @@ fun BrowserScreen(
             onboardingReplay = true
         },
     )
+    // 「全局应用」：二级页面用壁纸当背景（见 GlobalWallpaper.kt）；没壁纸 / 开关关闭时为 null
+    val globalWallpaper = remember(settings.wallpaperGlobal, wallpaperBitmap, wallpaperFromCache) {
+        if (settings.wallpaperGlobal && wallpaperBitmap != null) GlobalWallpaper(wallpaperBitmap, scrim = !wallpaperFromCache) else null
+    }
     Box(modifier = Modifier.fillMaxSize()) {
+    CompositionLocalProvider(LocalGlobalWallpaper provides globalWallpaper) {
     NavDisplay(
         backStack = backStack,
         modifier = Modifier.fillMaxSize(),
@@ -707,6 +698,26 @@ fun BrowserScreen(
             pushPage = ::pushPage,
         )
         } // backdrop capture layer ends before the floating toolbar
+
+        // ---- 网页态的状态栏背景：高级材质，以网页最顶部一条区域为采样层（仅 WebView；Gecko 保持原样）----
+        // 页面处于初始状态（状态栏留白未收起）时显示；下滑沉浸收起后淡出。停靠在顶部的栏自己的底板已经铺到状态栏下，不叠加
+        if (webGlassAvailable && settings.blurEnabled && !barLayout.reservesTop) {
+            StatusBarMaterialBand(
+                backdrop = browserBackdrop,
+                visible = !topInsetCollapsed,
+            )
+        }
+
+        // ---- 悬浮三段式沉到底部、网页在它上面结束时，那一行的背景：miuix 渐进模糊（direction = Bottom）----
+        // 行高 = 栏高 + 导航栏，随「让位比例 / 栏收起」动画；采样镜像后的网页底部内容；仅 WebView
+        if (webGlassAvailable && settings.blurEnabled && barLayout.style.splitPills && barLayout.reservesBottom) {
+            val navBarsForBand = WindowInsets.navigationBars
+            BottomBarProgressiveBand(
+                backdrop = browserBackdrop,
+                heightPx = { (navBarsForBand.getBottom(this) * bottomReserveFactor().coerceIn(0f, 1f)).toInt() + contentBottomPx() },
+                alpha = { bottomReserveFactor().coerceIn(0f, 1f) * (1f - hide).coerceIn(0f, 1f) },
+            )
+        }
 
         // ---- 新建标签页：顶部渐进模糊（与子页面顶栏同款 miuix 渐进模糊）----
         // 放在采集层之外，只采样首页内容；仅在内容滚到状态栏下方时淡入。
@@ -868,6 +879,7 @@ fun BrowserScreen(
     entry<AppRoute.GeckoExtensions> { nav.SubPage(AppRoute.GeckoExtensions) }
     entry<AppRoute.WebViewExtensions> { nav.SubPage(AppRoute.WebViewExtensions) }
     entry<AppRoute.Library> { route -> nav.SubPage(route) }
+    }
     }
     // 用户引导：盖在最上层。进入二级页面（备份 / Firefox 同步）时只是「不摆放」（visible = false），并不撤出组合：
     // 当前步骤、滚动位置和背景动画都留着，返回时第一帧就是完整的引导页，不会再闪出下面的浏览器首页

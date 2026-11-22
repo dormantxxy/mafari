@@ -112,7 +112,14 @@ fun AboutScreen(
     val scope = rememberCoroutineScope()
     val kernel = webViewVersion() ?: tr("未知")
     val geckoKernel = remember { geckoViewVersion() }
-    val ua = remember { runCatching { WebSettings.getDefaultUserAgent(context) }.getOrDefault(tr("未知")) }
+    // getDefaultUserAgent 会加载 WebView 提供方：Gecko 默认且没建过 WebView 时不去取，免得打开「关于」就拉起 Chromium
+    val ua = remember {
+        if (dev.dsh.miuixbrowser.engine.EngineSupport.webViewNeeded(context)) {
+            runCatching { WebSettings.getDefaultUserAgent(context) }.getOrDefault(tr("未知"))
+        } else {
+            tr("未启用（当前为 Gecko 内核）")
+        }
+    }
     val dependencyGroups = remember { parseDependencyVersions(BuildConfig.DEP_VERSIONS) }
     val cryptoGroups = remember { parseDependencyVersions(BuildConfig.CRYPTO_ALGORITHMS) }
     var checkingUpdate by remember { mutableStateOf(false) }
@@ -163,7 +170,7 @@ fun AboutScreen(
         Box(modifier = Modifier.fillMaxSize().background(surface).layerBackdrop(contentBackdrop).kyantLayerBackdrop(contentLiquidBackdrop)) {
             // ---- 整页背景：铺满全屏的主题色渐变，供玻璃图标与顶栏采样（顶栏在录制层之外）----
             Box(modifier = Modifier.fillMaxSize().layerBackdrop(pageBackdrop).kyantLayerBackdrop(liquidBackdrop)) {
-                Box(modifier = Modifier.fillMaxSize().background(surface))
+                Box(modifier = Modifier.fillMaxSize().pageBackground())
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -596,6 +603,7 @@ private val RELEASE_OPTIONS = HttpFetcher.Options(
     maxBytes = 8 * 1024 * 1024,
     userAgent = "mafari",
     accept = "application/vnd.github+json",
+    httpsOnly = true,
 )
 
 private fun fetchReleasePage(url: String): org.json.JSONArray? = runCatching {

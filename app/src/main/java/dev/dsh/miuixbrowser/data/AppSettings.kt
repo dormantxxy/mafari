@@ -117,6 +117,11 @@ fun readBrowserEngine(context: Context): Int =
     context.getSharedPreferences("mafari_settings", Context.MODE_PRIVATE)
         .getInt("browser_engine", ENGINE_GECKO)
 
+/** 网页增强总开关（脚本 / 去广告 / WebView 拓展）：冷启动早期、没有 AppSettings 实例的地方直接读。默认开 */
+fun readPageEnhancements(context: Context): Boolean =
+    context.getSharedPreferences("mafari_settings", Context.MODE_PRIVATE)
+        .getBoolean("page_enhancements", true)
+
 /** 「重启恢复标签页」的三种方式（[AppSettings.restoreTabsMode]） */
 object RestoreMode {
     const val ALL = 0
@@ -558,8 +563,12 @@ class AppSettings(context: Context) {
     var wallpaper by mutableStateOf(prefs.getString(KEY_WALL, "").orEmpty())
         private set
 
-    /** 主页壁纸模糊 */
+    /** 壁纸模糊 */
     var wallpaperBlur by mutableStateOf(prefs.getBoolean(KEY_WALL_BLUR, false))
+        private set
+
+    /** 全局应用：壁纸同时作为设置 / 下载 / 书签历史等二级页面的背景（玻璃控件也从它取样） */
+    var wallpaperGlobal by mutableStateOf(prefs.getBoolean(KEY_WALL_GLOBAL, false))
         private set
 
     /** 「设为默认浏览器」的首次询问是否已经处理过（选了设置 / 取消 / 点外面关掉都算）；之后不再自动弹，只能从 设置 → 高级 进入 */
@@ -598,6 +607,11 @@ class AppSettings(context: Context) {
     fun updateWallpaperBlur(enabled: Boolean) {
         wallpaperBlur = enabled
         prefs.edit().putBoolean(KEY_WALL_BLUR, enabled).apply()
+    }
+
+    fun updateWallpaperGlobal(enabled: Boolean) {
+        wallpaperGlobal = enabled
+        prefs.edit().putBoolean(KEY_WALL_GLOBAL, enabled).apply()
     }
 
     /** 空串表示跟随系统 WebView 默认 UA */
@@ -676,6 +690,7 @@ class AppSettings(context: Context) {
     fun updatePageEnhancements(enabled: Boolean) {
         pageEnhancements = enabled
         prefs.edit().putBoolean(KEY_ENHANCE, enabled).apply()
+        EngineSupport.notePageEnhancements(enabled)
     }
 
     /** 手动标记广告：长按网页元素时是否出现「标记为广告」（需要网页增强开启，WebView 内核） */
@@ -1000,7 +1015,7 @@ class AppSettings(context: Context) {
             .putString(KEY_PROXY_USER, proxyUser)
             .putString(KEY_PROXY_PASS, proxyPass)
             .apply()
-        WebViewProxy.applyFrom(this)
+        WebViewProxy.applyFrom(this, webView = !geckoMode || EngineSupport.webViewTouched)
     }
 
     private companion object {
@@ -1043,6 +1058,7 @@ class AppSettings(context: Context) {
         const val KEY_SEARCH_CUSTOM = "search_custom"
         const val KEY_WALL = "wallpaper"
         const val KEY_WALL_BLUR = "wallpaper_blur"
+        const val KEY_WALL_GLOBAL = "wallpaper_global"
         const val KEY_DEFAULT_BROWSER_PROMPTED = "default_browser_prompted"
         const val KEY_ONBOARDING = "onboarding_version"
         const val KEY_ENHANCE = "page_enhancements"

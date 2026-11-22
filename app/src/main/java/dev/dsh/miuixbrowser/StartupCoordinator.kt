@@ -12,7 +12,9 @@ import dev.dsh.miuixbrowser.browser.CacheCleaner
 import dev.dsh.miuixbrowser.browser.CookieControl
 import dev.dsh.miuixbrowser.download.Downloader
 import dev.dsh.miuixbrowser.browser.FaviconLoader
+import dev.dsh.miuixbrowser.browser.BrowserState
 import dev.dsh.miuixbrowser.engine.EngineSupport
+import dev.dsh.miuixbrowser.ext.ExtStartupGate
 import dev.dsh.miuixbrowser.engine.gecko.GeckoDebug
 import dev.dsh.miuixbrowser.engine.gecko.GeckoExtensionStore
 import dev.dsh.miuixbrowser.engine.gecko.GeckoRuntimeHolder
@@ -37,7 +39,7 @@ import kotlinx.coroutines.withContext
  *  3. 库就绪闸门          [isContentReady] / [awaitContentReady]：库没好之前界面只画 [StartupSkeleton]，
  *                         好了之后才组合 BrowserScreen（它首次组合会同步读库）；WebView 异步预热
  *                         （[WebViewStartup]，阶段 1 起跑）也在这里等，保证第一个 WebView 在它之后才创建。
- *  4. [onContentShown]    界面真正出来之后：Firefox 同步预热（延迟几秒）。
+ *  4. [onContentShown]    界面真正出来之后：去广告编译 / 拓展晚加载（[ExtStartupGate]）/ 快捷方式 / Firefox 同步预热（延迟几秒）。
  *
  * 具体「怎么预热加密库」仍在 [StartupWarmup]（只管库这一件事）。新增启动任务：先想清楚它属于哪个阶段，加在对应函数里。
  */
@@ -49,17 +51,17 @@ internal object StartupCoordinator {
     /** 首帧之后等这么久再编译去广告规则（约 0.5 秒的后台编译），让界面先出来。 */
     private const val ADBLOCK_COMPILE_DELAY_MS = 500L
 
-    /** WebView 拓展的后台页是隐藏 WebView，创建有开销：首帧之后再起，别和首屏抢主线程。 */
-    private const val EXT_BACKGROUND_DELAY_MS = 1_500L
+    /** 界面出来后若当前是主页（没有网址）：再等这么久、且主线程空闲，就开始晚加载拓展。 */
+    private const val EXT_AFTER_HOME_DELAY_MS = 600L
+
+    /** 界面出来后若当前标签要加载网页：最多等这么久让它加载完（页面加载完成会更早触发开闸），到点照样开。 */
+    private const val EXT_AFTER_PAGE_WAIT_MS = 5_000L
+
+    /** 第一个网页加载完成后，再等这么久（让它完成首次渲染 / 标签恢复）开始晚加载拓展。 */
+    const val EXT_AFTER_PAGE_FINISHED_DELAY_MS = 300L
 
     /** 多个拓展的后台页（各一个隐藏 WebView）依次错开拉起的间隔：别在主线程上挤成一次长卡顿。 */
     private const val EXT_BACKGROUND_STAGGER_MS = 200L
-
-    /** 等主线程空闲再拉后台页；一直等不到空闲（持续动画 / 滚动）就到这个时间强行拉。 */
-    private const val EXT_BACKGROUND_IDLE_TIMEOUT_MS = 3_000L
-
-    /** 拓展预热里等 WebView 预热结束的上限：先等它，免得和它抢着加载 WebView 提供方；等不到也往下走。 */
-    private const val EXT_PREWARM_WEBVIEW_WAIT_MS = 3_000L
 
     /** 清扫上次遗留的无痕 Profile：不急，排在拓展后台页之后。 */
     private const val SWEEP_INCOGNITO_DELAY_MS = 3_000L
@@ -81,34 +83,7 @@ internal object StartupCoordinator {
         FaviconLoader.init(app) // 只定磁盘目录，修剪在后台
         // WebView 异步预热：默认内核是 WebView 时才做（Gecko 默认时首屏不创建 WebView，没必要）。须尽早，越早越能和加密库预热重叠
         if (!EngineSupport.defaultIsGecko(app)) WebViewStartup.begin(app)
-        prewarmExtensions(app) // 须在 WebViewStartup.begin 之后（要看它是否已开始）
-    }
-
-    /**
-     * 拓展系统预热：原先第一个 WebView 标签创建时才在主线程上同步做——建拓展系统（注册二十多个 API）、
-     * 读仓库（逐个解析 manifest）、读 shim、读 / 打包各拓展的 content script，拓展越多首屏越慢。
-     * 现在进程一创建就在后台线程做完，首个标签装配时全是缓存命中。线程优先级比默认略低（但不进后台 cgroup，
-     * 免得被饿死、到首个标签创建时还没好），不和加密库 / WebView 预热抢关键路径。
-     * 和 [StartupWarmup] 互不依赖（不碰加密库）。
-     */
-    private fun prewarmExtensions(app: Application) {
-        Thread({
-            val t0 = SystemClock.elapsedRealtime()
-            runCatching {
-                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE)
-                val webViewTabs = !EngineSupport.defaultIsGecko(app)
-                val system = app.appContainer.webExtensions
-                if (webViewTabs && WebViewStartup.started) {
-                    // 判断系统 WebView 支不支持隔离世界要碰 WebView 提供方：等 WebView 预热先把它加载好。
-                    // 只轮询，不调 awaitDone —— 它超时会替冷启动闸门「宣布结束」，这里不该有这个副作用
-                    while (!WebViewStartup.isDone() && SystemClock.elapsedRealtime() - t0 < EXT_PREWARM_WEBVIEW_WAIT_MS) {
-                        Thread.sleep(25)
-                    }
-                }
-                system.prewarm(injection = webViewTabs)
-            }.onFailure { Diag.log("prewarm: web extensions failed ${it.javaClass.simpleName}: ${it.message}") }
-            Diag.log("prewarm: web extensions ready in ${SystemClock.elapsedRealtime() - t0}ms")
-        }, "mafari-prewarm-ext").apply { isDaemon = true }.start()
+        // 拓展不在冷启动期间预热：首页加载完成后由 [ExtStartupGate] 晚加载（见 [onContentShown]）
     }
 
     /** 阶段 2。须在主线程、Activity.onCreate 里调用。 */
@@ -122,8 +97,12 @@ internal object StartupCoordinator {
             GeckoExtensionStore.activityProvider = { self.get() }
         }
         Diag.log("MainActivity.onCreate")
-        WebViewDebug.load(activity) // 远程调试是进程级静态开关，须在创建任何 WebView 之前设置
-        dev.dsh.miuixbrowser.engine.webview.WebViewSpeculative.load(activity)
+        // 远程调试是进程级静态开关，须在创建任何 WebView 之前设置。Gecko 默认时不加载（远程调试开着会立刻拉起 WebView 提供方）；
+        // 之后真要建 WebView 时由 [EngineSupport.markWebViewUsed] 在建之前补加载
+        if (!EngineSupport.defaultIsGecko(activity)) {
+            WebViewDebug.load(activity)
+            dev.dsh.miuixbrowser.engine.webview.WebViewSpeculative.load(activity)
+        }
         AdBlock.init(activity)
         // Firefox 同步不占冷启动：这里什么都不做，界面出来后由 [onContentShown] 延迟预热（仅「上次已知已登录」才初始化，
         // 没登录过的用户零开销）；打开「Firefox帐户同步」页（FxaScreen）/ 系统分享面板发标签页（SendTabActivity）时仍会按需 init
@@ -154,6 +133,63 @@ internal object StartupCoordinator {
         }
     }
 
+    /** 已经拉起过 WebView 拓展后台页（切到 Gecko 时据此决定要不要关）。 */
+    @Volatile private var extBackgroundsStarted = false
+
+    private fun startExtensionBackgrounds(app: Context) {
+        extBackgroundsStarted = true
+        runCatching { app.appContainer.webExtensions.startAll(EXT_BACKGROUND_STAGGER_MS) }
+            .onFailure { Diag.log("web extensions: start backgrounds failed ${it.message}") }
+    }
+
+    /** [ExtStartupGate] 开闸并给已有标签补装完拓展后（主线程）：拉起所有已启用拓展的后台页（每个一个隐藏 WebView，依次错开）。幂等。 */
+    fun startExtensionBackgroundsWhenReady(app: Context) {
+        // Gecko 默认：不拉 WebView 拓展的后台页；网页增强关着：什么都不起
+        if (!EngineSupport.webViewNeeded(app) || !EngineSupport.pageEnhancementsOn(app)) return
+        if (!extBackgroundsStarted) startExtensionBackgrounds(app)
+    }
+
+    /**
+     * 用户在设置里把默认内核切到 WebView（主线程）：补做 Gecko 默认时跳过的 WebView 侧工作——去广告规则编译、拓展后台页。
+     * Gecko 运行时进程内无法单独卸载（shutdown 会连进程一起退出），所以它只是不再被新建标签使用，内存要到下次启动才完全释放。
+     */
+    fun onEngineSwitchedToWebView(context: Context) {
+        val app = context.applicationContext
+        if (!EngineSupport.pageEnhancementsOn(app)) return // 网页增强关着：什么都不补
+        AdBlock.ensureEngine()
+        if (!extBackgroundsStarted) startExtensionBackgrounds(app)
+    }
+
+    /**
+     * 「网页增强」总开关变化（主线程）。关：关掉全部 WebView 拓展（后台页 / 标签注入 / 连接），并释放去广告的已编译规则；
+     * 开：拉起已启用的拓展、重新编译去广告规则。脚本由各标签的 pageEnhancements 联动，不在这里处理。
+     * 已创建的拓展系统对象本身（几十个小对象 + 一个空闲线程）进程内无法回收，下次冷启动才完全不存在。
+     */
+    fun onPageEnhancementsChanged(context: Context, on: Boolean) {
+        val app = context.applicationContext
+        if (!on) {
+            extBackgroundsStarted = false
+            app.appContainer.webExtensionsIfCreated?.setActive(false)
+            AdBlock.releaseEngine()
+            return
+        }
+        if (!EngineSupport.webViewNeeded(app)) return // Gecko 默认且没建过 WebView：和 WebView 有关的都不碰
+        app.appContainer.webExtensions.setActive(true)
+        if (!extBackgroundsStarted) startExtensionBackgrounds(app)
+        AdBlock.ensureEngine()
+    }
+
+    /**
+     * 用户在设置里把默认内核切到 Gecko（主线程）：关掉 WebView 拓展的后台页（隐藏 WebView），WebView 侧不再有常驻开销。
+     * 已打开的 WebView 标签保持可用，但它们的拓展后台页要到下次启动后才会回来；去广告规则已编译的部分留在内存里，没有新的编译 / 订阅更新。
+     */
+    fun onEngineSwitchedToGecko(context: Context) {
+        if (!extBackgroundsStarted) return
+        extBackgroundsStarted = false
+        runCatching { context.applicationContext.appContainer.webExtensionsIfCreated?.stopAll() }
+            .onFailure { Diag.log("web extensions: stop backgrounds failed ${it.message}") }
+    }
+
     /**
      * 阶段 4：界面真正出来之后，在后台线程预热 Firefox 同步（登录状态、自动同步、发送标签页都依赖它就绪）。
      * decorView.post 保证排在首次布局 / 绘制之后；init 幂等，Activity 重建不会重复初始化。
@@ -162,27 +198,28 @@ internal object StartupCoordinator {
         val app = activity.applicationContext
         // 去广告规则：界面出来后再编译（init 只读设置，不编译），不和冷启动抢 CPU
         activity.window.decorView.post {
-            Handler(Looper.getMainLooper()).postDelayed({ AdBlock.startCompile() }, ADBLOCK_COMPILE_DELAY_MS)
+            // 去广告只对 WebView 标签生效：Gecko 默认时不编译（省 CPU 与内存）；切到 WebView 时由 [onEngineSwitchedToWebView] 补
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (EngineSupport.webViewNeeded(app) && EngineSupport.pageEnhancementsOn(app)) AdBlock.startCompile()
+            }, ADBLOCK_COMPILE_DELAY_MS)
         }
-        // WebView 拓展的后台页：没有已启用的拓展就什么都不建；幂等（Activity 重建时已在运行的会跳过）。
-        // 首帧后再等一会儿，然后等主线程空闲（首屏渲染 / 标签恢复期间不插队）才拉；多个拓展依次错开
+        // WebView 拓展晚加载：界面出来后，主页 → 短延迟 + 主线程空闲即开；要加载网页 → 等网页加载完成（BrowserTab.onPageFinished
+        // 会更早触发开闸），最多等 [EXT_AFTER_PAGE_WAIT_MS]。开闸后后台线程预热 → 主线程补装 → 错开拉起后台页（见 [ExtStartupGate]）
         activity.window.decorView.post {
-            val handler = Handler(Looper.getMainLooper())
-            handler.postDelayed({
-                val fired = java.util.concurrent.atomic.AtomicBoolean(false)
-                val startBackgrounds = {
-                    if (fired.compareAndSet(false, true)) {
-                        runCatching { app.appContainer.webExtensions.startAll(EXT_BACKGROUND_STAGGER_MS) }
-                            .onFailure { Diag.log("web extensions: start backgrounds failed ${it.message}") }
-                    }
-                }
-                Looper.myQueue().addIdleHandler { startBackgrounds(); false }
-                handler.postDelayed({ startBackgrounds() }, EXT_BACKGROUND_IDLE_TIMEOUT_MS) // 一直不空闲时的兜底
-            }, EXT_BACKGROUND_DELAY_MS)
+            val loadingPage = runCatching { BrowserState.current?.activeTab?.let { !it.incognito && it.url.isNotEmpty() } }.getOrNull() == true
+            ExtStartupGate.scheduleOpen(
+                app,
+                if (loadingPage) EXT_AFTER_PAGE_WAIT_MS else EXT_AFTER_HOME_DELAY_MS,
+                if (loadingPage) "page wait timeout" else "home shown",
+            )
         }
         // 上次进程被杀留在磁盘上的无痕 Profile 数据：界面出来、WebView 预热结束之后再扫（本进程已用过无痕就跳过）
         activity.window.decorView.post {
-            Handler(Looper.getMainLooper()).postDelayed({ IncognitoProfile.sweepStale() }, SWEEP_INCOGNITO_DELAY_MS)
+            // sweepStale 要问系统 WebView 支不支持多 Profile，会加载 WebView 提供方：Gecko 默认时不扫
+            // （旧数据留在磁盘上，下次真用到无痕 WebView 时 bind() 会先清掉）
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (EngineSupport.webViewNeeded(app)) IncognitoProfile.sweepStale()
+            }, SWEEP_INCOGNITO_DELAY_MS)
         }
         // 长按应用图标的快捷方式：界面出来后再发布，不占冷启动
         activity.window.decorView.post {

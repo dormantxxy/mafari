@@ -346,7 +346,10 @@ BrowserChunk {
                 )
             }
 
-            run {
+            // 网页增强关着（或 Gecko 默认）：不组合 WebView 拓展的页面 / 菜单，也就不会创建拓展系统
+            // 拓展晚加载：就绪前不组合（也就不创建拓展系统）
+            val extReady = dev.dsh.miuixbrowser.ext.ExtStartupGate.readyState.value
+            if (extReady && settings.pageEnhancements && !settings.geckoMode) run {
                 val extSystem = context.appContainer.webExtensions
                 var optionsRequest by remember { mutableStateOf<ExtPageRequest?>(null) }
                 var pendingOptions by remember { mutableStateOf<ExtPageRequest?>(null) }
@@ -375,7 +378,7 @@ BrowserChunk {
                 )
             }
 
-            WebViewExtMenuSheet(
+            if (extReady && settings.pageEnhancements && !settings.geckoMode) WebViewExtMenuSheet(
                 show = webViewExtSheetShow,
                 backdrop = if (glassAvailable && settings.blurEnabled) glassBackdrop else null,
                 system = context.appContainer.webExtensions,

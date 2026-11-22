@@ -175,7 +175,7 @@ BrowserChunk {
                                 } else if (tab.incognito) {
                                     0 // 无痕标签不装 WebView 拓展
                                 } else {
-                                    webViewEnabledExtCount(context.appContainer.webExtensions)
+                                    context.appContainer.webExtensionsOrNull?.let { webViewEnabledExtCount(it) } ?: 0
                                 }
                                 else -> 0
                             }
@@ -232,7 +232,7 @@ BrowserChunk {
                         extensionsActive = if (settings.geckoMode) {
                             GeckoExtensionStore.items.any { it.enabled && (!tab.incognito || it.allowedInPrivate) }
                         } else {
-                            !tab.incognito && webViewEnabledExtCount(context.appContainer.webExtensions) > 0
+                            !tab.incognito && (context.appContainer.webExtensionsOrNull?.let { webViewEnabledExtCount(it) } ?: 0) > 0
                         },
                     )
                     }
@@ -276,6 +276,7 @@ BrowserChunk {
                             }
                         }
                     }
+                    ExtContextMenuRows(kind = "link", targetUrl = linkUrl, tab = tab, dismiss = { sheet = Sheet.None })
                 }
 
                 Sheet.Image -> {
@@ -338,6 +339,7 @@ BrowserChunk {
                             }
                         }
                     }
+                    ExtContextMenuRows(kind = "image", targetUrl = imageUrl, tab = tab, dismiss = { sheet = Sheet.None })
                 }
 
                 Sheet.Element -> {
@@ -384,4 +386,31 @@ BrowserChunk {
                 }
             }
 }
+}
+
+/**
+ * WebView 拓展通过 contextMenus 注册的菜单项：追加在原生长按菜单（链接 / 图片）的最后，
+ * 副标题标出所属拓展。[kind] 是 "link" 或 "image"，[targetUrl] 是被长按的链接 / 图片地址。
+ */
+@Composable
+private fun ExtContextMenuRows(kind: String, targetUrl: String, tab: BrowserTab, dismiss: () -> Unit) {
+    val appContext = androidx.compose.ui.platform.LocalContext.current
+    val extSystem = appContext.appContainer.webExtensionsOrNull ?: return
+    val pageUrl = tab.url
+    val matches = remember(kind, targetUrl, pageUrl, extSystem) {
+        runCatching { extSystem.contextMenuItems(kind, pageUrl, targetUrl) }.getOrDefault(emptyList())
+    }
+    matches.forEach { (ext, items) ->
+        items.forEach { item ->
+            SheetRow(title = item.title, subtitle = ext.spec.name) {
+                dismiss()
+                val info = org.json.JSONObject()
+                    .put(if (kind == "link") "linkUrl" else "srcUrl", targetUrl)
+                    .put("pageUrl", pageUrl)
+                    .put("frameUrl", pageUrl)
+                val tabInfo = org.json.JSONObject().put("id", tab.id).put("url", pageUrl)
+                extSystem.onContextMenuClicked(ext.spec.id, item.id, info, tabInfo)
+            }
+        }
+    }
 }

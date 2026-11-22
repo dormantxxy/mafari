@@ -238,7 +238,7 @@ fun SettingsScreen(
                     .kyantLayerBackdrop(liquidBackdrop)
                     .scrollEndHaptic()
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .background(MiuixTheme.colorScheme.surface)
+                    .pageBackground()
                     .verticalScroll(rememberScrollState())
                     .padding(top = topInset)
                     // 沉浸：内容可滚到手势小白条下方，仅在末尾留出小白条高度
@@ -277,7 +277,7 @@ fun SettingsScreen(
                         onSelectedIndexChange = { settings.updateThemeMode(it) },
                     )
                     SettingsRow(
-                        title = tr("主页壁纸"),
+                        title = tr("壁纸"),
                         summary = if (settings.wallpaper.isBlank()) tr("未设置") else tr("已设置"),
                         onClick = { showWallpaper = true },
                     )
@@ -496,8 +496,12 @@ fun SettingsScreen(
                                     // 切 Gecko：记住当前状态并关闭去广告 / 隐私增强保护（脚本两种内核通用，保持不变）；切回 WebView：恢复切换前状态
                                     if (index == ENGINE_GECKO) {
                                         settings.suspendForGecko()
+                                        // 关掉 WebView 拓展的后台页（隐藏 WebView），WebView 侧不再常驻
+                                        dev.dsh.miuixbrowser.StartupCoordinator.onEngineSwitchedToGecko(context)
                                     } else {
                                         settings.resumeFromGecko()
+                                        // 补做 Gecko 默认时跳过的 WebView 侧工作（去广告编译、拓展后台页）
+                                        dev.dsh.miuixbrowser.StartupCoordinator.onEngineSwitchedToWebView(context)
                                     }
                                     Toast.makeText(
                                         context,
@@ -508,17 +512,11 @@ fun SettingsScreen(
                             },
                         )
                     }
-                    // 拓展两种内核都有入口（Gecko：Firefox 扩展；WebView：自研运行时，实验性）；网页增强 / 去广告依赖 WebView 专有 API；脚本管理两种内核通用
-                    SettingsRow(
-                        title = tr("拓展"),
-                        summary = if (settings.geckoMode) tr("管理 Firefox 扩展") else tr("管理 WebView 拓展（实验性）"),
-                        onClick = onOpenExtensions,
-                    )
-                    // 网页增强是 WebView 的总开关（脚本 + 去广告）；Gecko 下脚本只受脚本菜单里的开关控制
+                    // 网页增强是 WebView 的总开关（脚本 + 去广告 + 拓展）；Gecko 下脚本只受脚本菜单里的开关控制
                     EngineRow(visible = !settings.geckoMode) {
                         AppSwitchPreference(
                             title = tr("网页增强"),
-                            summary = tr("总开关：同步启用 / 停用全部油猴脚本和去广告；关闭后也不再检测长按标记广告"),
+                            summary = tr("总开关：一键启停全部油猴脚本、去广告和拓展；关闭后全部停止加载，不占内存和资源，冷启动也不再加载"),
                             checked = settings.pageEnhancements,
                             onCheckedChange = {
                                 settings.updatePageEnhancements(it)
@@ -527,6 +525,12 @@ fun SettingsScreen(
                             },
                         )
                     }
+                    // 拓展两种内核都有入口（Gecko：Firefox 扩展；WebView：自研运行时，实验性）；网页增强 / 去广告依赖 WebView 专有 API；脚本管理两种内核通用
+                    SettingsRow(
+                        title = tr("拓展"),
+                        summary = if (settings.geckoMode) tr("管理 Firefox 扩展") else if (!settings.pageEnhancements) tr("网页增强已关闭 · 拓展未运行") else tr("管理 WebView 拓展（实验性）"),
+                        onClick = onOpenExtensions,
+                    )
                     EngineRow(visible = !settings.geckoMode) {
                         SettingsRow(
                             title = tr("去广告"),
@@ -659,7 +663,7 @@ fun SettingsScreen(
 
             AppGlassDialog(
                 show = showWallpaper,
-                title = tr("主页壁纸"),
+                title = tr("壁纸"),
                 backdrop = if (glass) backdrop else null,
                 onDismissRequest = { showWallpaper = false },
             ) {
@@ -687,6 +691,16 @@ fun SettingsScreen(
                         AppSwitch(
                             checked = settings.wallpaperBlur,
                             onCheckedChange = { settings.updateWallpaperBlur(it) },
+                        )
+                    }
+                    WallpaperDialogRow(
+                        title = tr("全局应用"),
+                        summary = tr("壁纸同时作为设置等二级页面的背景"),
+                        onClick = { settings.updateWallpaperGlobal(!settings.wallpaperGlobal) },
+                    ) {
+                        AppSwitch(
+                            checked = settings.wallpaperGlobal,
+                            onCheckedChange = { settings.updateWallpaperGlobal(it) },
                         )
                     }
                     Spacer(Modifier.height(10.dp))

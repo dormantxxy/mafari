@@ -283,7 +283,7 @@ class ExtensionSystem(
 
     /**
      * 冷启动预热（**后台线程**调用）：把首个标签装配拓展时主线程要做的事提前做完——
-     * 读仓库（state/*.json + 解析每个 manifest）、读 shim、预处理各拓展的 content script（读文件 / 打包 / 本地化）。
+     * 读仓库（state 目录下的 json + 解析每个 manifest）、读 shim、预处理各拓展的 content script（读文件 / 打包 / 本地化）。
      * 都做完后，主线程上 [WebViewExtensionHost.install] 只剩拼接字符串；没有拓展时只是把系统对象建好。
      * [injection] = false：只读仓库、不预处理 content script（默认内核不是 WebView 时，标签装配用不上）。
      * 失败无妨：主线程用到时照旧同步做一遍。

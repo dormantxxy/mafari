@@ -77,4 +77,21 @@ class ContentModuleBundlerTest {
         assertTrue(js.contains("__imp('./n.js')"))
         assertTrue(js.contains("\"n.js\":"))
     }
+
+    @Test fun modsKeysListTheWholeDependencyClosureForLazyDelivery() {
+        val loader = """import(chrome.runtime.getURL("m.js"))"""
+        val r = ContentModuleBundler.process(
+            loader,
+            reader("m.js" to "import{a}from\"./u/a.js\";", "u/a.js" to "import\"../b.js\";export const a=1;", "b.js" to "1;"),
+        )
+        assertEquals(listOf("m.js", "u/a.js", "b.js"), r.mods.keys.toList())
+    }
+
+    @Test fun sameSourceIsCompiledOnceAndReused() {
+        val loader = """import(chrome.runtime.getURL("m.js"))"""
+        val files = reader("m.js" to "export default 1;")
+        val a = ContentModuleBundler.process(loader, files).mods["m.js"]
+        val b = ContentModuleBundler.process(loader, files).mods["m.js"]
+        assertSame(a, b)
+    }
 }

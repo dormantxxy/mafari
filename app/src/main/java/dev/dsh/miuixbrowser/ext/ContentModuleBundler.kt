@@ -20,19 +20,43 @@ internal object ContentModuleBundler {
     const val IMPORT_FN = "__mafariImport"
 
     private const val MAX_MODULES = 32
-    // 单个文件上限由 fileReader 的 8MB 把关；这里是所有内联模块的总和。实测有拓展的 content_main.js 就超过 4MB。
-    private const val MAX_TOTAL_BYTES = 12 * 1024 * 1024
+    // 单个文件上限由 fileReader 的 8MB 把关；这里是一次构建里所有模块的总和（按需模式下只占原生内存，不进页面）。
+    private const val MAX_TOTAL_BYTES = 16 * 1024 * 1024
 
     private val JS_PATH = Regex("""^(?:\.{0,2}/)?(?:[\w@.\-]+/)*[\w@.\-]+\.m?js$""")
 
-    class Result(val rewrittenJs: String, val modulesJs: String?, val warnings: List<String>)
+    /**
+     * [mods]：路径 → 模块函数源码（`async function(__exp,__req,__url,__imp){…}`），按依赖发现顺序。
+     * 内联模式用 [modulesJs] 整体塞进条目；按需模式只把 [mods] 的 key 列表写进条目，源码留在原生侧（见 WebViewExtensionHost）。
+     */
+    class Result(val rewrittenJs: String, val mods: Map<String, String>, val warnings: List<String>) {
+        val modulesJs: String?
+            get() = if (mods.isEmpty()) null
+            else "{" + mods.entries.joinToString(",") { (k, v) -> JSONObject.quote(k) + ":" + v } + "}"
+    }
+
+    /** 一个模块的转换结果；大文件（实测有 4MB+）只转换 / 扫描一次，之后按 内容 指纹 复用。 */
+    private class Compiled(val fn: String, val deps: List<String>, val refs: List<String>)
+
+    private val cache = object : LinkedHashMap<String, Compiled>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Compiled>?) = size > 48
+    }
+
+    private fun compile(path: String, src: String): Compiled {
+        val key = "$path\u0000${src.length}:${src.hashCode()}"
+        synchronized(cache) { cache[key]?.let { return it } }
+        val deps = mutableListOf<String>()
+        val c = Compiled(transform(src, path, deps), deps.toList(), stringPaths(src))
+        synchronized(cache) { cache[key] = c }
+        return c
+    }
 
     private class Edit(val s: Int, val e: Int, val r: String)
 
     /** [js] 是一条 content_scripts 拼好的源码；没有动态 import 时原样返回。 */
     fun process(js: String, readText: (String) -> String?): Result {
         val toks = JsLexer.lex(js)
-        if (!hasDynamicImport(toks)) return Result(js, null, emptyList())
+        if (!hasDynamicImport(toks)) return Result(js, emptyMap(), emptyList())
         val warnings = mutableListOf<String>()
         val mods = linkedMapOf<String, String>()
         var total = 0
@@ -46,18 +70,15 @@ internal object ContentModuleBundler {
                 return
             }
             mods[path] = "" // 先占位，防止循环依赖死循环
-            val deps = mutableListOf<String>()
-            mods[path] = transform(src, path, deps)
-            deps.forEach { load(it) }
+            val c = compile(path, src)
+            mods[path] = c.fn
+            c.deps.forEach { load(it) }
             // 模块里动态 import 引用到的其它文件
-            stringPaths(src).forEach { lit -> resolveCandidate(lit, path, readText)?.let { load(it) } }
+            c.refs.forEach { lit -> resolveCandidate(lit, path, readText)?.let { load(it) } }
         }
 
         stringPaths(js, toks).forEach { lit -> resolveCandidate(lit, "", readText)?.let { load(it) } }
-        val rewritten = rewriteDynamic(js, toks)
-        if (mods.isEmpty()) return Result(rewritten, null, warnings)
-        val body = mods.entries.joinToString(",") { (k, v) -> JSONObject.quote(k) + ":" + v }
-        return Result(rewritten, "{$body}", warnings)
+        return Result(rewriteDynamic(js, toks), mods, warnings)
     }
 
     private fun isDynamicImport(toks: List<JsLexer.Tok>, i: Int) =

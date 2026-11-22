@@ -1025,12 +1025,22 @@ function (CFG, ENTRIES) {
     });
   }
 
-  // 内联模块加载器：content script 里的 import(...) 被改写成它。页面 CSP 会拦截 import(拓展 origin 的 URL)，
-  // 所以拓展内的模块由原生随条目内联进来（en.mods：路径 → async function(exp, req, url, imp)）。
-  // 不在内联表里的（外部 URL 等）才回退原生 import()。
-  function makeImporter(mods) {
-    var cache = {};
+  // 模块加载器：content script 里的 import(...) 被改写成它。页面 CSP 会拦截 import(拓展 origin 的 URL)，所以拓展内的模块
+  // 不走网络，而是由原生送进来，有两种方式：
+  //   en.mods ：随条目内联（路径 → async function(exp, req, url, imp)），用于没有桥的 MAIN 世界等；
+  //   en.lazy ：只有路径；首次用到时经桥请求 mafari.module.load，原生用隔离世界的 executeJavaScript 调
+  //             __mafariModDefine(path, fn) 把模块函数送进来（同样不受页面 CSP 约束），源码不占每个页面的注入脚本。
+  // 都没有的（外部 URL 等）才回退原生 import()。模块每个世界只执行一次（modCache）。
+  var modFns = {}, modLazy = {}, modWait = {}, modCache = {};
+  if (CFG.isolatedWorld) {
+    // 只在隔离世界里挂：页面世界看不到这个世界的全局
+    globalThis.__mafariModDefine = function (path, fn) { modFns[path] = fn; };
+  }
+  function makeImporter(en) {
     var base = CFG.origin + '/';
+    var own = Object.prototype.hasOwnProperty;
+    var mods = en.mods || {};
+    (en.lazy || []).forEach(function (p) { modLazy[p] = 1; });
     function norm(from, rel) {
       var parts = rel.charAt(0) === '/' ? [] : from.split('/').slice(0, -1);
       rel.split('/').forEach(function (seg) {
@@ -1039,25 +1049,35 @@ function (CFG, ENTRIES) {
       });
       return parts.join('/');
     }
-    function toPath(spec, from) {
+    function toPath(spec) {
       var s = String(spec).replace(/[?#].*$/, '');
       if (s.indexOf(base) === 0) return s.slice(base.length);
       if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.indexOf('//') === 0) return null;
-      return norm(from || '', s);
+      return norm('', s);
+    }
+    function fnFor(path) {
+      if (own.call(mods, path)) return P.resolve(mods[path]);
+      if (own.call(modFns, path)) return P.resolve(modFns[path]);
+      if (!own.call(modLazy, path)) return null;
+      return modWait[path] || (modWait[path] = rpc('mafari.module.load', [path]).then(function () {
+        if (!own.call(modFns, path)) throw new E('module not delivered: ' + path);
+        return modFns[path];
+      }, function (e) { delete modWait[path]; throw e; }));
     }
     function load(path) {
-      if (!Object.prototype.hasOwnProperty.call(mods, path)) return null;
-      if (cache[path]) return cache[path];
-      var exp = {};
-      return (cache[path] = Promise.resolve().then(function () {
-        return mods[path](exp, function (p) {
+      if (own.call(modCache, path)) return modCache[path];
+      var fp = fnFor(path);
+      if (!fp) return null;
+      return (modCache[path] = fp.then(function (fn) {
+        var exp = {};
+        return P.resolve(fn(exp, function (p) {
           var l = load(p);
-          return l || Promise.reject(new Error('module not found: ' + p));
-        }, base + path, imp);
-      }).then(function () { return exp; }));
+          return l || P.reject(new E('module not found: ' + p));
+        }, base + path, imp)).then(function () { return exp; });
+      }));
     }
     function imp(spec) {
-      var p = toPath(spec, '');
+      var p = toPath(spec);
       var l = p && load(p);
       if (l) return l;
       return import(String(spec));
@@ -1073,7 +1093,7 @@ function (CFG, ENTRIES) {
       if (!anyMatch(en.m, href) || anyMatch(en.x, href)) return;
       runWhen(en.at, function () {
         en.css.forEach(function (c) { try { insertCss(c); } catch (e) { cerr(e); } });
-        var imp = en.mods ? makeImporter(en.mods) : function (u) { return import(String(u)); };
+        var imp = (en.mods || en.lazy) ? makeImporter(en) : function (u) { return import(String(u)); };
         en.js.forEach(function (fn) { try { fn(br, ch, imp); } catch (e) { cerr(e); } });
       });
     });

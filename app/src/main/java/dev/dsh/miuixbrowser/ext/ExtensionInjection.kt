@@ -33,6 +33,8 @@ class InjectionPlan(
      * 注册，origin 规则同 [isolatedOriginRules]。null = 隔离世界里没有晚于 document_start 的条目。
      */
     val isolatedEndScript: String? = null,
+    /** [ExtensionInjection.build] 的 lazyModules 模式下，按需送进隔离世界的模块：路径 → 模块函数源码。 */
+    val lazyModuleSources: Map<String, String> = emptyMap(),
 )
 
 object ExtensionInjection {
@@ -56,6 +58,10 @@ object ExtensionInjection {
     /**
      * [shim] 是 assets/mafari_ext_shim.js 全文；[readText] 按拓展包内的相对路径读文本（读不到返回 null）。
      * 没有任何可注入的 content script 时返回 null。
+     *
+     * [lazyModules]：true 时，ISOLATED 条目里 content script 动态 import 的拓展内模块不随脚本注入（可能有几 MB，
+     * 而且条目会被拼进多份脚本），只把路径写进条目（`lazy`），源码放进 [InjectionPlan.lazyModuleSources]，
+     * 由宿主在 shim 请求时经隔离世界的 executeJavaScript 送进去。只在宿主能用隔离世界时才能开；MAIN 条目没有桥，始终内联。
      */
     fun build(
         ext: InstalledExtension,
@@ -63,6 +69,7 @@ object ExtensionInjection {
         readText: (String) -> String?,
         dynamicContentScripts: List<ContentScriptSpec> = emptyList(),
         tabId: Int? = null,
+        lazyModules: Boolean = false,
     ): InjectionPlan? {
         val spec = ext.spec
         val warnings = mutableListOf<String>()
@@ -92,6 +99,7 @@ object ExtensionInjection {
             if (allowedMatches.isEmpty()) null else script.copy(matches = allowedMatches)
         }
 
+        val lazySources = linkedMapOf<String, String>()
         for (cs in spec.contentScripts + authorizedDynamicScripts) {
             val origin = cs.matches.flatMap { it.toOriginRules() }
             if (origin.isEmpty()) {
@@ -122,7 +130,13 @@ object ExtensionInjection {
             val body = if (bundled == null) "" else
                 "function(browser,chrome," + ContentModuleBundler.IMPORT_FN + "){\n" + bundled.rewrittenJs + "\n}"
             entry.append(",\"js\":[").append(body).append(']')
-            bundled?.modulesJs?.let { entry.append(",\"mods\":").append(it) }
+            val lazyEntry = lazyModules && cs.world != ScriptWorld.MAIN && bundled != null && bundled.mods.isNotEmpty()
+            if (lazyEntry) {
+                entry.append(",\"lazy\":[").append(bundled!!.mods.keys.joinToString(",") { JSONObject.quote(it) }).append(']')
+                lazySources.putAll(bundled.mods)
+            } else {
+                bundled?.modulesJs?.let { entry.append(",\"mods\":").append(it) }
+            }
             entry.append('}')
             val entryJson = entry.toString()
 
@@ -179,6 +193,7 @@ object ExtensionInjection {
             mainScript = mainScript,
             mainOriginRules = effectiveOf(mainRules),
             isolatedEndScript = if (isolatedScript != null && isoNeedsEnd) endScriptFor(spec.id) else null,
+            lazyModuleSources = lazySources,
         )
     }
 

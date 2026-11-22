@@ -48,6 +48,9 @@ class WebViewExtensionHost(
         const val EVENT_DOCUMENT_START = WebViewCompat.INJECTION_EVENT_DOCUMENT_START
         /** shim 向原生要内联模块的内部 api（不走 PermissionChecker，由 [handleModuleLoad] 自己校验）；符合 ApiProtocol 的 api 名格式。 */
         const val MODULE_LOAD_API = "mafari.module.load"
+        /** shim 在隔离世界里代 content script 读拓展自己的 web_accessible 资源（页面 CSP 的 connect-src 会拦直接 fetch） */
+        const val RESOURCE_READ_API = "mafari.resource.read"
+        const val MAX_RESOURCE_BYTES = 4 * 1024 * 1024
 
         /** `addJavaScriptOnEvent` 的 document-end 事件（1.16 起；官方文档写明对应 DOMContentLoaded），用来驱动 run_at: document_end / document_idle */
         const val EVENT_DOCUMENT_END = WebViewCompat.INJECTION_EVENT_DOCUMENT_END
@@ -364,6 +367,10 @@ class WebViewExtensionHost(
                 }
             }
         }
+        if (req.api == RESOURCE_READ_API) {
+            handleResourceRead(req, reply, viaWorld, tabId, frameUrl)
+            return
+        }
         val sender = Sender(
             SenderKind.CONTENT_SCRIPT, origin, isMainFrame, tabId,
             if (isMainFrame && tabId != null) "content:$boundExtId:$tabId" else null,
@@ -397,6 +404,43 @@ class WebViewExtensionHost(
             reply.executeJavaScript(js, receiver)
         } catch (e: Exception) {
             send(reply, ApiProtocol.error(req.id, ErrorCodes.SCRIPT_ERROR, "模块送入隔离世界失败：${e.message}"))
+        }
+    }
+
+    /**
+     * 读拓展包里的资源给 content script（`fetch(runtime.getURL(...))`）。规则与网页直接请求拓展地址一致：
+     * 只放行 web_accessible_resources，页面网址取自浏览器记录的标签网址（[frameUrl]），不信任页面自报。
+     * 回复 `{status, mime, b64}`；不存在 / 不可访问回 404，让页面侧拿到与网络请求一样的 404 响应。
+     */
+    private fun handleResourceRead(req: ApiRequest, reply: JavaScriptReplyProxy, viaWorld: Boolean, tabId: Int?, frameUrl: String) {
+        val path = req.args.optString(0)
+        val ext = if (viaWorld && tabId != null) {
+            synchronized(bindings) { bindings[tabId]?.exts?.firstOrNull { it.spec.id == req.extId } }
+        } else {
+            null
+        }
+        if (ext == null || path.isEmpty()) {
+            send(reply, ApiProtocol.error(req.id, ErrorCodes.BAD_REQUEST, "不能读取资源：$path"))
+            return
+        }
+        scope.launch {
+            val out = try {
+                val res = ExtensionPages.openWebAccessible(ext, "/" + path.removePrefix("/"), frameUrl)
+                val bytes = res?.let { it.file?.readBytes() ?: it.bytes }
+                when {
+                    res == null || bytes == null -> JSONObject().put("status", 404)
+                    bytes.size > MAX_RESOURCE_BYTES -> null
+                    else -> JSONObject().put("status", 200).put("mime", res.mime)
+                        .put("b64", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+                }
+            } catch (_: Exception) {
+                null
+            }
+            send(
+                reply,
+                if (out != null) ApiProtocol.ok(req.id, out)
+                else ApiProtocol.error(req.id, ErrorCodes.BAD_REQUEST, "资源读取失败或超过 ${MAX_RESOURCE_BYTES / 1024 / 1024}MB：$path"),
+            )
         }
     }
 

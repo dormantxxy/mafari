@@ -1035,6 +1035,29 @@ function (CFG, ENTRIES) {
   if (CFG.isolatedWorld) {
     // 只在隔离世界里挂：页面世界看不到这个世界的全局
     globalThis.__mafariModDefine = function (path, fn) { modFns[path] = fn; };
+    // 隔离世界里的 fetch 同样受页面 CSP 的 connect-src 约束（github 等站点会拦 https://<拓展>.ext.mafari.internal/...），
+    // content script 读自己的 default_config.json 之类就会失败。指向拓展 origin 的 GET 改走桥读文件（仅 web_accessible 资源），
+    // 其余请求原样交给原生 fetch。
+    var nativeFetch = globalThis.fetch;
+    if (typeof nativeFetch === 'function') {
+      globalThis.fetch = function (input, init) {
+        try {
+          var url = typeof input === 'string' ? input : (input && input.url) || String(input);
+          var method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+          var abs = new U(url, win.location && win.location.href).href;
+          if (method === 'GET' && abs.indexOf(CFG.origin + '/') === 0) {
+            var path = abs.slice(CFG.origin.length + 1).replace(/[?#].*$/, '');
+            return rpc('mafari.resource.read', [path]).then(function (r) {
+              if (!r || r.status !== 200) return new Response(null, { status: (r && r.status) || 404 });
+              var bin = atob(r.b64), bytes = new Uint8Array(bin.length);
+              for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+              return new Response(bytes, { status: 200, headers: { 'content-type': r.mime || 'application/octet-stream' } });
+            });
+          }
+        } catch (e) { /* 解析失败就按原样请求 */ }
+        return nativeFetch.apply(this, arguments);
+      };
+    }
   }
   function makeImporter(en) {
     var base = CFG.origin + '/';

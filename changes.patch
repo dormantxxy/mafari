@@ -1,0 +1,389 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,8 @@
+ - **The compact title pill (shown while scrolling) is lower**: 32dp → 26dp, corner 16dp → 13dp.
+ - **WebView debug: new "Record page performance" switch** (page performance section, default on = previous behaviour). When off, FCP / LCP and new entries are no longer collected; existing records are kept.
+ - **WebView debug: the "Preconnect" info line now says which path is available** (queued `enqueuePreconnect`, direct `preconnect`, or neither / no multi-profile) instead of a bare "not supported". `enqueuePreconnect` only exists since androidx.webkit 1.17.0-alpha04, so a system WebView that is not new enough reports it as unsupported even when it is the latest installed one.
++- **Cold start: WebView extensions no longer block the first frame / first tab.** Previously the first WebView tab built the extension system, read every extension's state + manifest, read the shim and read / bundled every content script **on the main thread** before the first page could load. Now `StartupCoordinator.prewarmExtensions` does all of that on a background thread right after process creation (`ExtensionSystem.prewarm`, `WebViewExtensionHost.prewarm`); `ExtensionInjection.build` is split into `prepare` (file reads, bundling, localisation; cached per extension, invalidated on install / enable / disable / uninstall, permission or dynamic-script change) and `finish` (per-tab string assembly with the tab id), so the main thread only concatenates. Output is byte-identical to before (`ExtensionInjectionTest.prepareThenFinishMatchesBuildForEveryTab`).
++- **Cold start: extension background pages start when the main thread is idle and are staggered** (200 ms apart, 3 s idle timeout) instead of all being created in one main-thread burst 1.5 s after the first frame. The start delay itself is unchanged; a delayed start re-checks that the extension is still enabled and not already running.
+ - Not compiled here (no Android toolchain).
+ 
+ ## [2.1.70]
+diff --git a/app/src/main/java/dev/dsh/miuixbrowser/StartupCoordinator.kt b/app/src/main/java/dev/dsh/miuixbrowser/StartupCoordinator.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/StartupCoordinator.kt
++++ b/app/src/main/java/dev/dsh/miuixbrowser/StartupCoordinator.kt
+@@ -23,6 +23,7 @@
+ import android.content.Context
+ import android.os.Handler
+ import android.os.Looper
++import android.os.SystemClock
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.withContext
+ 
+@@ -51,6 +52,15 @@
+     /** WebView 拓展的后台页是隐藏 WebView，创建有开销：首帧之后再起，别和首屏抢主线程。 */
+     private const val EXT_BACKGROUND_DELAY_MS = 1_500L
+ 
++    /** 多个拓展的后台页（各一个隐藏 WebView）依次错开拉起的间隔：别在主线程上挤成一次长卡顿。 */
++    private const val EXT_BACKGROUND_STAGGER_MS = 200L
++
++    /** 等主线程空闲再拉后台页；一直等不到空闲（持续动画 / 滚动）就到这个时间强行拉。 */
++    private const val EXT_BACKGROUND_IDLE_TIMEOUT_MS = 3_000L
++
++    /** 拓展预热里等 WebView 预热结束的上限：先等它，免得和它抢着加载 WebView 提供方；等不到也往下走。 */
++    private const val EXT_PREWARM_WEBVIEW_WAIT_MS = 3_000L
++
+     /** 清扫上次遗留的无痕 Profile：不急，排在拓展后台页之后。 */
+     private const val SWEEP_INCOGNITO_DELAY_MS = 3_000L
+ 
+@@ -71,6 +81,34 @@
+         FaviconLoader.init(app) // 只定磁盘目录，修剪在后台
+         // WebView 异步预热：默认内核是 WebView 时才做（Gecko 默认时首屏不创建 WebView，没必要）。须尽早，越早越能和加密库预热重叠
+         if (!EngineSupport.defaultIsGecko(app)) WebViewStartup.begin(app)
++        prewarmExtensions(app) // 须在 WebViewStartup.begin 之后（要看它是否已开始）
++    }
++
++    /**
++     * 拓展系统预热：原先第一个 WebView 标签创建时才在主线程上同步做——建拓展系统（注册二十多个 API）、
++     * 读仓库（逐个解析 manifest）、读 shim、读 / 打包各拓展的 content script，拓展越多首屏越慢。
++     * 现在进程一创建就在后台线程做完，首个标签装配时全是缓存命中。线程优先级比默认略低（但不进后台 cgroup，
++     * 免得被饿死、到首个标签创建时还没好），不和加密库 / WebView 预热抢关键路径。
++     * 和 [StartupWarmup] 互不依赖（不碰加密库）。
++     */
++    private fun prewarmExtensions(app: Application) {
++        Thread({
++            val t0 = SystemClock.elapsedRealtime()
++            runCatching {
++                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE)
++                val webViewTabs = !EngineSupport.defaultIsGecko(app)
++                val system = app.appContainer.webExtensions
++                if (webViewTabs && WebViewStartup.started) {
++                    // 判断系统 WebView 支不支持隔离世界要碰 WebView 提供方：等 WebView 预热先把它加载好。
++                    // 只轮询，不调 awaitDone —— 它超时会替冷启动闸门「宣布结束」，这里不该有这个副作用
++                    while (!WebViewStartup.isDone() && SystemClock.elapsedRealtime() - t0 < EXT_PREWARM_WEBVIEW_WAIT_MS) {
++                        Thread.sleep(25)
++                    }
++                }
++                system.prewarm(injection = webViewTabs)
++            }.onFailure { Diag.log("prewarm: web extensions failed ${it.javaClass.simpleName}: ${it.message}") }
++            Diag.log("prewarm: web extensions ready in ${SystemClock.elapsedRealtime() - t0}ms")
++        }, "mafari-prewarm-ext").apply { isDaemon = true }.start()
+     }
+ 
+     /** 阶段 2。须在主线程、Activity.onCreate 里调用。 */
+@@ -126,11 +164,20 @@
+         activity.window.decorView.post {
+             Handler(Looper.getMainLooper()).postDelayed({ AdBlock.startCompile() }, ADBLOCK_COMPILE_DELAY_MS)
+         }
+-        // WebView 拓展的后台页：没有已启用的拓展就什么都不建；幂等（Activity 重建时已在运行的会跳过）
++        // WebView 拓展的后台页：没有已启用的拓展就什么都不建；幂等（Activity 重建时已在运行的会跳过）。
++        // 首帧后再等一会儿，然后等主线程空闲（首屏渲染 / 标签恢复期间不插队）才拉；多个拓展依次错开
+         activity.window.decorView.post {
+-            Handler(Looper.getMainLooper()).postDelayed({
+-                runCatching { app.appContainer.webExtensions.startAll() }
+-                    .onFailure { Diag.log("web extensions: start backgrounds failed ${it.message}") }
++            val handler = Handler(Looper.getMainLooper())
++            handler.postDelayed({
++                val fired = java.util.concurrent.atomic.AtomicBoolean(false)
++                val startBackgrounds = {
++                    if (fired.compareAndSet(false, true)) {
++                        runCatching { app.appContainer.webExtensions.startAll(EXT_BACKGROUND_STAGGER_MS) }
++                            .onFailure { Diag.log("web extensions: start backgrounds failed ${it.message}") }
++                    }
++                }
++                Looper.myQueue().addIdleHandler { startBackgrounds(); false }
++                handler.postDelayed({ startBackgrounds() }, EXT_BACKGROUND_IDLE_TIMEOUT_MS) // 一直不空闲时的兜底
+             }, EXT_BACKGROUND_DELAY_MS)
+         }
+         // 上次进程被杀留在磁盘上的无痕 Profile 数据：界面出来、WebView 预热结束之后再扫（本进程已用过无痕就跳过）
+diff --git a/app/src/main/java/dev/dsh/miuixbrowser/ext/ExtensionInjection.kt b/app/src/main/java/dev/dsh/miuixbrowser/ext/ExtensionInjection.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/ext/ExtensionInjection.kt
++++ b/app/src/main/java/dev/dsh/miuixbrowser/ext/ExtensionInjection.kt
+@@ -37,6 +37,27 @@
+     val lazyModuleSources: Map<String, String> = emptyMap(),
+ )
+ 
++/**
++ * [ExtensionInjection.prepare] 的结果：content script 条目、origin 规则、本地化后的 manifest 等与标签无关的部分。
++ * 每个标签用 [ExtensionInjection.finish] 带上 tabId 拼出最终脚本。
++ */
++class PreparedInjection internal constructor(
++    internal val extId: String,
++    internal val entries: String,
++    internal val isoEntries: String,
++    internal val mainEntries: String,
++    internal val originRules: Set<String>,
++    internal val isolatedOriginRules: Set<String>,
++    internal val mainOriginRules: Set<String>,
++    internal val isoCount: Int,
++    internal val mainCount: Int,
++    internal val isoNeedsEnd: Boolean,
++    internal val localizedManifest: JSONObject,
++    internal val i18n: JSONObject?,
++    internal val warnings: List<String>,
++    internal val lazySources: Map<String, String>,
++)
++
+ object ExtensionInjection {
+     private const val MAX_FILE_BYTES = 8L * 1024 * 1024
+ 
+@@ -70,7 +91,20 @@
+         dynamicContentScripts: List<ContentScriptSpec> = emptyList(),
+         tabId: Int? = null,
+         lazyModules: Boolean = false,
+-    ): InjectionPlan? {
++    ): InjectionPlan? =
++        prepare(ext, readText, dynamicContentScripts, lazyModules)?.let { finish(it, shim, tabId) }
++
++    /**
++     * [build] 里与标签无关的重活：读 manifest / content script / css、打包内联模块、本地化。
++     * 结果可以缓存，之后每个标签只需 [finish]（字符串拼接），不必在主线程上反复读盘。
++     * 没有任何可注入的 content script 时返回 null。
++     */
++    fun prepare(
++        ext: InstalledExtension,
++        readText: (String) -> String?,
++        dynamicContentScripts: List<ContentScriptSpec> = emptyList(),
++        lazyModules: Boolean = false,
++    ): PreparedInjection? {
+         val spec = ext.spec
+         val warnings = mutableListOf<String>()
+         val manifest = try {
+@@ -161,39 +195,61 @@
+         if (count == 0) return null
+ 
+         fun effectiveOf(r: Set<String>): Set<String> = if ("*" in r) setOf("*") else r
+-        val effective = effectiveOf(rules)
+-        val bridge = bridgeNameFor(spec.id)
++        // 本地化 manifest / i18n 注入块与标签无关：这里只算一次，[finish] 里直接复用（之后只读，不会被改）
++        val localizedManifest = loc.localizedManifest()
++        val injectableI18n = loc.injectable(warnings)
++        return PreparedInjection(
++            extId = spec.id,
++            entries = entries.toString(),
++            isoEntries = isoEntries.toString(),
++            mainEntries = mainEntries.toString(),
++            originRules = effectiveOf(rules),
++            isolatedOriginRules = effectiveOf(isoRules),
++            mainOriginRules = effectiveOf(mainRules),
++            isoCount = isoCount,
++            mainCount = mainCount,
++            isoNeedsEnd = isoNeedsEnd,
++            localizedManifest = localizedManifest,
++            i18n = injectableI18n,
++            warnings = warnings,
++            lazySources = lazySources,
++        )
++    }
++
++    /** 把 [prepare] 的结果按 [shim] 与 [tabId] 拼成最终注入脚本。拼法与拆分前的 [build] 完全一致。 */
++    fun finish(p: PreparedInjection, shim: String, tabId: Int? = null): InjectionPlan {
++        val bridge = bridgeNameFor(p.extId)
+         val cfg = JSONObject()
+-            .put("extId", spec.id)
++            .put("extId", p.extId)
+             .put("bridge", bridge)
+-            .put("origin", ExtensionOrigins.originFor(spec.id))
+-            .put("manifest", loc.localizedManifest())
++            .put("origin", ExtensionOrigins.originFor(p.extId))
++            .put("manifest", p.localizedManifest)
+         tabId?.let { cfg.put("tabId", it) }
+-        loc.injectable(warnings)?.let { cfg.put("i18n", it) }
++        p.i18n?.let { cfg.put("i18n", it) }
+         // 隔离世界：桥只注册在该世界里，页面世界既看不到桥也发不出消息；browser / chrome 也只挂在这个世界的全局上
+-        val isolatedScript = if (isoCount > 0) {
++        val isolatedScript = if (p.isoCount > 0) {
+             val isoCfg = JSONObject(cfg.toString()).put("isolatedWorld", true)
+             // 有 document_end / document_idle 条目时，让 shim 等宿主注册的原生 document-end 事件（见 [InjectionPlan.isolatedEndScript]）
+-            if (isoNeedsEnd) isoCfg.put("nativeEnd", endHookFor(spec.id))
+-            assemble(shim, isoCfg, isoEntries.toString())
++            if (p.isoNeedsEnd) isoCfg.put("nativeEnd", endHookFor(p.extId))
++            assemble(shim, isoCfg, p.isoEntries)
+         } else {
+             null
+         }
+         // MAIN 世界：脚本全文对页面可见，所以 cfg 里只放一个开关，不带 extId / manifest / i18n
+-        val mainScript = if (mainCount > 0) {
+-            assemble(shim, JSONObject().put("mainWorld", true), mainEntries.toString())
++        val mainScript = if (p.mainCount > 0) {
++            assemble(shim, JSONObject().put("mainWorld", true), p.mainEntries)
+         } else {
+             null
+         }
+         return InjectionPlan(
+-            spec.id, bridge, effective, assemble(shim, cfg, entries.toString()), warnings,
+-            worldName = worldNameFor(spec.id),
++            p.extId, bridge, p.originRules, assemble(shim, cfg, p.entries), p.warnings,
++            worldName = worldNameFor(p.extId),
+             isolatedScript = isolatedScript,
+-            isolatedOriginRules = effectiveOf(isoRules),
++            isolatedOriginRules = p.isolatedOriginRules,
+             mainScript = mainScript,
+-            mainOriginRules = effectiveOf(mainRules),
+-            isolatedEndScript = if (isolatedScript != null && isoNeedsEnd) endScriptFor(spec.id) else null,
+-            lazyModuleSources = lazySources,
++            mainOriginRules = p.mainOriginRules,
++            isolatedEndScript = if (isolatedScript != null && p.isoNeedsEnd) endScriptFor(p.extId) else null,
++            lazyModuleSources = p.lazySources,
+         )
+     }
+ 
+diff --git a/app/src/main/java/dev/dsh/miuixbrowser/ext/ExtensionSystem.kt b/app/src/main/java/dev/dsh/miuixbrowser/ext/ExtensionSystem.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/ext/ExtensionSystem.kt
++++ b/app/src/main/java/dev/dsh/miuixbrowser/ext/ExtensionSystem.kt
+@@ -282,16 +282,47 @@
+         .use { it.readText() }.also { shimText = it }
+ 
+     /**
++     * 冷启动预热（**后台线程**调用）：把首个标签装配拓展时主线程要做的事提前做完——
++     * 读仓库（state/*.json + 解析每个 manifest）、读 shim、预处理各拓展的 content script（读文件 / 打包 / 本地化）。
++     * 都做完后，主线程上 [WebViewExtensionHost.install] 只剩拼接字符串；没有拓展时只是把系统对象建好。
++     * [injection] = false：只读仓库、不预处理 content script（默认内核不是 WebView 时，标签装配用不上）。
++     * 失败无妨：主线程用到时照旧同步做一遍。
++     */
++    fun prewarm(injection: Boolean = true) {
++        val exts = webViewExtensions()
++        if (!injection || exts.isEmpty()) return
++        shim()
++        tabHost.prewarm(exts)
++    }
++
++    private val startHandler = android.os.Handler(android.os.Looper.getMainLooper())
++
++    /**
+      * 应用启动后（主线程，幂等）：拉起所有已启用拓展的后台页。每个后台页就绪后先收到 runtime.onStartup，
+      * 再收到补发的 alarms.onAlarm（见 [ExtensionLifecycle]）。
++     *
++     * 每个后台页都是一个隐藏 WebView，创建有开销。[staggerMs] > 0 时第一个立即拉起，其余每个依次再晚 [staggerMs]，
++     * 避免多个拓展在主线程上挤成一次长卡顿；默认 0 = 全部立即拉起（与旧行为一致）。
+      */
+-    fun startAll() {
++    fun startAll(staggerMs: Long = 0L) {
++        var delay = 0L
+         for (ext in webViewExtensions()) {
+-            if (pages.startBackground(ext) != null) lifecycle.expectStartup(ext.spec.id)
++            val id = ext.spec.id
++            if (delay == 0L) startOne(id) else startHandler.postDelayed({ startOne(id) }, delay)
++            delay += staggerMs
+         }
+     }
+ 
+     /**
++     * 拉起一个拓展的后台页。延后执行的启动要重新确认：期间拓展可能已被停用 / 卸载，
++     * 或已被 [onInstalled] / [onEnabled] 拉起（[ExtensionPageHost.startBackground] 对已在运行的返回 null，不会重复拉）。
++     */
++    private fun startOne(id: String) {
++        val ext = repo.get(id)?.takeIf { it.enabled && EngineKind.WEBVIEW in it.engines } ?: return
++        if (pages.startBackground(ext) != null) lifecycle.expectStartup(id)
++    }
++
++    /**
+      * 安装 / 更新完成后（主线程）：重启后台页。[previous] 为更新前的版本（全新安装传 null）：
+      * 后台页就绪后收到 runtime.onInstalled（reason = install / update）；更新会清掉旧闹钟，与 Chrome 一致。
+      */
+diff --git a/app/src/main/java/dev/dsh/miuixbrowser/ext/WebViewExtensionHost.kt b/app/src/main/java/dev/dsh/miuixbrowser/ext/WebViewExtensionHost.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/ext/WebViewExtensionHost.kt
++++ b/app/src/main/java/dev/dsh/miuixbrowser/ext/WebViewExtensionHost.kt
+@@ -196,6 +196,45 @@
+      * 在 WebView 首次加载网页之前调用。[exts] 里只传要在这个标签上生效的（已启用、引擎含 WEBVIEW、无痕范围已过滤）。
+      * [shim] 是 assets/mafari_ext_shim.js 全文。
+      */
++    /** [ExtensionInjection.prepare] 的缓存项：键是它依赖的全部输入，任何一个变了（授权、动态脚本、世界支持）就重算 */
++    private class PreparedEntry(
++        val ext: InstalledExtension,
++        val dynamic: List<ContentScriptSpec>,
++        val lazyModules: Boolean,
++        val prepared: PreparedInjection?,
++    )
++
++    private val preparedLock = Any()
++    private val preparedCache = HashMap<String, PreparedEntry>()
++
++    /**
++     * 取（必要时计算）拓展的注入预处理结果。整段在锁里：冷启动时后台线程正在算的话，主线程会等它算完而不是重复算一遍。
++     * 命中条件是 [ext]、动态脚本、是否走隔离世界都和上次一致；拓展被装 / 启 / 停 / 卸（[forget]）时整项丢弃。
++     */
++    private fun preparedFor(ext: InstalledExtension, dynamic: List<ContentScriptSpec>, useWorlds: Boolean): PreparedInjection? =
++        synchronized(preparedLock) {
++            val hit = preparedCache[ext.spec.id]
++            if (hit != null && hit.lazyModules == useWorlds && hit.ext == ext && hit.dynamic == dynamic) {
++                return@synchronized hit.prepared
++            }
++            val fresh = ExtensionInjection.prepare(ext, ExtensionInjection.fileReader(ext.rootDir), dynamic, useWorlds)
++            preparedCache[ext.spec.id] = PreparedEntry(ext, dynamic, useWorlds, fresh)
++            fresh
++        }
++
++    /**
++     * 冷启动预热：在**后台线程**调用，把每个拓展的 content script 先读好、打包好，
++     * 这样第一个标签在主线程装配时（[install]）只剩字符串拼接，不再同步读盘。不支持时什么都不做。
++     */
++    fun prewarm(exts: List<InstalledExtension>) {
++        if (!isSupported()) return
++        val useWorlds = isolatedWorldsSupported()
++        for (ext in exts) {
++            runCatching { preparedFor(ext, dynamicContentScripts(ext), useWorlds) }
++                .onFailure { log("ext ${ext.spec.id}: prewarm failed ${it.message}") }
++        }
++    }
++
+     fun install(webView: WebView, exts: List<InstalledExtension>, shim: String, tabId: Int?): Installation? {
+         if (!isSupported()) return null
+         val useWorlds = isolatedWorldsSupported()
+@@ -205,10 +244,9 @@
+         val installedExtIds = mutableListOf<String>()
+         for (ext in exts) {
+             installedExtIds.add(ext.spec.id)
+-            val plan = ExtensionInjection.build(
+-                ext, shim, ExtensionInjection.fileReader(ext.rootDir), dynamicContentScripts(ext), tabId,
+-                lazyModules = useWorlds,
+-            )
++            // 读文件 / 打包 / 本地化这部分与标签无关，走缓存（冷启动时已在后台线程算好，见 [prewarm]）；每个标签只做拼接
++            val plan = preparedFor(ext, dynamicContentScripts(ext), useWorlds)
++                ?.let { ExtensionInjection.finish(it, shim, tabId) }
+             if (plan == null) {
+                 log("ext ${ext.spec.id}: tab $tabId 没有可注入的 content script（manifest 无 content_scripts，或脚本文件读不到）")
+                 continue
+@@ -497,6 +535,7 @@
+ 
+     /** 拓展被卸载 / 停用时丢掉它的连接记录 */
+     fun forget(extId: String) {
++        synchronized(preparedLock) { preparedCache.remove(extId) } // 包可能换了（更新 / 重装）：预处理结果作废
+         synchronized(connections) { connections.remove(extId) }
+         synchronized(lazyModules) { lazyModules.remove(extId) }
+         synchronized(contentEndpoints) {
+diff --git a/app/src/test/java/dev/dsh/miuixbrowser/ext/ExtensionInjectionTest.kt b/app/src/test/java/dev/dsh/miuixbrowser/ext/ExtensionInjectionTest.kt
+--- a/app/src/test/java/dev/dsh/miuixbrowser/ext/ExtensionInjectionTest.kt
++++ b/app/src/test/java/dev/dsh/miuixbrowser/ext/ExtensionInjectionTest.kt
+@@ -24,6 +24,30 @@
+     private fun mf(contentScripts: String) =
+         """{"manifest_version":3,"name":"Demo","version":"1","content_scripts":$contentScripts}"""
+ 
++    @Test fun prepareThenFinishMatchesBuildForEveryTab() {
++        val e = ext(
++            mf("""[{"matches":["https://a.com/*"],"js":["c.js"],"run_at":"document_idle"},{"matches":["https://b.com/*"],"js":["m.js"],"world":"MAIN"}]"""),
++            "c.js" to "console.log('c')",
++            "m.js" to "console.log('m')",
++        )
++        val read = ExtensionInjection.fileReader(e.rootDir)
++        // 冷启动预热只做一次 prepare，之后每个标签只 finish：结果必须和每次完整 build 逐字一致（tabId 照样进脚本）
++        val prepared = ExtensionInjection.prepare(e, read)!!
++        for (tabId in listOf(null, 1, 42)) {
++            val expected = ExtensionInjection.build(e, shim, read, tabId = tabId)!!
++            val actual = ExtensionInjection.finish(prepared, shim, tabId)
++            assertEquals(expected.script, actual.script)
++            assertEquals(expected.isolatedScript, actual.isolatedScript)
++            assertEquals(expected.mainScript, actual.mainScript)
++            assertEquals(expected.isolatedEndScript, actual.isolatedEndScript)
++            assertEquals(expected.originRules, actual.originRules)
++            assertEquals(expected.isolatedOriginRules, actual.isolatedOriginRules)
++            assertEquals(expected.mainOriginRules, actual.mainOriginRules)
++        }
++        assertTrue(ExtensionInjection.finish(prepared, shim, 42).script.contains("\"tabId\":42"))
++        assertFalse(ExtensionInjection.finish(prepared, shim, null).script.contains("\"tabId\""))
++    }
++
+     @Test fun buildsPlanWithRulesBridgeAndScript() {
+         val e = ext(
+             mf("""[{"matches":["https://a.com/*"],"js":["c.js"],"css":["s.css"],"run_at":"document_start","all_frames":true}]"""),

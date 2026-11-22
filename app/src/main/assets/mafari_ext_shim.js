@@ -1025,6 +1025,46 @@ function (CFG, ENTRIES) {
     });
   }
 
+  // 内联模块加载器：content script 里的 import(...) 被改写成它。页面 CSP 会拦截 import(拓展 origin 的 URL)，
+  // 所以拓展内的模块由原生随条目内联进来（en.mods：路径 → async function(exp, req, url, imp)）。
+  // 不在内联表里的（外部 URL 等）才回退原生 import()。
+  function makeImporter(mods) {
+    var cache = {};
+    var base = CFG.origin + '/';
+    function norm(from, rel) {
+      var parts = rel.charAt(0) === '/' ? [] : from.split('/').slice(0, -1);
+      rel.split('/').forEach(function (seg) {
+        if (seg === '' || seg === '.') return;
+        if (seg === '..') { if (parts.length) parts.pop(); } else parts.push(seg);
+      });
+      return parts.join('/');
+    }
+    function toPath(spec, from) {
+      var s = String(spec).replace(/[?#].*$/, '');
+      if (s.indexOf(base) === 0) return s.slice(base.length);
+      if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.indexOf('//') === 0) return null;
+      return norm(from || '', s);
+    }
+    function load(path) {
+      if (!Object.prototype.hasOwnProperty.call(mods, path)) return null;
+      if (cache[path]) return cache[path];
+      var exp = {};
+      return (cache[path] = Promise.resolve().then(function () {
+        return mods[path](exp, function (p) {
+          var l = load(p);
+          return l || Promise.reject(new Error('module not found: ' + p));
+        }, base + path, imp);
+      }).then(function () { return exp; }));
+    }
+    function imp(spec) {
+      var p = toPath(spec, '');
+      var l = p && load(p);
+      if (l) return l;
+      return import(String(spec));
+    }
+    return imp;
+  }
+
   function runEntries(br, ch) {
     var href = win.location.href;
     var isTop = (win.top === win);
@@ -1033,7 +1073,8 @@ function (CFG, ENTRIES) {
       if (!anyMatch(en.m, href) || anyMatch(en.x, href)) return;
       runWhen(en.at, function () {
         en.css.forEach(function (c) { try { insertCss(c); } catch (e) { cerr(e); } });
-        en.js.forEach(function (fn) { try { fn(br, ch); } catch (e) { cerr(e); } });
+        var imp = en.mods ? makeImporter(en.mods) : function (u) { return import(String(u)); };
+        en.js.forEach(function (fn) { try { fn(br, ch, imp); } catch (e) { cerr(e); } });
       });
     });
   }

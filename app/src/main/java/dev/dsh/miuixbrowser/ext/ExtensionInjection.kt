@@ -115,8 +115,15 @@ object ExtensionInjection {
             // 同一条 content_scripts 的多个 js 文件拼进同一个函数（用 `;` 隔开）：Chrome 里它们共享同一个全局，
             // 常见写法是 ["utils.js","main.js"]，main.js 直接用 utils.js 顶层声明的函数 / 变量，分开包会让后面的文件找不到。
             // 代价：前一个文件抛错会连累后面的；变量只在这条 content script 内可见，不会泄漏到页面全局。
-            val body = if (js.isEmpty()) "" else "function(browser,chrome){\n" + js.joinToString("\n;\n") + "\n}"
-            entry.append(",\"js\":[").append(body).append("]}")
+            // 动态 import(拓展内模块)会被页面 CSP 拦截（WebView 的隔离世界受页面 CSP 约束），
+            // 这里把引用到的模块内联进条目，import( 改写成 __mafariImport(，由 shim 在运行时取内联模块。
+            val bundled = if (js.isEmpty()) null else ContentModuleBundler.process(js.joinToString("\n;\n"), readText)
+            bundled?.warnings?.forEach { warnings.add(it) }
+            val body = if (bundled == null) "" else
+                "function(browser,chrome," + ContentModuleBundler.IMPORT_FN + "){\n" + bundled.rewrittenJs + "\n}"
+            entry.append(",\"js\":[").append(body).append(']')
+            bundled?.modulesJs?.let { entry.append(",\"mods\":").append(it) }
+            entry.append('}')
             val entryJson = entry.toString()
 
             // 旧路径：所有条目一起进同一个页面世界脚本

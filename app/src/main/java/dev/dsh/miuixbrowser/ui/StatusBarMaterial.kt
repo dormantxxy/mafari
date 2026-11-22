@@ -6,7 +6,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -53,9 +56,13 @@ internal fun StatusBarMaterialBand(
     )
     // 完全淡出后不再占用采样 / 着色器
     if (!visible && alpha < 0.01f) return
+    val density = LocalDensity.current
+    val statusInsets = WindowInsets.statusBars
+    // 状态栏那一条在整页采集层里是空的：以状态栏下沿为轴镜像，这一条采到的是网页最顶部；轴以下保持原位
+    val mirrored = remember(backdrop) { MirroredBackdrop(backdrop) { statusInsets.getTop(density).toFloat() } }
     Box(modifier = modifier.fillMaxSize()) {
         TopProgressiveBlurBand(
-            backdrop = backdrop,
+            backdrop = mirrored,
             alpha = { alpha },
             modifier = Modifier.matchParentSize(),
             // 栏高 = 状态栏本身；下沿只留一小段渐隐，不遮住太多网页顶部内容
@@ -67,10 +74,17 @@ internal fun StatusBarMaterialBand(
 }
 
 /**
- * 采样层「以 [pivotLocalY]=绘制区域顶边」做上下镜像：停靠底栏那一行里网页是空的（网页在栏上面结束），
- * 镜像后这一行采到的是紧贴在它上面的网页底部内容，并且在顶边与真实网页无缝衔接（平移则会在接缝处错位一整行）。
+ * 采样层镜像：停靠栏占的那一行里网页是空的，镜像后这一行采到的是紧贴在它旁边的网页内容，
+ * 并且在接缝处与真实网页无缝衔接（平移则会在接缝处错位一整行）。
+ *
+ * - [splitPx] == null：以绘制区域顶边（局部 y=0）为轴，整块镜像（底部那一行：采样紧贴在它上面的网页）。
+ * - [splitPx] != null：以局部 y=[splitPx] 为轴，只镜像它上方那一条（顶部状态栏：采样网页顶部），
+ *   轴以下保持原位采样（渐隐段本来就盖在网页上）。
  */
-internal class MirroredBackdrop(private val base: Backdrop) : Backdrop {
+internal class MirroredBackdrop(
+    private val base: Backdrop,
+    private val splitPx: (() -> Float)? = null,
+) : Backdrop {
     override val isCoordinatesDependent: Boolean get() = base.isCoordinatesDependent
     override val offsetResidualX: Float get() = base.offsetResidualX
     override val offsetResidualY: Float get() = base.offsetResidualY
@@ -82,8 +96,21 @@ internal class MirroredBackdrop(private val base: Backdrop) : Backdrop {
         layerBlock: (GraphicsLayerScope.() -> Unit)?,
         downscaleFactor: Float,
     ) {
-        // 以本绘制区域的顶边（局部 y=0）为轴翻转：局部 y=t 处画的是采样层里顶边上方 t 处的内容
-        withTransform({ scale(1f, -1f, pivot = Offset.Zero) }) {
+        val split = splitPx
+        if (split == null) {
+            withTransform({ scale(1f, -1f, pivot = Offset.Zero) }) {
+                with(base) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
+            }
+            return
+        }
+        // 降采样录制时，绘制坐标系已按 1/downscaleFactor 缩小，轴位置同比例缩小
+        val p = split() / downscaleFactor.coerceAtLeast(1f)
+        withTransform({ clipRect(top = 0f, bottom = p) }) {
+            withTransform({ scale(1f, -1f, pivot = Offset(0f, p)) }) {
+                with(base) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
+            }
+        }
+        withTransform({ clipRect(top = p, bottom = size.height) }) {
             with(base) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
         }
     }

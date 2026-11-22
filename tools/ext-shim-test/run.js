@@ -376,6 +376,20 @@ test('tabs.onHighlighted dispatches Chrome highlightInfo payload', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(env.sandbox.highlighted)), { tabIds: [7], windowId: 1 });
 });
 
+test('chrome.extension promise methods honour callback style (Dark Reader collectData awaits isAllowedFileSchemeAccess(cb))', async () => {
+  const env = makeEnv();
+  env.run(assemble(cfg({ page: true }), entry([`
+    window.__r = [];
+    chrome.extension.isAllowedFileSchemeAccess(function (v) { window.__r.push(['file', v]); });
+    chrome.extension.isAllowedIncognitoAccess(function (v) { window.__r.push(['incog', v]); });
+    browser.extension.isAllowedFileSchemeAccess().then(function (v) { window.__r.push(['promise', v]); });
+    window.__url = chrome.extension.getURL('a.html');
+  `])));
+  await tick(); await tick();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(env.sandbox.__r)).sort(), [['file', false], ['incog', false], ['promise', false]]);
+  assert.ok(String(env.sandbox.__url).endsWith('/a.html'));
+});
+
 test('runtime.onMessage: sync, return true + sendResponse, promise, and no listener', async () => {
   // 没有监听器
   let env = makeEnv();
@@ -383,11 +397,11 @@ test('runtime.onMessage: sync, return true + sendResponse, promise, and no liste
   env.native({ type: 'message', cid: 'c0', message: 'x' });
   assert.deepStrictEqual(env.posted[0].args, ['c0', null, { noReceiver: true }]);
 
-  // 监听器收到消息但没有回复：按 NO_RECEIVER 处理，不伪造成功的 undefined
+  // 监听器收到消息但没有回复：标记 noResponse（不是 noReceiver），由 broker 决定发送方 resolve undefined
   env = makeEnv();
   env.run(assemble(cfg(), entry(['browser.runtime.onMessage.addListener(function () { });'])));
   env.native({ type: 'message', cid: 'c1', message: 'x' });
-  assert.deepStrictEqual(env.posted[0].args, ['c1', null, { noReceiver: true }]);
+  assert.deepStrictEqual(env.posted[0].args, ['c1', null, { noResponse: true }]);
 
   // 同步 sendResponse：即使监听器没有 return true，也立即完成回复
   env = makeEnv();

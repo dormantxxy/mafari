@@ -173,12 +173,15 @@ function (CFG, ENTRIES) {
   function deliverMessage(m) {
     var listeners = (L['runtime.onMessage'] || []).slice();
     var done = false;
-    function reply(v, noReceiver) {
+    // opts: 'noReceiver' = 这个上下文根本没有 onMessage 监听器；'noResponse' = 有监听器但没有给出响应。
+    // 两者对发送方的结果不同（Firefox）：前者 reject「Receiving end does not exist」，后者 resolve undefined。
+    function reply(v, opt) {
       if (done) return;
       done = true;
-      rpc('runtime.reply', [m.cid, v === undefined ? null : v, noReceiver ? { noReceiver: true } : null]).catch(function () { });
+      var o = opt === 'noReceiver' ? { noReceiver: true } : opt === 'noResponse' ? { noResponse: true } : null;
+      rpc('runtime.reply', [m.cid, v === undefined ? null : v, o]).catch(function () { });
     }
-    if (!listeners.length) { reply(undefined, true); return; }
+    if (!listeners.length) { reply(undefined, 'noReceiver'); return; }
     var async = false;
     listeners.forEach(function (f) {
       var r;
@@ -186,9 +189,10 @@ function (CFG, ENTRIES) {
       if (r === true) async = true;
       else if (r && typeof r.then === 'function') { async = true; r.then(function (v) { reply(v); }, function () { reply(undefined); }); }
     });
-    // Chrome 的消息通道只有在监听器明确同步 sendResponse、返回 true 或返回 Promise 时才算得到响应。
-    // 单纯收到消息但没有响应，不应伪造一个成功的 undefined 回复。
-    if (!async && !done) reply(undefined, true);
+    // 监听器收到了消息但既没同步 sendResponse、也没返回 true / Promise：不是「没有接收端」。
+    // 交给 broker 汇总——所有目标都没响应时，发送方 resolve undefined（Firefox 语义），而不是 NO_RECEIVER。
+    // 这里不伪造成功回复：只要还有别的上下文给出真正的响应，那个响应优先。
+    if (!async && !done) reply(undefined, 'noResponse');
   }
 
   // runtime.connect / Port。Port 在 JS 侧同步返回；底层连接异步建立，建立前 postMessage 会排队。
@@ -936,7 +940,10 @@ function (CFG, ENTRIES) {
       onChanged: storage.onChanged
     },
     i18n: cbObj(i18n),
-    extension: ext,
+    // extension 里的 isAllowedFileSchemeAccess / isAllowedIncognitoAccess 是 promise 方法，Chrome 风格的调用方传回调
+    // （Dark Reader 的 collectData 就是 new Promise(r => chrome.extension.isAllowedFileSchemeAccess(r))）。
+    // 不过 cbObj 的话回调永远不被调用，等它的 Promise.all 会卡死，popup 空白。
+    extension: cbObj(ext),
     permissions: cbObj(permissions)
   };
   if (!CFG.offscreen && mafari) chrome['mafari'] = { userscripts: cbObj(mafari.userscripts) };
@@ -982,6 +989,69 @@ function (CFG, ENTRIES) {
   }
   if (CFG.page || CFG.tabId !== undefined && CFG.tabId !== null) {
     rpc('runtime.hello', []).catch(function () { });
+  }
+
+  // 拓展页里的跨域 fetch：Chrome / Firefox 里拓展凭 host 权限可以绕过 CORS，WebView 里这些页面只是普通网页，会被 CORS 拦下
+  // （例如后台页请求 api.xxx.com 的预检不过）。指向别的 origin 的 http(s) 请求转给原生（mafari.net.fetch）代发，
+  // 原生按拓展已获授权的 host 放行。没有权限 / 请求体类型不支持（FormData 等）/ 原生不可用时原样走原生 fetch，行为与改动前一致。
+  // 不带 cookie（等同 credentials: omit）；XMLHttpRequest 不在此列。
+  if (CFG.page && !MAIN && typeof win.fetch === 'function' && typeof win.Response === 'function') {
+    var pageNativeFetch = win.fetch;
+    var netB64 = function (buf) {
+      var u8 = new Uint8Array(buf), out = '', i;
+      for (i = 0; i < u8.length; i += 0x8000) out += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+      return win.btoa(out);
+    };
+    // 返回 Promise<{ bytes: ArrayBuffer|null, type: string|null }>；不支持的请求体类型 resolve(undefined) → 走原生 fetch
+    var netBody = function (b) {
+      if (b === undefined || b === null) return P.resolve({ bytes: null, type: null });
+      if (typeof b === 'string') return P.resolve({ bytes: new win.TextEncoder().encode(b).buffer, type: 'text/plain;charset=UTF-8' });
+      if (win.URLSearchParams && b instanceof win.URLSearchParams) return P.resolve({ bytes: new win.TextEncoder().encode(b.toString()).buffer, type: 'application/x-www-form-urlencoded;charset=UTF-8' });
+      if (b instanceof win.ArrayBuffer) return P.resolve({ bytes: b, type: null });
+      if (win.ArrayBuffer.isView && win.ArrayBuffer.isView(b)) return P.resolve({ bytes: b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), type: null });
+      if (win.Blob && b instanceof win.Blob) return b.arrayBuffer().then(function (bytes) { return { bytes: bytes, type: b.type || null }; });
+      return P.resolve(undefined);
+    };
+    win.fetch = function (input, init) {
+      var self = this, args = arguments;
+      var viaNative = function () { return pageNativeFetch.apply(self, args); };
+      var isReq = typeof win.Request === 'function' && input instanceof win.Request;
+      var abs;
+      try { abs = new U(isReq ? input.url : String(input), win.location && win.location.href); } catch (e) { return viaNative(); }
+      var proto = abs.protocol;
+      if ((proto !== 'http:' && proto !== 'https:') || abs.origin === CFG.origin || (win.location && abs.origin === win.location.origin)) return viaNative();
+      init = init || {};
+      var method = String(init.method || (isReq && input.method) || 'GET').toUpperCase();
+      var signal = init.signal || (isReq ? input.signal : null);
+      if (signal && signal.aborted) return P.reject(new win.DOMException('The operation was aborted.', 'AbortError'));
+      var headers = [];
+      try { new win.Headers(init.headers || (isReq ? input.headers : undefined)).forEach(function (v, k) { headers.push([k, v]); }); } catch (e) { return viaNative(); }
+      var bodySrc = init.body !== undefined ? P.resolve(init.body) : (isReq && method !== 'GET' && method !== 'HEAD' ? input.clone().arrayBuffer() : P.resolve(null));
+      var call = bodySrc.then(netBody).then(function (b) {
+        if (b === undefined) return { native: true };
+        if (b.type && !headers.some(function (h) { return h[0].toLowerCase() === 'content-type'; })) headers.push(['content-type', b.type]);
+        return rpc('mafari.net.fetch', [{
+          url: abs.href, method: method, headers: headers, redirect: init.redirect || (isReq && input.redirect) || 'follow',
+          bodyB64: b.bytes && b.bytes.byteLength ? netB64(b.bytes) : null
+        }]).then(function (r) { return { r: r }; }, function (e) {
+          var c = e && e.code;
+          if (c === 'DENIED_PERMISSION' || c === 'UNSUPPORTED' || c === 'UNKNOWN_API') return { native: true };
+          throw new TypeError(c === 'NETWORK' ? 'Failed to fetch' : 'Failed to fetch: ' + (e && e.message));
+        });
+      }).then(function (o) {
+        if (o.native) return viaNative();
+        var r = o.r, bin = win.atob(r.b64 || ''), bytes = new Uint8Array(bin.length), i;
+        for (i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        var resp = new win.Response(r.status === 204 || r.status === 205 || r.status === 304 ? null : bytes, { status: r.status, statusText: r.statusText || '', headers: r.headers || [] });
+        try { Object.defineProperty(resp, 'url', { value: r.url || abs.href }); } catch (e) { }
+        return resp;
+      });
+      if (!signal || typeof signal.addEventListener !== 'function') return call;
+      return new P(function (resolve, reject) {
+        signal.addEventListener('abort', function () { reject(new win.DOMException('The operation was aborted.', 'AbortError')); }, { once: true });
+        call.then(resolve, reject);
+      });
+    };
   }
 
   // ───────────── 匹配与执行 ─────────────

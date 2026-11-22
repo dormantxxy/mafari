@@ -64,6 +64,8 @@ class MessageBroker(
         val cids = HashSet<String>()
         var outstanding = 0
         var sealed = false
+        /** 至少有一个目标上下文装了 onMessage 监听器、但没有给出响应（Firefox：此时发送方 resolve undefined，而不是报错） */
+        var listened = false
     }
 
     /** One caller-side Port can be observed by every live extension page context. */
@@ -283,7 +285,7 @@ class MessageBroker(
         }
         synchronized(state) {
             state.sealed = true
-            if (state.outstanding == 0 && !state.result.isCompleted) state.result.completeExceptionally(noReceiver())
+            if (state.outstanding == 0 && !state.result.isCompleted) finishWithoutReply(state)
         }
         try {
             val reply = withTimeoutOrNull(timeoutMs) { state.result.await() }
@@ -300,11 +302,13 @@ class MessageBroker(
     }
 
     /** `runtime.reply`：页面把 onMessage 的结果送回来。[noReceiver] 表示该上下文没有监听器 */
-    fun reply(extId: String, cid: String, value: Any?, noReceiver: Boolean) {
+    fun reply(extId: String, cid: String, value: Any?, noReceiver: Boolean, noResponse: Boolean = false) {
         val state = pending[cid] ?: return
         if (state.extId != extId) return
-        if (noReceiver) {
-            settleWithoutReply(cid)
+        if (noResponse) log("ext $extId runtime.sendMessage: 目标页面有 onMessage 监听器但没有响应（没 sendResponse / 没 return true）")
+        if (noReceiver || noResponse) {
+            // noResponse：该上下文有监听器但没响应；noReceiver：该上下文根本没有监听器
+            settleWithoutReply(cid, hadListener = noResponse)
             return
         }
         if (pending.remove(cid) == null) return
@@ -313,15 +317,24 @@ class MessageBroker(
         state.result.complete(Reply(value))
     }
 
-    private fun settleWithoutReply(cid: String) {
+    private fun settleWithoutReply(cid: String, hadListener: Boolean = false) {
         val state = pending.remove(cid) ?: return
         pendingOwner.remove(cid)
         synchronized(state) {
+            if (hadListener) state.listened = true
             if (state.cids.remove(cid)) state.outstanding--
-            if (state.sealed && state.outstanding == 0 && !state.result.isCompleted) {
-                state.result.completeExceptionally(noReceiver())
-            }
+            if (state.sealed && state.outstanding == 0 && !state.result.isCompleted) finishWithoutReply(state)
         }
+    }
+
+    /**
+     * 所有目标都已表态且没人给出回复：
+     * - 有人装了监听器但没响应 → 和 Firefox 一样 resolve undefined（Tampermonkey 等的 fire-and-forget 消息依赖这一点）；
+     * - 没有任何监听器 / 送不到 → NO_RECEIVER。
+     */
+    private fun finishWithoutReply(state: Pending) {
+        if (state.listened) state.result.complete(Reply(null))
+        else state.result.completeExceptionally(noReceiver())
     }
 
     fun register(router: ApiRouter) {
@@ -330,7 +343,11 @@ class MessageBroker(
         router.register("runtime.reply") { ctx, a ->
             val cid = a.argOrNull(0) as? String ?: throw ApiException(ErrorCodes.BAD_REQUEST, "reply 需要 cid")
             val opts = a.argOrNull(2) as? JSONObject
-            reply(ctx.ext.spec.id, cid, a.argOrNull(1), opts?.optBoolean("noReceiver", false) == true)
+            reply(
+                ctx.ext.spec.id, cid, a.argOrNull(1),
+                noReceiver = opts?.optBoolean("noReceiver", false) == true,
+                noResponse = opts?.optBoolean("noResponse", false) == true,
+            )
             null
         }
     }

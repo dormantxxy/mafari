@@ -1,4 +1,11 @@
 # Changelog
+## [2.1.70]
+## WebView extensions: blank popups (Dark Reader / Tampermonkey)
+
+- **Dark Reader popup was blank.** `chrome.extension` in the page shim was the raw object, not wrapped by `cbObj`, so `chrome.extension.isAllowedFileSchemeAccess(cb)` / `isAllowedIncognitoAccess(cb)` never called their callback. Dark Reader's `collectData()` does `Promise.all([... new Promise(r => chrome.extension.isAllowedFileSchemeAccess(r)) ...])`, so on Firefox (port `getData`) the background never answered and the popup stayed empty. `chrome.extension` is now `cbObj(ext)`; promise-style `browser.extension.*` is unchanged.
+- **`runtime.sendMessage` no longer rejects with `NO_RECEIVER` when a listener exists but does not respond** (Firefox semantics: resolves `undefined`). Only "no listener at all / undeliverable" is `NO_RECEIVER`. The shim now replies `{noResponse:true}` (listener present, no answer) vs `{noReceiver:true}` (no listener); `MessageBroker` resolves `undefined` when every target finished without a real reply and at least one had a listener. A real reply from any context still wins. Tampermonkey's popup sends fire-and-forget messages and then reads data over a Port; the rejection surfaced as "unable to load tree".
+- Diagnostics: a `listener present but no response` line is logged for `noResponse` replies.
+- Tests: `ext-shim-test` (chrome.extension callback style, noResponse reply), `MessageBrokerTest.listenerWithoutResponseResolvesUndefinedNotNoReceiver`. Not compiled for Android here. Two shim tests (`windows.create` UNSUPPORTED, API wiring list) already failed in the uploaded tree and are unchanged.
 
 ## WebView adoption, part 2: incognito Profile, WebMessageListener bridges
 

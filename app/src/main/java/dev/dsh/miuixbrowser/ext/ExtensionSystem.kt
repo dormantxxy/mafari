@@ -130,6 +130,7 @@ class ExtensionSystem(
         OffscreenApi(pages).register(router)
         permissions.register(router)
         ClipboardApi(context.applicationContext).register(router)
+        NetApi().register(router)
         NotificationsApi(context.applicationContext, pages).register(router)
         BookmarksApi(context.applicationContext, pages).register(router)
         HistoryApi(historyStore).register(router)

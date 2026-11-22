@@ -20,7 +20,8 @@ internal object ContentModuleBundler {
     const val IMPORT_FN = "__mafariImport"
 
     private const val MAX_MODULES = 32
-    private const val MAX_TOTAL_BYTES = 4 * 1024 * 1024
+    // 单个文件上限由 fileReader 的 8MB 把关；这里是所有内联模块的总和。实测有拓展的 content_main.js 就超过 4MB。
+    private const val MAX_TOTAL_BYTES = 12 * 1024 * 1024
 
     private val JS_PATH = Regex("""^(?:\.{0,2}/)?(?:[\w@.\-]+/)*[\w@.\-]+\.m?js$""")
 
@@ -41,7 +42,7 @@ internal object ContentModuleBundler {
             val src = readText(path) ?: return
             total += src.length
             if (total > MAX_TOTAL_BYTES) {
-                warnings.add("内联模块超过 ${MAX_TOTAL_BYTES / 1024 / 1024}MB，已停止：$path")
+                warnings.add("内联模块总大小超过 ${MAX_TOTAL_BYTES / 1024 / 1024}MB，已跳过 $path（将回退到原生 import()，会被页面 CSP 拦截）")
                 return
             }
             mods[path] = "" // 先占位，防止循环依赖死循环

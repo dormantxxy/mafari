@@ -1,6 +1,6 @@
-From fc9ff60384dad6fbff2bfea26ef882902e8ce479 Mon Sep 17 00:00:00 2001
-From: mafari <mafari@local>
-Date: Wed, 18 Nov 2026 06:17:13 +0800
+From 29b06c27e6c9dd82e5344eab10c35b4dd03ff6f7 Mon Sep 17 00:00:00 2001
+From: x <a@b>
+Date: Mon, 23 Nov 2026 20:47:37 +0000
 Subject: [PATCH] =?UTF-8?q?glass:=20GlassBottomSheet/GlassDialog=20?=
  =?UTF-8?q?=E6=94=AF=E6=8C=81=20style=20/=20shading=20=E5=8F=82=E6=95=B0?=
  =?UTF-8?q?=EF=BC=8Cmaterial=20=E5=8F=AF=E4=B8=BA=20null?=
@@ -16,18 +16,18 @@ Content-Transfer-Encoding: 8bit
  4 files changed, 12 insertions(+), 6 deletions(-)
 
 diff --git a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheet.kt b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheet.kt
-index 6039d4b4..f75525fc 100644
+index 6fd46fd..a096a5d 100644
 --- a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheet.kt
 +++ b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheet.kt
-@@ -13,6 +13,7 @@ import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
- import top.yukonga.miuix.kmp.layout.BottomSheetSurfaceScope
+@@ -14,6 +14,7 @@ import top.yukonga.miuix.kmp.layout.BottomSheetSurfaceScope
+ import top.yukonga.miuix.kmp.layout.SheetMotion
  import top.yukonga.miuix.kmp.material.EdgeStroke
  import top.yukonga.miuix.kmp.material.GlassMaterial
 +import top.yukonga.miuix.kmp.material.GlassStyle
  import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
  
  /**
-@@ -68,9 +69,11 @@ fun GlassBottomSheet(
+@@ -71,9 +72,11 @@ fun GlassBottomSheet(
      outsideMargin: DpSize = BottomSheetDefaults.outsideMargin,
      insideMargin: DpSize = GlassBottomSheetDefaults.InsideMargin,
      dragHandleColor: Color = BottomSheetDefaults.dragHandleColor(),
@@ -40,17 +40,17 @@ index 6039d4b4..f75525fc 100644
      dimColor: Color = GlassBottomSheetDefaults.ScrimColor,
      surface: (@Composable BottomSheetSurfaceScope.() -> Modifier)? = null,
      onDismissFinished: (() -> Unit)? = null,
-@@ -96,7 +99,7 @@ fun GlassBottomSheet(
-         enableNestedScroll = enableNestedScroll,
+@@ -100,7 +103,7 @@ fun GlassBottomSheet(
          renderInRootScaffold = renderInRootScaffold,
          dimColor = dimColor,
+         motion = SheetMotion.Glass,
 -        surface = surface ?: glassBottomSheetSurface(backdrop, material, stroke, containerColor),
 +        surface = surface ?: glassBottomSheetSurface(backdrop, material, stroke, containerColor, shading, style),
          content = content,
      )
  }
 diff --git a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheetSurface.kt b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheetSurface.kt
-index c572c66d..e84391f8 100644
+index c572c66..e84391f 100644
 --- a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheetSurface.kt
 +++ b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheetSurface.kt
 @@ -79,7 +79,7 @@ object GlassBottomSheetDefaults {
@@ -63,7 +63,7 @@ index c572c66d..e84391f8 100644
      containerColor: Color = GlassBottomSheetDefaults.containerColor(),
      shading: Boolean = GlassSurfaceShading.enabled,
 diff --git a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDialog.kt b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDialog.kt
-index dfcca686..5523c0aa 100644
+index dfcca68..5523c0a 100644
 --- a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDialog.kt
 +++ b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDialog.kt
 @@ -13,6 +13,7 @@ import top.yukonga.miuix.kmp.layout.DialogDefaults
@@ -97,7 +97,7 @@ index dfcca686..5523c0aa 100644
      )
  }
 diff --git a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDialogSurface.kt b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDialogSurface.kt
-index 9c732efe..7e2441c6 100644
+index 9c732ef..7e2441c 100644
 --- a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDialogSurface.kt
 +++ b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDialogSurface.kt
 @@ -68,7 +68,7 @@ object GlassDialogDefaults {

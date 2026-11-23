@@ -1,6 +1,6 @@
-From 8703099e73b30ce8bde831dc0d61344a226c6f5a Mon Sep 17 00:00:00 2001
-From: Mafari <mafari@local>
-Date: Tue, 17 Nov 2026 19:43:31 +0000
+From 597f95cec4c41abf182d286bdc8214a8bfe918b7 Mon Sep 17 00:00:00 2001
+From: Mafari <a@b>
+Date: Mon, 23 Nov 2026 20:47:17 +0000
 Subject: [PATCH] =?UTF-8?q?glass:=20GlassBottomSheet=20=E5=A2=9E=E5=8A=A0?=
  =?UTF-8?q?=20surface=20=E5=8F=82=E6=95=B0?=
 MIME-Version: 1.0
@@ -12,7 +12,7 @@ Content-Transfer-Encoding: 8bit
  1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheet.kt b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheet.kt
-index 4676afa5..6039d4b4 100644
+index e2828d7..6fd46fd 100644
 --- a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheet.kt
 +++ b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassBottomSheet.kt
 @@ -10,6 +10,7 @@ import androidx.compose.ui.unit.Dp
@@ -20,10 +20,10 @@ index 4676afa5..6039d4b4 100644
  import top.yukonga.miuix.kmp.blur.Backdrop
  import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
 +import top.yukonga.miuix.kmp.layout.BottomSheetSurfaceScope
+ import top.yukonga.miuix.kmp.layout.SheetMotion
  import top.yukonga.miuix.kmp.material.EdgeStroke
  import top.yukonga.miuix.kmp.material.GlassMaterial
- import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
-@@ -44,6 +45,7 @@ import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
+@@ -47,6 +48,7 @@ import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
   * @param stroke Optional bloom stroke, omitted on the overscroll extension.
   * @param containerColor Opaque fallback fill.
   * @param dimColor Scrim color before the host applies animation progress.
@@ -31,7 +31,7 @@ index 4676afa5..6039d4b4 100644
   * @param onDismissFinished Called after the hide animation completes.
   * @param content Sheet content. Add scrolling, navigation-bar padding and extra spacing as needed.
   */
-@@ -70,6 +72,7 @@ fun GlassBottomSheet(
+@@ -73,6 +75,7 @@ fun GlassBottomSheet(
      stroke: EdgeStroke? = GlassBottomSheetDefaults.stroke(),
      containerColor: Color = GlassBottomSheetDefaults.containerColor(),
      dimColor: Color = GlassBottomSheetDefaults.ScrimColor,
@@ -39,10 +39,10 @@ index 4676afa5..6039d4b4 100644
      onDismissFinished: (() -> Unit)? = null,
      content: @Composable () -> Unit,
  ) {
-@@ -93,7 +96,7 @@ fun GlassBottomSheet(
-         enableNestedScroll = enableNestedScroll,
+@@ -97,7 +100,7 @@ fun GlassBottomSheet(
          renderInRootScaffold = renderInRootScaffold,
          dimColor = dimColor,
+         motion = SheetMotion.Glass,
 -        surface = glassBottomSheetSurface(backdrop, material, stroke, containerColor),
 +        surface = surface ?: glassBottomSheetSurface(backdrop, material, stroke, containerColor),
          content = content,

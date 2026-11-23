@@ -1,4 +1,4 @@
-From 42d9bb1a553503c2e28dcd59c5cc9fd4946cdae4 Mon Sep 17 00:00:00 2001
+From 2fdf608426fa08a48d0ff1cb257b04a51fae806c Mon Sep 17 00:00:00 2001
 From: Mafari <mafari@local>
 Date: Sun, 22 Nov 2026 20:50:43 +0000
 Subject: [PATCH] =?UTF-8?q?glass:=20=E5=BC=B9=E7=AA=97=20surface/alignStar?=
@@ -15,7 +15,7 @@ Content-Transfer-Encoding: 8bit
  3 files changed, 66 insertions(+), 8 deletions(-)
 
 diff --git a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDropdownPopup.kt b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDropdownPopup.kt
-index 8b399cb6..3fca00a3 100644
+index 8b399cb..3fca00a 100644
 --- a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDropdownPopup.kt
 +++ b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDropdownPopup.kt
 @@ -26,6 +26,7 @@ import androidx.compose.ui.unit.Dp
@@ -43,7 +43,7 @@ index 8b399cb6..3fca00a3 100644
          scrollable = true,
          content = content,
 diff --git a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDropdownPreference.kt b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDropdownPreference.kt
-index 4404487e..03677203 100644
+index 4404487..0367720 100644
 --- a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDropdownPreference.kt
 +++ b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassDropdownPreference.kt
 @@ -6,6 +6,7 @@ package top.yukonga.miuix.kmp.glass
@@ -95,7 +95,7 @@ index 4404487e..03677203 100644
                              hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
                              setExpanded(false)
 diff --git a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassPopup.kt b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassPopup.kt
-index 4f31edac..80c1d9e7 100644
+index 4f31eda..80c1d9e 100644
 --- a/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassPopup.kt
 +++ b/miuix-glass/src/commonMain/kotlin/top/yukonga/miuix/kmp/glass/GlassPopup.kt
 @@ -4,6 +4,10 @@

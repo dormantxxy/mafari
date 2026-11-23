@@ -65,14 +65,21 @@ internal fun StatusBarMaterialBand(
             alpha = { alpha },
             modifier = Modifier.matchParentSize(),
             // 不叠雾化色（拉伸取到的是不透明网页边缘色，叠色会在与网页的接缝处露出一条线）
-            // 渐隐整段收在状态栏里（下沿正好结束，与下面的真实网页无缝衔接），不再向下盖住网页内容
+            // 渐隐段比状态栏再向下延伸 StatusBarRampExtra：状态栏下沿与网页之间原本会露出一条没被模糊盖住的浅色分割块，
+            // 延伸出的这一段采样的是真实网页（轴以下保持原位采样），渐隐到清晰时与网页无缝衔接
             barHeight = 0.dp,
-            rampExtra = 0.dp,
+            rampExtra = StatusBarRampExtra,
             heightFactor = 1f,
             tint = Color.Unspecified,
         )
     }
 }
+
+/** 状态栏渐进模糊在状态栏下沿以下继续向下渐隐的高度，用来盖住状态栏与网页之间的分割白块 */
+private val StatusBarRampExtra = 18.dp
+
+/** 底部下沉背景比让位高度略向上多出的高度：顶边压在网页底边上，避免两者接缝处露出细分割线 */
+private val BottomBandOverlap = 2.dp
 
 /** 边缘拉伸倍数：停靠行只取紧贴它的网页边缘一小条（行高 / 倍数），纵向拉满整行 */
 private const val EdgeStretch = 24f
@@ -148,12 +155,14 @@ internal fun BottomBarProgressiveBand(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .layout { measurable, constraints ->
-                    val h = heightPx().coerceAtLeast(0)
+                    val h = heightPx().coerceAtLeast(0) + BottomBandOverlap.roundToPx()
                     val p = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
                     layout(constraints.maxWidth, h) { p.placeRelative(0, 0) }
                 }
                 .fillMaxWidth()
-                .graphicsLayer { this.alpha = alpha().coerceIn(0f, 1f) }
+                .graphicsLayer {
+                    this.alpha = alpha().coerceIn(0f, 1f)
+                }
                 .progressiveTextureBlur(
                     backdrop = mirrored,
                     shape = RectangleShape,

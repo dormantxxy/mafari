@@ -21,6 +21,10 @@ internal object WebViewNavigate {
         url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true)
 
     fun load(webView: WebView, url: String, headers: Map<String, String> = emptyMap(), replace: Boolean = false) {
+        // 地址栏 / 拓展手输的 file:// 同样只认本应用拷出的 HTML 副本，不让浏览器去读手机存储或应用私有数据
+        if (url.startsWith("file:", ignoreCase = true) &&
+            !dev.dsh.miuixbrowser.util.LocalHtml.isOpenedFileUrl(webView.context, url)
+        ) return
         if (isWebUrl(url) && isSupported()) {
             try {
                 val params = NavigationParameters.Builder()

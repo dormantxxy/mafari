@@ -102,6 +102,12 @@ class MainActivity : ComponentActivity() {
         if (intent?.action != Intent.ACTION_VIEW) return
         val data = intent.data ?: return
         val scheme = data.scheme?.lowercase() ?: return
+        // 「打开方式」里的 HTML 文件：HtmlOpenActivity 拷成本地副本后交过来。MainActivity 是导出的，
+        // 所以只认本应用拷出来的副本，其余 file:// 一律忽略；本地文件不受「链接打开方式」影响
+        if (scheme == "file") {
+            if (dev.dsh.miuixbrowser.util.LocalHtml.isOpenedFile(this, data)) incomingUrl.value = data.toString()
+            return
+        }
         if (scheme != "http" && scheme != "https") return
         // 桌面快捷方式（Gecko）：固定在应用内打开，不受「链接打开方式」影响
         if (intent.getBooleanExtra(ShortcutHelper.EXTRA_FROM_SHORTCUT, false)) {

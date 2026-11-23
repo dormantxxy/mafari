@@ -83,6 +83,46 @@
             </intent-filter>
         </activity>
 
+        <!-- 系统「打开方式」里的 HTML 文件：文件管理器 / 聊天 / 邮件等交来的 content:// 或 file:// 本地网页。
+             无界面：先把文件拷进应用私有目录再交给 MainActivity 打开（见 LocalHtml）。
+             不是 http(s) 链接，所以不影响「默认浏览器」的判定 -->
+        <activity
+            android:name=".HtmlOpenActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="${applicationId}.htmlopen"
+            android:theme="@style/Theme.MafariTranslucent">
+            <!-- 1) 系统给出了正确的 MIME -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="application/xhtml+xml" />
+            </intent-filter>
+            <!-- 2) 文件管理器没给 MIME（或给了 octet-stream / */*）：按扩展名匹配。
+                 文件名中间带点（a.b.html）时单个 .*\\. 匹配不稳，所以多写几档 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.html" />
+                <data android:pathPattern=".*\\..*\\.html" />
+                <data android:pathPattern=".*\\..*\\..*\\.html" />
+                <data android:pathPattern=".*\\.htm" />
+                <data android:pathPattern=".*\\..*\\.htm" />
+                <data android:pathPattern=".*\\..*\\..*\\.htm" />
+                <data android:pathPattern=".*\\.xhtml" />
+                <data android:pathPattern=".*\\..*\\.xhtml" />
+            </intent-filter>
+        </activity>
+
         <!-- 自定义标签页：叠在调用方任务里的轻量网页窗口（标准启动模式，不要 document 模式 / 独立任务） -->
         <activity
             android:name=".CustomTabActivity"

@@ -56,6 +56,7 @@ import dev.dsh.miuixbrowser.sync.fxa.FxaSync
 import dev.dsh.miuixbrowser.util.Diag
 import dev.dsh.miuixbrowser.util.ErrorPages
 import dev.dsh.miuixbrowser.util.ErrorSpec
+import dev.dsh.miuixbrowser.util.LocalHtml
 import dev.dsh.miuixbrowser.util.isSameSite
 import dev.dsh.miuixbrowser.util.isUserScriptUrl
 import dev.dsh.miuixbrowser.util.toUrl
@@ -185,6 +186,14 @@ internal fun BrowserTab.setupWebView() {
         javaScriptCanOpenWindowsAutomatically = true
         mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         cacheMode = WebSettings.LOAD_DEFAULT
+        // 「用 Mafari 打开 HTML 文件」要加载 file:// 副本（targetSdk ≥ 30 默认关）。具体放行范围由
+        // shouldInterceptRequest / shouldOverrideUrlLoading / WebViewNavigate 里的 LocalHtml 校验限定在副本目录内；
+        // file 页面读其他 file / 跨源（FromFileURLs）仍然明确关闭
+        allowFileAccess = true
+        @Suppress("DEPRECATION")
+        allowFileAccessFromFileURLs = false
+        @Suppress("DEPRECATION")
+        allowUniversalAccessFromFileURLs = false
         userAgentString = userAgentString.replace("; wv", "")
     }
     // 图标由应用自己的 FaviconLoader 取，不读 WebView 的图标：别让 WebView 每次导航再下载一遍
@@ -343,6 +352,10 @@ internal fun BrowserTab.setupWebView() {
         }
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            // file:// 只放行本应用拷出的 HTML 副本（含其子资源），其余一律 403
+            if (request.url.scheme.equals("file", ignoreCase = true) && !LocalHtml.isOpenedFile(appContext, request.url)) {
+                return WebResourceResponse("text/plain", "utf-8", 403, "Forbidden", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+            }
             val extensionBlocking = if (!incognito) appContext.appContainer.webExtensionsOrNull?.onWebRequestBefore(id, request) else null
             return extensionBlocking ?: webExtensionResource(request) ?:
             if (incognito && !adblockInIncognito) null
@@ -492,6 +505,7 @@ internal fun BrowserTab.setupWebView() {
                 view.loadUrl(target, extraRequestHeaders())
                 return true
             }
+            if (scheme == "file" && !LocalHtml.isOpenedFile(appContext, request.url)) return true
             return when (scheme) {
                 "http", "https", "file", "about", "data", "javascript" -> false
                 else -> {

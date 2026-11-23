@@ -568,6 +568,12 @@ class BrowserState(private val context: Context, initialUserAgent: String = "") 
         fromStartPage: Boolean = false,
     ) {
         if (target.isBlank()) return
+        // 本地文件（file://）没有主机名，不能按站点复用标签：空白标签直接用，否则新开一个
+        if (target.startsWith("file://", ignoreCase = true)) {
+            val cur = activeTab
+            if (cur.incognito == incognito && cur.url.isEmpty() && cur.isBlank) cur.load(target) else newTab(target, incognito)
+            return
+        }
         val idx = findSiteTab(target, incognito)
         if (idx >= 0) {
             val existing = tabs[idx]

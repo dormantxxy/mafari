@@ -1,5 +1,9 @@
 # Changelog
 ## [2.1.84-canary]
+- 新增：Mafari 出现在系统「打开方式」里，可以直接打开本地 HTML 文件（.html / .htm / .xhtml，来自文件管理器、聊天软件、邮件等的 content:// 或 file://）。新增无界面入口 HtmlOpenActivity：先把文件拷到应用私有目录 filesDir/opened_html（超过 7 天的旧副本自动清理，单文件上限 64MB），再在新标签里打开，所以标签恢复 / 重新加载不依赖原来的临时授权。注意：只拷这一个文件，页面里引用的同目录图片 / 样式等相对资源加载不到（单文件网页，如「另存为单个 HTML」，不受影响）。
+- 安全：WebView 开启 allowFileAccess 以加载本地副本，但 file:// 一律只放行 opened_html 目录内的副本（shouldInterceptRequest / shouldOverrideUrlLoading / 地址栏加载三处校验，其余 403 / 忽略），并明确关闭 allowFileAccessFromFileURLs / allowUniversalAccessFromFileURLs；导出的 MainActivity 同样只接收这个目录里的 file://，不会被其他应用拿来读私有数据。
+- 新增：液态玻璃也有「自定义材质参数」（设置 →「高级材质」选「液态玻璃」后出现）。提供 6 套模板（液态默认 / 清透 / 强折射 / 雾面 / 白亮 / 柔和）和自定义：模糊强度、折射宽度 / 强度、边缘高光、饱和度、亮度、叠色浓度滑条，以及景深折射、边缘色散、增强背景饱和度三个开关；拖动实时生效，松手保存。数值为各表面原有基准的倍率，「液态默认」与改造前外观一致；作用于弹出菜单、对话框、sheet、顶栏按钮 / 胶囊按钮、底栏和主页卡片（开关滑块不受影响）。
+- 调整：柔光玻璃与液态玻璃共用同一个参数弹窗（MaterialParamsSheet），GlassField / GlassPreset 抽成通用的 ParamField / ParamPreset / ParamToggle
 - 修复：网页态状态栏渐进模糊在上滑沉浸浏览时，顶部采样层随页面滚动不断变化，出现拉伸残影 / 闪烁。适用于除「固定在顶部」外的各导航栏样式（WebView；Gecko 不变）：
   - 页面自己带固定在顶部的整宽栏（新增 PageTopBar 检测，WebView 每 0.8 秒一次，带滞后）：上滑进入沉浸浏览时网页不再铺到状态栏下，状态栏区域保持原样。
   - 页面没有固定顶栏：上滑沉浸后，状态栏区域的渐进模糊改为直接采样下层网页（不镜像、不拉伸）；拉伸采样层快速淡出，不再在滚动中残留。

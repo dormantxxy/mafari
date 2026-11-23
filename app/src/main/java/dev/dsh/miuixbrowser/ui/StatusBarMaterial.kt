@@ -102,13 +102,16 @@ internal fun StatusBarMaterialBand(
 }
 
 /** 状态栏渐进模糊在状态栏下沿以下继续向下渐隐的高度，用来盖住状态栏与网页之间的分割白块 */
-private val StatusBarRampExtra = 17.2.dp
+private val StatusBarRampExtra = 16.5.dp
 
 /** 底部下沉背景比让位高度略向上多出的高度：顶边压在网页底边上，避免两者接缝处露出细分割线 */
 private val BottomBandOverlap = 2.dp
 
 /** 边缘拉伸倍数：停靠行只取紧贴它的网页边缘一小条（行高 / 倍数），纵向拉满整行 */
 private const val EdgeStretch = 24f
+
+/** 拉伸取样起点相对轴向网页内挪的像素数（采样空间；避开与透明留白相邻的那一行） */
+private const val EdgeSampleInset = 3f
 
 /**
  * 采样层「边缘拉伸」（翻转后纵向放大 [EdgeStretch] 倍）：停靠栏占的那一行里网页是空的，镜像后这一行采到的是紧贴在它旁边的网页内容，
@@ -146,7 +149,11 @@ internal class MirroredBackdrop(
         // 拉伸段多盖过轴 2px、真实网页段再从轴开始盖在它上面：两段裁剪边缘落在小数像素上时，
         // 接缝处那一行不会两边都没盖到而露出底下的白色（交界处的白条）
         withTransform({ clipRect(top = 0f, bottom = (p + 2f).coerceAtMost(size.height)) }) {
-            withTransform({ scale(1f, -EdgeStretch, pivot = Offset(0f, p)) }) {
+            // 取样起点比轴再往网页里挪 EdgeSampleInset：轴正下方那一行与上面留白（透明）相邻，双线性采样会把它们混在一起，
+            // 拉伸出来的近轴一段（约 EdgeStretch / 2 px 高）就变得半透明，透出底色形成一条发灰的雾带。
+            // 取样点落在 y = p + inset 处，仍让它映射到轴（y = p）：pivot = p + inset * k / (k + 1)
+            val pivotY = p + EdgeSampleInset * EdgeStretch / (EdgeStretch + 1f)
+            withTransform({ scale(1f, -EdgeStretch, pivot = Offset(0f, pivotY)) }) {
                 with(base) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
             }
         }

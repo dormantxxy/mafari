@@ -128,7 +128,7 @@ object MediaHost {
                             val pip = a.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
                             reply.send(
                                 fn, "r",
-                                JSONObject().put("api", 1).put("engine", engine).put("pip", pip).put("cast", true).put("ext", true).toString(),
+                                JSONObject().put("api", 1).put("engine", engine).put("pip", pip).put("cast", true).put("ext", true).put("dl", true).toString(),
                             )
                         }
                     }
@@ -184,6 +184,27 @@ object MediaHost {
                             true -> ok()
                             else -> fail("no_app")
                         }
+                    }
+                    "download" -> {
+                        // 悬浮播放器「下载视频」交给 App 下载器：普通文件按设置里选的下载器（内置 / 第三方）；
+                        // m3u8 由 App 自己取清单、下分片、合并（前台服务，离开页面也不中断）
+                        if (a == null) return@post fail("unsupported")
+                        val url = o.optString("url")
+                        if (!isHttp(url)) return@post fail("bad_url")
+                        val ctx = a.applicationContext
+                        val ua = o.optString("ua").takeIf { it.isNotBlank() }
+                        val referer = o.optString("referer").takeIf { it.isNotBlank() }
+                        val name = o.optString("name").ifBlank { "video.mp4" }
+                        val gecko = engine == "gecko"
+                        val hls = o.optString("type") == "hls"
+                        if (hls) {
+                            dev.dsh.miuixbrowser.download.Downloader.startHls(ctx, url, ua, name, referer, true, gecko)
+                        } else {
+                            dev.dsh.miuixbrowser.download.Downloader.start(
+                                ctx, url, ua, name, null, null, referer, true, gecko,
+                            )
+                        }
+                        ok(JSONObject().put("hls", hls))
                     }
                     "release" -> {
                         armed = false

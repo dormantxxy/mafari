@@ -80,7 +80,7 @@ object Downloader {
     private val jobs = ConcurrentHashMap<Long, Job>()
     private val numberFormat = DecimalFormat("0.0")
 
-    private lateinit var app: Context
+    internal lateinit var app: Context
     @Volatile
     private var inited = false
     private val persistLock = Any()
@@ -144,7 +144,7 @@ object Downloader {
     // ───────────────────────── 持久化 ─────────────────────────
 
     private fun rootDir(context: Context) = File(context.filesDir, "downloads")
-    private fun taskDir(context: Context, id: Long) = File(rootDir(context), id.toString())
+    internal fun taskDir(context: Context, id: Long) = File(rootDir(context), id.toString())
 
     /** 冷启动 / 通知按钮 / 任何入口第一次用到下载器时调用，幂等 */
     @Synchronized
@@ -245,7 +245,7 @@ object Downloader {
      * 库用 WAL + synchronous=NORMAL：断电最多丢最后几笔，丢的只会让进度退回到更早的值，
      * 而数据在写进度前已 fsync，所以续传仍然正确。
      */
-    private fun persist(id: Long) {
+    internal fun persist(id: Long) {
         if (!inited) return
         val task = tasks.firstOrNull { it.id == id } ?: return
         val seg = segSaved[id]
@@ -268,14 +268,14 @@ object Downloader {
         }
     }
 
-    private fun update(id: Long, transform: (DownloadTask) -> DownloadTask) {
+    internal fun update(id: Long, transform: (DownloadTask) -> DownloadTask) {
         synchronized(tasks) {
             val index = tasks.indexOfFirst { it.id == id }
             if (index >= 0) tasks[index] = transform(tasks[index])
         }
     }
 
-    private fun updateAndPersist(id: Long, transform: (DownloadTask) -> DownloadTask) {
+    internal fun updateAndPersist(id: Long, transform: (DownloadTask) -> DownloadTask) {
         update(id, transform)
         persist(id)
     }
@@ -333,6 +333,23 @@ object Downloader {
     ): Long = startInternal(
         context.applicationContext, url, userAgent, originalName(fileName), mimeType,
         null, referer, false, false,
+    )
+
+    /**
+     * m3u8 下载：始终走内置下载器（第三方下载器不会解析 HLS）。任务在前台服务里运行，离开页面 / 切到后台都不会中断。
+     * 用 mime 标记 HLS 任务（不改数据库结构）；合并完成后会改成 video/mp2t 或 video/mp4。
+     */
+    fun startHls(
+        context: Context,
+        url: String,
+        userAgent: String?,
+        fileName: String,
+        referer: String?,
+        withCookies: Boolean,
+        geckoCookies: Boolean,
+    ): Long = startInternal(
+        context.applicationContext, url, userAgent, fileName, HlsDownload.MIME_MARK,
+        null, referer, withCookies, geckoCookies,
     )
 
     fun startForUpdate(
@@ -481,6 +498,7 @@ object Downloader {
         val dir = taskDir(app, id)
         runCatching { File(dir, DATA_PART).delete() }
         runCatching { File(dir, DATA_SEG).delete() }
+        runCatching { File(dir, "hls").deleteRecursively() }
         segSaved.remove(id)
         updateAndPersist(id) {
             it.copy(bytes = 0, total = 0, etag = null, lastModified = null, segCount = 0, fetched = false)
@@ -500,8 +518,8 @@ object Downloader {
      * 手动跟随重定向：Cookie 按每一跳的地址重新取（和浏览器一致，不会把 A 站的 Cookie 带给 CDN），
      * Referer 全程保持为来源页。返回的连接已拿到响应码。
      */
-    private fun connect(task: DownloadTask, range: String?, ifRange: String?): HttpURLConnection {
-        var url = URL(task.url)
+    internal fun connect(task: DownloadTask, range: String?, ifRange: String?, urlOverride: String? = null): HttpURLConnection {
+        var url = URL(urlOverride ?: task.url)
         repeat(MAX_REDIRECTS + 1) {
             // 先取 Cookie：Gecko 的 UA 是取 Cookie 时顺带从后台页拿到的
             val cookie = if (task.withCookies) cookieFor(task, url.toString()) else null
@@ -537,7 +555,7 @@ object Downloader {
     }
 
     /** 协程取消（暂停 / 删除）时主动断开连接，否则阻塞中的 read 会一直占着线程继续写文件 */
-    private suspend fun <T> withConn(conn: HttpURLConnection, block: suspend () -> T): T = coroutineScope {
+    internal suspend fun <T> withConn(conn: HttpURLConnection, block: suspend () -> T): T = coroutineScope {
         val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
             suspendCancellableCoroutine<Unit> { cont ->
                 // 可能在主线程触发（pause），关 socket 要换线程
@@ -608,6 +626,13 @@ object Downloader {
                 return
             }
             throw RestartDownload(tr("临时文件已丢失，重新下载"))
+        }
+
+        // HLS（m3u8）：App 端取清单 → 并行下分片 → 合并成一个文件再入库；分片按序号落盘，暂停 / 失败后按已有分片续传
+        if (HlsDownload.isHls(task)) {
+            val merged = HlsDownload.run(id)
+            export(id, merged)
+            return
         }
 
         // 分段任务：按落盘的分段进度续传
@@ -712,7 +737,7 @@ object Downloader {
         }
     }
 
-    private fun markFetched(id: Long) = updateAndPersist(id) { it.copy(fetched = true, bytes = it.total) }
+    internal fun markFetched(id: Long) = updateAndPersist(id) { it.copy(fetched = true, bytes = it.total) }
 
     private suspend fun stream(id: Long, conn: HttpURLConnection, file: File, append: Boolean, existing: Long): Long {
         val name = tasks.firstOrNull { it.id == id }?.name ?: ""

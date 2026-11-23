@@ -115,6 +115,9 @@ class BrowserTab(
     var canGoForward by mutableStateOf(false)
     /** 页面自己带固定在底部的整宽栏（如 YouTube 的「首页 / 我」）：悬浮三段式据此决定是否让位。WebView 轮询检测，Gecko 由内容脚本回报 */
     var pageHasBottomBar by mutableStateOf(false)
+    /** 页面自己带固定在顶部的整宽栏：网页态状态栏沉浸据此决定收起时是否让网页铺到状态栏下。仅 WebView 轮询检测，见 PageTopBar.kt */
+    var pageHasTopBar by mutableStateOf(false)
+    internal var topBarMisses = 0
     var errorText by mutableStateOf<String?>(null)
     /** 应用当前深浅色：访问失败页按它配色 */
     @Volatile internal var displayDark = false
@@ -128,6 +131,10 @@ class BrowserTab(
     /** WebView：已在 onReceivedSslError 里自己渲染过证书错误页的地址与时间，避免随后的 onReceivedError 再渲染一次 */
     @Volatile internal var sslPageShownFor: String? = null
     @Volatile internal var sslPageShownAt = 0L
+
+    /** Cloudflare 等 CDN 的瞬时 5xx（空响应体）自动重试：记录正在重试的地址与已重试次数，页面成功加载后清零 */
+    internal var httpRetryUrl: String? = null
+    internal var httpRetryCount = 0
     /** Gecko：用户点了「继续」后，下一次对该地址的证书错误交给内核自带证书页（它自带「接受风险并继续」） */
     @Volatile private var geckoNativeCertFor: String? = null
     /** 标签卡片用的页面缩略图（页面加载完成后截取） */
@@ -174,7 +181,12 @@ class BrowserTab(
 
     /** 标签正显示主页：WebView 里的页面（若有）被盖住，页面侧回调不得再改写 url，否则主页会被页面「顶」出来 */
     internal var parked = false
-        internal set
+        internal set(value) {
+            if (field == value) return
+            field = value
+            // 页面被主页盖住期间（同一个标签、引擎仍存活）禁止播放媒体：回到页面前一律保持暂停
+            applyMediaBlock(value)
+        }
 
     var closed = false
     internal var destroyed = false
@@ -720,6 +732,21 @@ class BrowserTab(
         }
         if (isGecko) return
         runCatching { webViewOrNull?.evaluateJavascript(PAUSE_MEDIA_JS, null) }
+    }
+
+    /**
+     * 主页盖住页面时：暂停并拦住页面里的媒体（含之后页面脚本自己触发的播放）；页面还原 / 重新加载后解除。
+     * Gecko：onPlay 里补暂停；WebView：脚本暂停现有媒体 + 捕获阶段监听 play 事件。
+     */
+    private fun applyMediaBlock(block: Boolean) {
+        val g = geckoEngine
+        if (g != null) {
+            g.setMediaBlocked(block)
+            if (block) g.pauseMedia()
+            return
+        }
+        if (isGecko) return
+        runCatching { webViewOrNull?.evaluateJavascript(if (block) PARK_MEDIA_JS else UNPARK_MEDIA_JS, null) }
     }
 
     /** 最近一次作为当前标签（或被创建）的时间，uptime 毫秒；闲置时长 = now - 它 */
@@ -1523,6 +1550,8 @@ class BrowserTab(
     fun goHome() {
         // 已经在主页：不能再覆盖 savedUrl，否则被盖住的页面就丢了
         if (url.isEmpty()) return
+        // 页面被主页盖在下面（引擎仍存活）：切走就要暂停正在播放的媒体
+        pauseMedia()
         savedUrl = url
         fromHome = false
         parked = true
@@ -1559,6 +1588,7 @@ class BrowserTab(
         }
         if (atFirstPage) {
             engineStop()
+            pauseMedia()
             fromHome = false
             parked = true
             url = ""
@@ -1667,6 +1697,11 @@ class BrowserTab(
         /** 拓展晚加载后，前台已加载好的页面若有 content script 匹配，是否重新加载一次让拓展生效（关掉则只对之后的导航生效） */
         const val RELOAD_AFTER_LATE_EXT = true
 
+        private const val PARK_MEDIA_JS =
+            "(function(){try{window.__mfPark=true;if(!window.__mfParkL){window.__mfParkL=function(e){" +
+                "if(window.__mfPark){try{e.target.pause()}catch(x){}}};document.addEventListener('play',window.__mfParkL,true)}" +
+                "document.querySelectorAll('video,audio').forEach(function(m){try{if(!m.paused)m.pause()}catch(e){}})}catch(e){}})()"
+        private const val UNPARK_MEDIA_JS = "(function(){try{window.__mfPark=false}catch(e){}})()"
         private const val PAUSE_MEDIA_JS =
             "(function(){try{var p=function(d){d.querySelectorAll('video,audio').forEach(function(m){" +
                 "try{if(!m.paused)m.pause()}catch(e){}})};p(document);" +

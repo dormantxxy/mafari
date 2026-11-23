@@ -64,6 +64,14 @@ data class GlassParams(
             GlassField("玻璃体", "伽马", 0.7f, 1.5f, 0.01f, GlassFormat.F2, { it.colorPow }, { p, v -> p.copy(colorPow = v) }),
         )
 
+        /** 开关项（设置弹窗「材质」分组）。 */
+        val TOGGLES: List<ParamToggle<GlassParams>> = listOf(
+            ParamToggle<GlassParams>(
+                "材质", "叠加磨砂白色材质", "开启后玻璃更雾、更不透，背景模糊跟「背景模糊」滑条走",
+                { it.frostMaterial }, { p, v -> p.copy(frostMaterial = v) },
+            ),
+        )
+
         /** 解析 [encode] 的结果；个数不对 / 有非数字返回 null，每项都夹回合法范围。 */
         fun decode(s: String?): GlassParams? {
             val parts = s?.split(',') ?: return null
@@ -84,28 +92,8 @@ data class GlassParams(
     }
 }
 
-enum class GlassFormat { INT, F1, F2, DP3 }
-
-/** 一个可调参数：[group] / [name] 是简体中文键（界面里走 tr()），[min]..[max] 为滑条范围，[step] 为取整步长。 */
-class GlassField(
-    val group: String,
-    val name: String,
-    val min: Float,
-    val max: Float,
-    val step: Float,
-    val format: GlassFormat,
-    val get: (GlassParams) -> Float,
-    val set: (GlassParams, Float) -> GlassParams,
-) {
-    fun show(v: Float): String = when (format) {
-        GlassFormat.INT -> v.toInt().toString()
-        GlassFormat.F1 -> String.format(java.util.Locale.US, "%.1f", v)
-        GlassFormat.F2 -> String.format(java.util.Locale.US, "%.2f", v)
-        GlassFormat.DP3 -> String.format(java.util.Locale.US, "%.1fdp", v / 3f)
-    }
-}
-
-class GlassPreset(val name: String, val desc: String, val params: GlassParams)
+typealias GlassField = ParamField<GlassParams>
+typealias GlassPreset = ParamPreset<GlassParams>
 
 /**
  * 柔光玻璃模板。第 0 个是默认（miuix 默认 = 全部用上游自己的样式和材质，数值不生效）。

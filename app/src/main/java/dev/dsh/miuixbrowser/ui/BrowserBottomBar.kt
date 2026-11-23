@@ -151,6 +151,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur as backdropBlur
+import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import androidx.compose.animation.core.Animatable
@@ -237,15 +238,22 @@ internal fun Modifier.glassBar(
     val dark = isAppDarkTheme()
     if (liquid != null && blurEnabled && textureBlurEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         val liquidShape = RoundedCornerShape(corner)
+        val lp = LocalLiquidParams.current
         return this.drawBackdrop(
             backdrop = liquid,
             shape = { liquidShape },
             effects = {
-                vibrancy()
-                backdropBlur(1.5f.dp.toPx())
-                lens(18f.dp.toPx(), 40f.dp.toPx(), depthEffect = true, chromaticAberration = true)
+                if (lp.vibrancy) vibrancy()
+                if (lp.hasColorTweak) colorControls(brightness = lp.brightness, saturation = lp.saturation)
+                if (lp.hasBlur) backdropBlur(lp.blurDp(1.5f).dp.toPx())
+                if (lp.hasLens) {
+                    lens(
+                        lp.lensHeightDp(18f).dp.toPx(), lp.lensAmountDp(40f).dp.toPx(),
+                        depthEffect = lp.depthEffect, chromaticAberration = lp.chromaticAberration,
+                    )
+                }
             },
-            onDrawSurface = { drawRect(if (dark) Color.White.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.14f)) },
+            onDrawSurface = { drawRect(Color.White.copy(alpha = lp.tintAlpha(if (dark) 0.04f else 0.14f))) },
         )
     }
     val glassShape = GlassShape(corner)
@@ -307,14 +315,16 @@ internal fun Modifier.flatBarSurface(
         drawLine(color = lineColor, start = Offset(0f, y), end = Offset(size.width, y), strokeWidth = h)
     }
     if (liquid != null && blurEnabled && textureBlurEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val lp = LocalLiquidParams.current
         return this.drawBackdrop(
             backdrop = liquid,
             shape = { RectangleShape },
             effects = {
-                vibrancy()
-                backdropBlur(10f.dp.toPx())
+                if (lp.vibrancy) vibrancy()
+                if (lp.hasColorTweak) colorControls(brightness = lp.brightness, saturation = lp.saturation)
+                if (lp.hasBlur) backdropBlur(lp.blurDp(10f).dp.toPx())
             },
-            onDrawSurface = { drawRect(surfaceColor.copy(alpha = if (dark) 0.62f else 0.72f)) },
+            onDrawSurface = { drawRect(surfaceColor.copy(alpha = lp.tintAlpha(if (dark) 0.62f else 0.72f))) },
         ).then(divider)
     }
     val canUseGlass = blurEnabled && textureBlurEnabled && backdrop != null &&
@@ -384,6 +394,9 @@ internal fun BottomBar(
     /** 正显示原文：图标变灰；译文时是主题色 */
     translateOriginal: Boolean = false,
     onTranslateToggle: () -> Unit = {},
+    /** 当前搜索引擎：输入网址时地址栏最左侧显示它的图标，点击回报图标位置，由外层弹出引擎快捷切换菜单（null 则不显示） */
+    searchEngine: dev.dsh.miuixbrowser.data.SearchEngine? = null,
+    onEngineClick: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     /** 导航栏样式的尺寸参数（高度 / 圆角 / 按钮大小…）；默认是悬浮胶囊的尺寸 */
     metrics: BarMetrics = BarStyles.FloatingCapsule.metrics,
     /** false = 底板由外层通过 [BarStyle.surface] 画（停靠样式的底板要铺到状态栏 / 导航栏下面），这里只放按钮 */
@@ -479,6 +492,11 @@ internal fun BottomBar(
                     .padding(start = 6.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 输入中：最左侧是当前搜索引擎图标（此时阅读 / 脚本 / 下载 / 翻译图标都不显示），点击切换引擎
+                if (editing && searchEngine != null) {
+                    AddressEngineButton(engine = searchEngine, onClick = onEngineClick)
+                    Spacer(Modifier.width(6.dp))
+                }
                 // 阅读模式图标：地址栏最左侧（比加载小圆点还靠左）
                 if (showTranslate) {
                     // 翻译图标优先级最高（翻译 > 下载 > 阅读 > 脚本）：与它们同一位置、同一尺寸

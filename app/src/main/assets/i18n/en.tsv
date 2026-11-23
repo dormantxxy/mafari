@@ -197,6 +197,9 @@ Keystore 里的包裹密钥已丢失	The wrapping key in Keystore is missing
 本页数据已使用加密套件保护	Data on this page is protected by a cipher suite
 加密套件	Cipher suite
 （后量子混合）	 (post-quantum hybrid)
+（本机对称加密）	 (on-device symmetric)
+无非对称运算：256 位主密钥由 Android Keystore 保护；AES-256 对量子计算机同样安全	No asymmetric operations: the 256-bit master key is protected by Android Keystore; AES-256 is also secure against quantum computers
+该算法套件加密时需要密钥	This cipher suite needs its key to encrypt
 密钥派生	Key derivation
 数据加密	Data encryption
 密钥保护	Key protection
@@ -2143,3 +2146,27 @@ URL 预取	URL prefetch
 单击打开正在运行的拓展快捷菜单；长按进入「拓展」管理页	Tap to open the quick menu of running extensions; long-press to open the Extensions manager
 功能菜单	Feature menu
 打开拓展的快捷菜单	Open the extension's quick menu
+在 Mafari 中打开	Open in Mafari
+恢复默认（液态玻璃默认）	Reset to default (liquid glass default)
+效果	Effects
+模糊强度	Blur strength
+折射宽度	Refraction width
+折射强度	Refraction strength
+边缘高光	Edge highlight
+叠色浓度	Tint strength
+景深折射	Depth refraction
+折射带带景深，边缘更立体；关闭后折射更平	Adds depth to the refraction band for more dimensional edges; off makes refraction flatter
+边缘色散	Edge dispersion
+边缘出现细微彩边，更像真玻璃；关闭后更干净	Adds subtle color fringes at the edges, like real glass; off looks cleaner
+增强背景饱和度	Boost background saturation
+提亮背景色彩（Kyant vibrancy）；关闭后保持背景原色	Makes the background colors pop (Kyant vibrancy); off keeps the original colors
+液态默认	Liquid default
+Kyant 官方 catalog 的原味液态玻璃，各处保持原来的模糊、折射和叠色，下面的自定义参数回到初始值	The original liquid glass from the Kyant catalog: every surface keeps its own blur, refraction and tint, and the custom parameters return to their initial values
+模糊低、叠色淡，背景清楚，折射和边缘光比默认更明显	Low blur and light tint, clear background, with more visible refraction and rim light than the default
+强折射	Strong refraction
+几乎不模糊，折射又宽又强，边缘高光很重，最像一块厚玻璃；浅色图标压在花哨内容上要留意可读性	Almost no blur, wide and strong refraction and heavy edge highlights; looks like thick glass. Check icon legibility over busy content
+雾面	Frosted haze
+模糊高、叠色浓，折射收敛，文字可读性好	High blur and heavy tint with restrained refraction; good text legibility
+中高模糊，提亮并加浓白雾，整体明亮，边缘依然有玻璃感	Medium-high blur, brightened with a thicker white haze; bright overall while the edges still read as glass
+柔和	Soft
+折射很轻，无色散无景深，更稳更省眼，适合文字多的页面	Very light refraction, no dispersion or depth; calmer and easier on the eyes, good for text-heavy pages

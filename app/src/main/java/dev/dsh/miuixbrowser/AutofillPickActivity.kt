@@ -69,6 +69,7 @@ class AutofillPickActivity : ComponentActivity() {
                 CompositionLocalProvider(
                     LocalBlurMode provides settings.blurMode,
                     dev.dsh.miuixbrowser.ui.LocalGlassParams provides settings.glassParams,
+                    dev.dsh.miuixbrowser.ui.LocalLiquidParams provides settings.liquidParams,
                 ) {
                     val list = rows
                     if (list != null) {

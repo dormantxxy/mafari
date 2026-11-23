@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import kotlin.math.abs
@@ -96,6 +97,7 @@ fun LiquidGlassSurface(
     deformable: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    val lp = LocalLiquidParams.current
     val haptic = LocalHapticFeedback.current
     val animationScope = rememberCoroutineScope()
     val highlight = remember(animationScope) { InteractiveHighlight(animationScope = animationScope) }
@@ -133,9 +135,15 @@ fun LiquidGlassSurface(
                             backdrop = backdrop,
                             shape = { CircleShape },
                             effects = {
-                                vibrancy()
-                                blur(2f.dp.toPx())
-                                lens(12f.dp.toPx(), 24f.dp.toPx(), depthEffect = true, chromaticAberration = true)
+                                if (lp.vibrancy) vibrancy()
+                                if (lp.hasColorTweak) colorControls(brightness = lp.brightness, saturation = lp.saturation)
+                                if (lp.hasBlur) blur(lp.blurDp(2f).dp.toPx())
+                                if (lp.hasLens) {
+                                    lens(
+                                        lp.lensHeightDp(12f).dp.toPx(), lp.lensAmountDp(24f).dp.toPx(),
+                                        depthEffect = lp.depthEffect, chromaticAberration = lp.chromaticAberration,
+                                    )
+                                }
                             },
                             layerBlock = {
                                 liquidLayer()
@@ -147,7 +155,7 @@ fun LiquidGlassSurface(
                                     // 彩色按钮（主色 / 危险色）：叠色不透明度由 0.75 提到 0.92，降低通透度，字更清楚
                                     drawRect(tint.copy(alpha = COLORED_TINT_ALPHA))
                                 } else {
-                                    drawRect(tint.copy(alpha = tintAlpha))
+                                    drawRect(tint.copy(alpha = lp.tintAlpha(tintAlpha)))
                                 }
                             },
                         ),

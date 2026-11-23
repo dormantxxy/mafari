@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -68,7 +69,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 悬浮三段式导航栏（[BarStyles.SafariSplit]）：三块分开的玻璃件——左边圆形「后退」、中间地址栏胶囊、右边圆形「更多」。
  *
- * - 处于首页（[atHome]）时后退按钮置灰不可点；
+ * - 后退按钮是否可点只看 canGoBack（与默认底栏一致）：空白首页置灰；点主页按钮回到首页后页面仍被盖在下面，可点后退还原；
  * - 地址栏：点击 = 输入网址，长按 = 打开起始页（跟随「定制主页 → 自定义起始页」，带弹性缩放动画），左右滑动 = 切换标签页，上滑 = 打开标签页列表；
  * - 输入网址时两侧圆钮收起，地址栏占满整行。
  *
@@ -105,6 +106,8 @@ internal fun SafariSplitBar(
     translateVisible: Boolean,
     translateOriginal: Boolean,
     onTranslateToggle: () -> Unit,
+    searchEngine: dev.dsh.miuixbrowser.data.SearchEngine? = null,
+    onEngineClick: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onBack: () -> Unit,
     onMore: () -> Unit,
     onRefresh: () -> Unit,
@@ -114,6 +117,11 @@ internal fun SafariSplitBar(
     onSwitchTab: (Int) -> Unit,
     /** 上滑地址栏：打开标签页列表 */
     onOpenTabs: () -> Unit,
+    /** 右边圆钮的图标 / 无障碍描述（默认「更多」；自定义标签页用「在 Mafari 中打开」） */
+    endIcon: ImageVector = MiuixIcons.Glass.More,
+    endDescription: String = tr("更多"),
+    /** false：地址栏不响应拖动切换标签 / 上滑 / 长按起始页（自定义标签页没有这些操作） */
+    gesturesEnabled: Boolean = true,
 ) {
     // 三段式 ↔ 小胶囊是同一套布局的连续变形（不是两套界面交叉淡入淡出）：
     //   p: 0 = 三段式，1 = 小胶囊。后退 / 更多 两个圆钮宽度收到 0、淡出并缩小，
@@ -179,8 +187,9 @@ internal fun SafariSplitBar(
                     SafariCircleButton(
                         icon = MiuixIcons.Glass.Back,
                         description = tr("后退"),
-                        // 首页不可点；阅读模式中「后退」= 退出阅读模式，所以即使没有历史也可点
-                        enabled = !atHome && canGoBack,
+                        // 与默认底栏一致：是否可点只看 canGoBack——空白首页为 false；首页盖住了某个页面时为 true（点后退还原该页面）；
+                        // 阅读模式中「后退」= 退出阅读模式，所以即使没有历史也可点
+                        enabled = canGoBack,
                         size = metrics.buttonSize,
                         side = -1,
                         shift = pillShift,
@@ -222,16 +231,19 @@ internal fun SafariSplitBar(
                 translateVisible = translateVisible,
                 translateOriginal = translateOriginal,
                 onTranslateToggle = onTranslateToggle,
+                searchEngine = searchEngine,
+                onEngineClick = onEngineClick,
                 onRefresh = onRefresh,
                 onHome = onHome,
                 onSwitchTab = onSwitchTab,
                 onOpenTabs = onOpenTabs,
+                gesturesEnabled = gesturesEnabled,
             )
             if (!editing) {
                 CollapseSlot(progress = morph, gap = SafariGap, gapAtStart = true) {
                     SafariCircleButton(
-                        icon = MiuixIcons.Glass.More,
-                        description = tr("更多"),
+                        icon = endIcon,
+                        description = endDescription,
                         enabled = true,
                         size = metrics.buttonSize,
                         side = 1,
@@ -444,10 +456,13 @@ private fun SafariAddressPill(
     translateVisible: Boolean,
     translateOriginal: Boolean,
     onTranslateToggle: () -> Unit,
+    searchEngine: dev.dsh.miuixbrowser.data.SearchEngine? = null,
+    onEngineClick: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onRefresh: () -> Unit,
     onHome: () -> Unit,
     onSwitchTab: (Int) -> Unit,
     onOpenTabs: () -> Unit,
+    gesturesEnabled: Boolean = true,
 ) {
     val haptic = LocalHapticFeedback.current
     // 图标显示条件与原样式一致：翻译 > 下载 > 阅读 > 脚本，同占地址栏最左侧
@@ -522,8 +537,8 @@ private fun SafariAddressPill(
                 scaleY = pop.value
             }
             // 输入网址时不挂手势：横向拖动要留给输入框（移动光标 / 选词）
-            .pointerInput(editing, compact) {
-                if (editing || compact) return@pointerInput
+            .pointerInput(editing, compact, gesturesEnabled) {
+                if (editing || compact || !gesturesEnabled) return@pointerInput
                 val switchPx = 48.dp.toPx()
                 val openPx = 40.dp.toPx()
                 // 横向拖过切换阈值时「咔」一下：和圆钮的吸附 / 排斥配合，告诉手指松手就会切换
@@ -604,6 +619,10 @@ private fun SafariAddressPill(
                 }
             }
             if (editing) {
+                if (searchEngine != null) {
+                    AddressEngineButton(engine = searchEngine, onClick = onEngineClick)
+                    Spacer(Modifier.width(6.dp))
+                }
                 AddressField(
                     value = address,
                     onChange = onChange,
@@ -627,7 +646,7 @@ private fun SafariAddressPill(
                                 if (compact) onExpand() else onAddressTap()
                             },
                             onLongClick = {
-                                if (!compact) {
+                                if (!compact && gesturesEnabled) {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     playHomePop()
                                 }

@@ -29,8 +29,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import dev.dsh.miuixbrowser.data.AppSettings
-import dev.dsh.miuixbrowser.data.GlassField
+import dev.dsh.miuixbrowser.data.GlassParams
 import dev.dsh.miuixbrowser.data.GlassPresets
+import dev.dsh.miuixbrowser.data.LiquidParams
+import dev.dsh.miuixbrowser.data.LiquidPresets
+import dev.dsh.miuixbrowser.data.ParamField
+import dev.dsh.miuixbrowser.data.ParamPreset
+import dev.dsh.miuixbrowser.data.ParamToggle
 import dev.dsh.miuixbrowser.i18n.tr
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Icon
@@ -47,6 +52,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 fun glassParamsSummary(settings: AppSettings): String =
     GlassPresets.ALL.getOrNull(settings.glassPreset)?.let { tr(it.name) } ?: tr("自定义")
 
+fun liquidParamsSummary(settings: AppSettings): String =
+    LiquidPresets.ALL.getOrNull(settings.liquidPreset)?.let { tr(it.name) } ?: tr("自定义")
+
 /**
  * 柔光玻璃自定义材质参数：模板 + 全部可调参数滑条。
  * 滑条拖动实时生效（sheet 自己就是柔光玻璃，改参数时能直接看到变化），松手后才写入存储。
@@ -58,6 +66,71 @@ fun GlassParamsSheet(
     backdrop: Backdrop?,
     onDismissRequest: () -> Unit,
 ) {
+    MaterialParamsSheet(
+        show = show,
+        backdrop = backdrop,
+        onDismissRequest = onDismissRequest,
+        presets = GlassPresets.ALL,
+        fields = GlassParams.FIELDS,
+        toggles = GlassParams.TOGGLES,
+        presetIndex = { settings.glassPreset },
+        params = { settings.glassParams },
+        onApplyPreset = { settings.applyGlassPreset(it) },
+        onUpdate = { settings.updateGlassParams(it) },
+        onCommit = { settings.commitGlassParams() },
+        resetLabel = "恢复默认（miuix 默认）",
+        resetTo = GlassPresets.INDEX_UPSTREAM,
+    )
+}
+
+/**
+ * 液态玻璃自定义材质参数：与柔光玻璃共用同一个弹窗（[MaterialParamsSheet]），模板 / 滑条 / 开关换成液态玻璃的。
+ * 弹窗自己也是液态玻璃（设置页里的 sheet 走 LiquidGlassMaterial），拖滑条能直接看到变化。
+ */
+@Composable
+fun LiquidParamsSheet(
+    show: Boolean,
+    settings: AppSettings,
+    backdrop: Backdrop?,
+    onDismissRequest: () -> Unit,
+) {
+    MaterialParamsSheet(
+        show = show,
+        backdrop = backdrop,
+        onDismissRequest = onDismissRequest,
+        presets = LiquidPresets.ALL,
+        fields = LiquidParams.FIELDS,
+        toggles = LiquidParams.TOGGLES,
+        presetIndex = { settings.liquidPreset },
+        params = { settings.liquidParams },
+        onApplyPreset = { settings.applyLiquidPreset(it) },
+        onUpdate = { settings.updateLiquidParams(it) },
+        onCommit = { settings.commitLiquidParams() },
+        resetLabel = "恢复默认（液态玻璃默认）",
+        resetTo = LiquidPresets.INDEX_DEFAULT,
+    )
+}
+
+/**
+ * 通用「自定义材质参数」弹窗。[P] 是参数类型；读取参数一律走 lambda（[presetIndex] / [params]），
+ * 保证读状态发生在弹窗内容里，拖滑条时只重组需要的行。
+ */
+@Composable
+private fun <P> MaterialParamsSheet(
+    show: Boolean,
+    backdrop: Backdrop?,
+    onDismissRequest: () -> Unit,
+    presets: List<ParamPreset<P>>,
+    fields: List<ParamField<P>>,
+    toggles: List<ParamToggle<P>>,
+    presetIndex: () -> Int,
+    params: () -> P,
+    onApplyPreset: (Int) -> Unit,
+    onUpdate: (P) -> Unit,
+    onCommit: () -> Unit,
+    resetLabel: String,
+    resetTo: Int,
+) {
     AppBottomSheet(
         show = show,
         title = tr("自定义材质参数"),
@@ -68,7 +141,7 @@ fun GlassParamsSheet(
         val insets = LocalBottomSheetInsets.current
         val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.62f).dp
         // 选中「自定义」（或本来就是自定义参数）时展开参数；选模板时保持用户上次的展开状态
-        var customExpanded by remember { mutableStateOf(settings.glassPreset == -1) }
+        var customExpanded by remember { mutableStateOf(presetIndex() == -1) }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -78,18 +151,18 @@ fun GlassParamsSheet(
                 .padding(top = insets.top, bottom = insets.bottom + 28.dp),
         ) {
             GroupTitle(tr("模板"))
-            GlassPresets.ALL.forEachIndexed { index, preset ->
+            presets.forEachIndexed { index, preset ->
                 PresetRow(
                     title = tr(preset.name),
                     summary = tr(preset.desc),
-                    selected = settings.glassPreset == index,
-                    onClick = { settings.applyGlassPreset(index) },
+                    selected = presetIndex() == index,
+                    onClick = { onApplyPreset(index) },
                 )
             }
             PresetRow(
                 title = tr("自定义"),
                 summary = tr("手动调整模糊、折射、光影、色彩等全部参数"),
-                selected = settings.glassPreset == -1,
+                selected = presetIndex() == -1,
                 onClick = { customExpanded = !customExpanded },
                 trailing = if (customExpanded) tr("收起") else tr("展开"),
             )
@@ -100,47 +173,28 @@ fun GlassParamsSheet(
                 exit = shrinkVertically() + fadeOut(),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    GroupTitle(tr("材质"))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                settings.updateGlassParams(settings.glassParams.copy(frostMaterial = !settings.glassParams.frostMaterial))
-                                settings.commitGlassParams()
-                            }
-                            .padding(horizontal = ContentInset, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = tr("叠加磨砂白色材质"), style = MiuixTheme.textStyles.headline1, color = MiuixTheme.colorScheme.onSurface)
-                            Text(
-                                text = tr("开启后玻璃更雾、更不透，背景模糊跟「背景模糊」滑条走"),
-                                style = MiuixTheme.textStyles.body2,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
+                    var lastToggleGroup = ""
+                    toggles.forEach { toggle ->
+                        if (toggle.group != lastToggleGroup) {
+                            lastToggleGroup = toggle.group
+                            GroupTitle(tr(toggle.group))
                         }
-                        AppSwitch(
-                            checked = settings.glassParams.frostMaterial,
-                            onCheckedChange = {
-                                settings.updateGlassParams(settings.glassParams.copy(frostMaterial = it))
-                                settings.commitGlassParams()
-                            },
-                        )
+                        ToggleRow(toggle = toggle, params = params, onUpdate = onUpdate, onCommit = onCommit)
                     }
 
                     var lastGroup = ""
-                    GlassParamsFields.forEach { field ->
+                    fields.forEach { field ->
                         if (field.group != lastGroup) {
                             lastGroup = field.group
                             GroupTitle(tr(field.group))
                         }
-                        FieldSlider(field = field, settings = settings)
+                        FieldSlider(field = field, params = params, onUpdate = onUpdate, onCommit = onCommit)
                     }
 
                     Spacer(Modifier.height(8.dp))
                     TextButton(
-                        text = tr("恢复默认（miuix 默认）"),
-                        onClick = { settings.applyGlassPreset(0) },
+                        text = tr(resetLabel),
+                        onClick = { onApplyPreset(resetTo) },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = ContentInset),
                     )
                 }
@@ -157,8 +211,6 @@ private val ContentInset = 20.dp
 private fun GroupTitle(text: String) {
     SmallTitle(text = text, insideMargin = PaddingValues(horizontal = ContentInset, vertical = 8.dp))
 }
-
-private val GlassParamsFields: List<GlassField> get() = dev.dsh.miuixbrowser.data.GlassParams.FIELDS
 
 @Composable
 private fun PresetRow(title: String, summary: String, selected: Boolean, onClick: () -> Unit, trailing: String? = null) {
@@ -194,8 +246,49 @@ private fun PresetRow(title: String, summary: String, selected: Boolean, onClick
 }
 
 @Composable
-private fun FieldSlider(field: GlassField, settings: AppSettings) {
-    val value = field.get(settings.glassParams).coerceIn(field.min, field.max)
+private fun <P> ToggleRow(
+    toggle: ParamToggle<P>,
+    params: () -> P,
+    onUpdate: (P) -> Unit,
+    onCommit: () -> Unit,
+) {
+    val checked = toggle.get(params())
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                onUpdate(toggle.set(params(), !checked))
+                onCommit()
+            }
+            .padding(horizontal = ContentInset, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = tr(toggle.name), style = MiuixTheme.textStyles.headline1, color = MiuixTheme.colorScheme.onSurface)
+            Text(
+                text = tr(toggle.summary),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+        AppSwitch(
+            checked = checked,
+            onCheckedChange = {
+                onUpdate(toggle.set(params(), it))
+                onCommit()
+            },
+        )
+    }
+}
+
+@Composable
+private fun <P> FieldSlider(
+    field: ParamField<P>,
+    params: () -> P,
+    onUpdate: (P) -> Unit,
+    onCommit: () -> Unit,
+) {
+    val value = field.get(params()).coerceIn(field.min, field.max)
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = ContentInset, vertical = 4.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(text = tr(field.name), style = MiuixTheme.textStyles.headline1, color = MiuixTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
@@ -205,11 +298,11 @@ private fun FieldSlider(field: GlassField, settings: AppSettings) {
             value = value,
             onValueChange = { raw ->
                 val snapped = ((raw / field.step).roundToInt() * field.step).coerceIn(field.min, field.max)
-                if (snapped != field.get(settings.glassParams)) {
-                    settings.updateGlassParams(field.set(settings.glassParams, snapped))
+                if (snapped != field.get(params())) {
+                    onUpdate(field.set(params(), snapped))
                 }
             },
-            onValueChangeFinished = { settings.commitGlassParams() },
+            onValueChangeFinished = onCommit,
             valueRange = field.min..field.max,
         )
     }

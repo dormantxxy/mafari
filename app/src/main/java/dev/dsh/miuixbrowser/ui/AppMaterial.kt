@@ -291,14 +291,16 @@ private fun rememberOverlayContent(
     val liquidBackdrop = LocalLiquidBackdrop.current
     val mode = LocalBlurMode.current
     val glassParams = LocalGlassParams.current
+    val liquidParams = LocalLiquidParams.current
     val latest by rememberUpdatedState(content)
-    return remember(liquidBackdrop, mode, glassParams, immersive, sheetContentPadding, padInsets, sheetBackdrop, sheetScrim, fadeContent) {
+    return remember(liquidBackdrop, mode, glassParams, liquidParams, immersive, sheetContentPadding, padInsets, sheetBackdrop, sheetScrim, fadeContent) {
         val bandBase = SheetBandBase(sheetBackdrop, sheetScrim)
         val wrapped: @Composable () -> Unit = {
             CompositionLocalProvider(
                 LocalLiquidBackdrop provides liquidBackdrop,
                 LocalBlurMode provides mode,
                 LocalGlassParams provides glassParams,
+                LocalLiquidParams provides liquidParams,
                 LocalSheetBandBase provides bandBase,
             ) {
                 if (immersive) SheetImmersiveBody(sheetContentPadding, padInsets, fadeContent) { latest() } else latest()
@@ -734,7 +736,7 @@ open class MiuixGlassMaterialBase(private val sampling: Boolean) : AppMaterial {
             anchorBounds = anchorBounds,
             backdrop = bd(backdrop),
             modifier = modifier,
-            alignStart = alignStart,
+            horizontalAlignment = if (alignStart) androidx.compose.ui.Alignment.Start else androidx.compose.ui.Alignment.End,
             visuals = visuals,
             sizing = sizing,
             contentPadding = contentPadding,
@@ -1043,11 +1045,12 @@ fun BoxScope.AppGlassPopup(
     val liquidBackdrop = LocalLiquidBackdrop.current
     val mode = LocalBlurMode.current
     val glassParams = LocalGlassParams.current
+    val liquidParams = LocalLiquidParams.current
     with(m) {
         PopupHost(
             show, onDismissRequest, anchorBounds, backdrop, modifier, alignStart,
             content = {
-                CompositionLocalProvider(LocalLiquidBackdrop provides liquidBackdrop, LocalBlurMode provides mode, LocalGlassParams provides glassParams) {
+                CompositionLocalProvider(LocalLiquidBackdrop provides liquidBackdrop, LocalBlurMode provides mode, LocalGlassParams provides glassParams, LocalLiquidParams provides liquidParams) {
                     content()
                 }
             },

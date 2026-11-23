@@ -170,6 +170,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur as backdropBlur
+import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import androidx.compose.animation.core.Animatable
@@ -844,40 +845,55 @@ internal fun Modifier.homeGlass(
     val preBlurred = LocalWallpaperPreBlurred.current
     // liquid glass 模式：用 Kyant 液态玻璃从未模糊的壁纸取样
     if (liquid != null && blurEnabled) {
+        val lp = LocalLiquidParams.current
+        // 深色：折射 / 高光更重、叠「上亮下暗」渐变；浅色保持原样。数值是该表面原来的基准，再乘参数倍率。
+        val blurBase = if (dark) 5f else 2f
+        val lensH = if (dark) 26f else 16f
+        val lensA = if (dark) 60f else 36f
         if (dark) {
-            // 深色模式：背景本身暗，折射 / 高光不明显，卡片显得发平。加大模糊与折射、加宽边缘高光，
-            // 再用「上亮下暗」的叠色做出厚度，增加玻璃深度；浅色模式保持原样。
             return this.drawBackdrop(
                 backdrop = liquid,
                 shape = { shape },
                 effects = {
-                    vibrancy()
-                    if (!preBlurred) backdropBlur(5f.dp.toPx())
-                    lens(26f.dp.toPx(), 60f.dp.toPx(), depthEffect = true, chromaticAberration = true)
+                    if (lp.vibrancy) vibrancy()
+                    if (lp.hasColorTweak) colorControls(brightness = lp.brightness, saturation = lp.saturation)
+                    if (!preBlurred && lp.hasBlur) backdropBlur(lp.blurDp(blurBase).dp.toPx())
+                    if (lp.hasLens) {
+                        lens(
+                            lp.lensHeightDp(lensH).dp.toPx(), lp.lensAmountDp(lensA).dp.toPx(),
+                            depthEffect = lp.depthEffect, chromaticAberration = lp.chromaticAberration,
+                        )
+                    }
                 },
-                highlight = {
-                    com.kyant.backdrop.highlight.Highlight.Plain.copy(
-                        width = com.kyant.backdrop.highlight.Highlight.Plain.width * 1.5f,
-                    )
-                },
+                highlight = { liquidHighlight(lp, 1.5f) },
                 onDrawSurface = {
                     drawRect(
                         Brush.verticalGradient(
-                            listOf(Color.White.copy(alpha = 0.09f), Color.Black.copy(alpha = 0.16f)),
+                            listOf(
+                                Color.White.copy(alpha = lp.tintAlpha(0.09f)),
+                                Color.Black.copy(alpha = lp.tintAlpha(0.16f)),
+                            ),
                         ),
                     )
                 },
             )
         }
+        // 浅色：不显式传 highlight（沿用库默认），与改造前一致
         return this.drawBackdrop(
             backdrop = liquid,
             shape = { shape },
             effects = {
-                vibrancy()
-                if (!preBlurred) backdropBlur(2f.dp.toPx())
-                lens(16f.dp.toPx(), 36f.dp.toPx(), depthEffect = true, chromaticAberration = true)
+                if (lp.vibrancy) vibrancy()
+                if (lp.hasColorTweak) colorControls(brightness = lp.brightness, saturation = lp.saturation)
+                if (!preBlurred && lp.hasBlur) backdropBlur(lp.blurDp(blurBase).dp.toPx())
+                if (lp.hasLens) {
+                    lens(
+                        lp.lensHeightDp(lensH).dp.toPx(), lp.lensAmountDp(lensA).dp.toPx(),
+                        depthEffect = lp.depthEffect, chromaticAberration = lp.chromaticAberration,
+                    )
+                }
             },
-            onDrawSurface = { drawRect(Color.White.copy(alpha = 0.12f)) },
+            onDrawSurface = { drawRect(Color.White.copy(alpha = lp.tintAlpha(0.12f))) },
         )
     }
     // 取巧路径：壁纸已是缓存里的预模糊图时，直接把小图贴成卡片底，不录制壁纸层、不跑玻璃 shader

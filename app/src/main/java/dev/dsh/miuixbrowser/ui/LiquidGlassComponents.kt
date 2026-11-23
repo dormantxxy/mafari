@@ -3,6 +3,7 @@ package dev.dsh.miuixbrowser.ui
 import dev.dsh.miuixbrowser.i18n.tr
 
 import dev.dsh.miuixbrowser.data.BLUR_LIQUID
+import dev.dsh.miuixbrowser.data.LiquidParams
 import dev.dsh.miuixbrowser.data.BLUR_MIUIX
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -121,8 +122,8 @@ internal fun activeLiquidBackdrop(miuixBackdrop: Backdrop?): LiquidBackdrop? =
 private fun demoContainerColor(dark: Boolean): Color =
     if (dark) Color(0xFF121212).copy(alpha = 0.4f) else Color(0xFFFAFAFA).copy(alpha = 0.6f)
 
-/** 弹窗 / 菜单 / sheet 的边缘高光：比默认的 Plain 略宽，配合更强的折射让边缘玻璃感更明显。 */
-private fun edgeHighlight(): Highlight = Highlight.Plain.copy(width = Highlight.Plain.width * 1.4f)
+/** 弹窗 / 菜单 / sheet 的边缘高光：比默认的 Plain 略宽（×1.4），再乘参数里的高光倍率。 */
+private fun edgeHighlight(p: LiquidParams): Highlight = liquidHighlight(p, 1.4f)
 
 /** 液态玻璃面板（下拉菜单 / 弹出菜单）：与 catalog 的玻璃卡片一致——vibrancy + 模糊 + 折射 + 纯白高光。 */
 @Composable
@@ -133,16 +134,23 @@ private fun Modifier.liquidPanel(
     refractionHeight: Dp = 22.dp,
     refractionAmount: Dp = 52.dp,
 ): Modifier {
-    val container = demoContainerColor(isAppDarkTheme())
+    val p = LocalLiquidParams.current
+    val container = demoContainerColor(isAppDarkTheme()).liquidTint(p)
     return this.drawBackdrop(
         backdrop = backdrop,
         shape = { shape },
         effects = {
-            vibrancy()
-            backdropBlur(blur.toPx())
-            lens(refractionHeight.toPx(), refractionAmount.toPx(), depthEffect = true, chromaticAberration = true)
+            if (p.vibrancy) vibrancy()
+            if (p.hasColorTweak) colorControls(brightness = p.brightness, saturation = p.saturation)
+            if (p.hasBlur) backdropBlur(p.blurDp(blur.value).dp.toPx())
+            if (p.hasLens) {
+                lens(
+                    p.lensHeightDp(refractionHeight.value).dp.toPx(), p.lensAmountDp(refractionAmount.value).dp.toPx(),
+                    depthEffect = p.depthEffect, chromaticAberration = p.chromaticAberration,
+                )
+            }
         },
-        highlight = { edgeHighlight() },
+        highlight = { edgeHighlight(p) },
         onDrawSurface = { drawRect(container) },
     )
 }
@@ -168,7 +176,8 @@ object LiquidGlassMaterial : AppMaterial {
         }
         val containerColor = GlassDialogDefaults.containerColor()
         val dark = isAppDarkTheme()
-        val panelColor = demoContainerColor(dark)
+        val lp = LocalLiquidParams.current
+        val panelColor = demoContainerColor(dark).liquidTint(lp)
         GlassDialog(
             onDismissRequest = onDismissRequest,
             show = show,
@@ -188,14 +197,20 @@ object LiquidGlassMaterial : AppMaterial {
                     shape = { shape },
                     // 对话框：提亮 + 加饱和 + 模糊 + 带深度的折射 + 边缘高光
                     effects = {
+                        // 原写法 colorControls(亮度 0.2/0, 饱和度 1.5)；开关 vibrancy 关闭时不加饱和度，只留亮度
                         colorControls(
-                            brightness = if (dark) 0f else 0.2f,
-                            saturation = 1.5f,
+                            brightness = (if (dark) 0f else 0.2f) + lp.brightness,
+                            saturation = (if (lp.vibrancy) 1.5f else 1f) * lp.saturation,
                         )
-                        backdropBlur(if (dark) 4f.dp.toPx() else 9f.dp.toPx())
-                        lens(32f.dp.toPx(), 68f.dp.toPx(), depthEffect = true, chromaticAberration = true)
+                        if (lp.hasBlur) backdropBlur(lp.blurDp(if (dark) 4f else 9f).dp.toPx())
+                        if (lp.hasLens) {
+                            lens(
+                                lp.lensHeightDp(32f).dp.toPx(), lp.lensAmountDp(68f).dp.toPx(),
+                                depthEffect = lp.depthEffect, chromaticAberration = lp.chromaticAberration,
+                            )
+                        }
                     },
-                    highlight = { edgeHighlight() },
+                    highlight = { edgeHighlight(lp) },
                     onDrawSurface = {
                         drawRect(scrim.value)
                         drawRect(panelColor)
@@ -220,7 +235,8 @@ object LiquidGlassMaterial : AppMaterial {
             )
             return
         }
-        val panelColor = demoContainerColor(isAppDarkTheme())
+        val lp = LocalLiquidParams.current
+        val panelColor = demoContainerColor(isAppDarkTheme()).liquidTint(lp)
         GlassBottomSheet(
             onDismissRequest = onDismissRequest,
             show = show,
@@ -248,11 +264,17 @@ object LiquidGlassMaterial : AppMaterial {
                     backdrop = liquid,
                     shape = { shape },
                     effects = {
-                        vibrancy()
-                        backdropBlur(4f.dp.toPx())
-                        if (!isOverscroll) lens(24f.dp.toPx(), 52f.dp.toPx(), depthEffect = true, chromaticAberration = true)
+                        if (lp.vibrancy) vibrancy()
+                        if (lp.hasColorTweak) colorControls(brightness = lp.brightness, saturation = lp.saturation)
+                        if (lp.hasBlur) backdropBlur(lp.blurDp(4f).dp.toPx())
+                        if (!isOverscroll && lp.hasLens) {
+                            lens(
+                                lp.lensHeightDp(24f).dp.toPx(), lp.lensAmountDp(52f).dp.toPx(),
+                                depthEffect = lp.depthEffect, chromaticAberration = lp.chromaticAberration,
+                            )
+                        }
                     },
-                    highlight = { edgeHighlight() },
+                    highlight = { edgeHighlight(lp) },
                     onDrawSurface = {
                         drawRect(scrim.value)
                         drawRect(panelColor)
@@ -277,7 +299,7 @@ object LiquidGlassMaterial : AppMaterial {
             anchorBounds = anchorBounds,
             backdrop = backdrop,
             modifier = modifier,
-            alignStart = alignStart,
+            horizontalAlignment = if (alignStart) androidx.compose.ui.Alignment.Start else androidx.compose.ui.Alignment.End,
             sizing = sizing,
             contentPadding = contentPadding,
             surface = liquid?.let { liquidPopupSurface(it) },

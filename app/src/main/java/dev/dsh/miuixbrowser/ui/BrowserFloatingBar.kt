@@ -446,6 +446,8 @@ internal fun BoxScope.BrowserFloatingBar(
                 translateVisible = tab.translate.iconVisible,
                 translateOriginal = tab.translate.showingOriginal,
                 onTranslateToggle = { tab.translate.toggleOriginal() },
+                searchEngine = settings.allSearchEngines.getOrNull(settings.searchIndex),
+                onEngineClick = { ui.engineMenuAnchor = it; ui.engineMenuShow = !ui.engineMenuShow },
                 onBack = { tab.goBack() },
                 onMore = { sheet = Sheet.Menu },
                 onRefresh = { tab.reload() },
@@ -524,6 +526,8 @@ internal fun BoxScope.BrowserFloatingBar(
             translateVisible = tab.translate.iconVisible,
             translateOriginal = tab.translate.showingOriginal,
             onTranslateToggle = { tab.translate.toggleOriginal() },
+            searchEngine = settings.allSearchEngines.getOrNull(settings.searchIndex),
+            onEngineClick = { ui.engineMenuAnchor = it; ui.engineMenuShow = !ui.engineMenuShow },
             onShare = {
                 if (tab.url.isNotBlank()) {
                     runCatching {

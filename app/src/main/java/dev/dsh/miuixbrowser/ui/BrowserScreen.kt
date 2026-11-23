@@ -16,6 +16,7 @@ import dev.dsh.miuixbrowser.browser.DefaultBrowser
 import dev.dsh.miuixbrowser.browser.MenuAction
 import dev.dsh.miuixbrowser.browser.MenuOrderStore
 import dev.dsh.miuixbrowser.browser.pollPageBottomBar
+import dev.dsh.miuixbrowser.browser.pollPageTopBar
 import dev.dsh.miuixbrowser.data.AppSettings
 import dev.dsh.miuixbrowser.data.BAR_POS_FIXED_BOTTOM
 import dev.dsh.miuixbrowser.data.BAR_POS_FIXED_TOP
@@ -73,6 +74,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -480,7 +482,24 @@ fun BrowserScreen(
     val topReserved = statusBarHeight + dockedTopBody
     // 悬浮三段式：栏不隐藏（barHidden 恒为 false），而是缩成小胶囊（barCompact，阈值与自动隐藏一致）；
     // 缩小时与默认导航栏样式的「沉浸浏览」一致：顶部状态栏留白随滑动收起，网页铺到屏幕顶，上滑展开后恢复
-    val topInsetCollapsed = barHidden || (barLayout.style.splitPills && ui.barCompact && tab.url.isNotEmpty())
+    val immersiveScrolled = barHidden || (barLayout.style.splitPills && ui.barCompact && tab.url.isNotEmpty())
+    // 网页态状态栏背景（渐进模糊带）生效的条件：仅 WebView、非顶部停靠栏样式（停靠栏自己的底板已铺到状态栏下）
+    val statusBandActive = webGlassAvailable && settings.blurEnabled && !barLayout.reservesTop
+    // 页面自己带固定顶栏时，上滑沉浸不让网页铺到状态栏下，状态栏区域保持原样；没有时才收起留白、让网页铺到屏幕顶
+    if (statusBandActive) {
+        LaunchedEffect(tab.id, tab.url.isEmpty()) {
+            if (tab.url.isEmpty()) {
+                tab.pageHasTopBar = false
+                return@LaunchedEffect
+            }
+            while (true) {
+                tab.pollPageTopBar()
+                kotlinx.coroutines.delay(800)
+            }
+        }
+    }
+    val keepStatusInset = statusBandActive && tab.pageHasTopBar
+    val topInsetCollapsed = immersiveScrolled && !keepStatusInset
     val animatedTopPadding by animateDpAsState(
         // 顶栏停靠且页面已深入栏下：留白归零，网页铺到屏幕顶（栏的玻璃盖在网页上）
         targetValue = if (topInsetCollapsed || (barLayout.reservesTop && ui.barOverlap)) 0.dp else topReserved,
@@ -701,10 +720,11 @@ fun BrowserScreen(
 
         // ---- 网页态的状态栏背景：高级材质，以网页最顶部一条区域为采样层（仅 WebView；Gecko 保持原样）----
         // 页面处于初始状态（状态栏留白未收起）时显示；下滑沉浸收起后淡出。停靠在顶部的栏自己的底板已经铺到状态栏下，不叠加
-        if (webGlassAvailable && settings.blurEnabled && !barLayout.reservesTop) {
+        // 初始 / 页面带固定顶栏：采样「拉伸的网页顶边」；上滑沉浸后（页面无固定顶栏）：直接采样下层网页（不镜像），避免拉伸残影闪烁
+        if (statusBandActive) {
             StatusBarMaterialBand(
                 backdrop = browserBackdrop,
-                visible = !topInsetCollapsed,
+                stretched = !topInsetCollapsed,
             )
         }
 
@@ -737,6 +757,9 @@ fun BrowserScreen(
                 )
             }
         }
+
+        // ---- 加载进度条：放在采集层与所有渐进模糊带之外的最上层，不会被模糊采样 ----
+        ui.BrowserProgressOverlay(tab = tab, barLayout = barLayout, contentTopPx = contentTopPx)
 
         // ---- 地址栏输入中：底栏以外的区域是「收键盘」热区 ----
         // 透明遮罩盖在网页之上、底栏之下：点击只退出编辑并收起键盘，不会落到网页上
@@ -774,6 +797,37 @@ fun BrowserScreen(
             quickRunner = quickRunner,
             pushPage = ::pushPage,
         )
+
+        // ---- 地址栏搜索引擎快捷切换菜单：用抽象的 AppGlassPopup（与其他弹出菜单同一套材质 / 动效），输入时才会打开 ----
+        LaunchedEffect(ui.editing) { if (!ui.editing) ui.engineMenuShow = false }
+        // 输入时键盘会盖住屏幕下半部分，而 GlassPopup 只看窗口高度（不含键盘），会误判下方放得下而向下弹被键盘遮住。
+        // 所以图标不在屏幕上部（底栏 / 悬浮栏）时一律向上弹：anchor.top 取页面之外的远值，GlassPopup 判定下方放不下而翻到上方，
+        // 并以 anchor.bottom（图标上沿再留 8dp）为底边；停靠在顶部的栏才向下弹
+        val engineAnchor = ui.engineMenuAnchor
+        val engineScreenH = LocalConfiguration.current.screenHeightDp * LocalDensity.current.density
+        val engineGap = with(LocalDensity.current) { 8.dp.toPx() }
+        AppGlassPopup(
+            show = ui.engineMenuShow && ui.editing,
+            onDismissRequest = { ui.engineMenuShow = false },
+            anchorBounds = if (engineAnchor.center.y > engineScreenH * 0.3f) {
+                androidx.compose.ui.geometry.Rect(engineAnchor.left, 1e7f, engineAnchor.right, engineAnchor.top - engineGap)
+            } else {
+                engineAnchor
+            },
+            backdrop = if (glassAvailable) glassBackdrop else null,
+            alignStart = true,
+            sizing = top.yukonga.miuix.kmp.glass.GlassPopupSizing(minWidth = 140.dp, maxWidth = 240.dp),
+        ) {
+            settings.allSearchEngines.forEachIndexed { index, engine ->
+                top.yukonga.miuix.kmp.glass.GlassPopupItem(
+                    text = if (index == settings.searchIndex) engine.name + "  ✓" else engine.name,
+                    onClick = {
+                        settings.updateSearch(index)
+                        ui.engineMenuShow = false
+                    },
+                )
+            }
+        }
 
         // 隐藏状态不放置透明热区：底部网页区域完全交给 WebView 处理点击、长按和滚动。
         // 通过 WebView 的 scrollY 方向判断下拉恢复，不通过点击底部区域恢复。

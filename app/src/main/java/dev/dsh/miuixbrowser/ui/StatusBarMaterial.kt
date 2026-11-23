@@ -143,7 +143,9 @@ internal class MirroredBackdrop(
         }
         // 降采样录制时，绘制坐标系已按 1/downscaleFactor 缩小，轴位置同比例缩小
         val p = split() / downscaleFactor.coerceAtLeast(1f)
-        withTransform({ clipRect(top = 0f, bottom = p) }) {
+        // 拉伸段多盖过轴 2px、真实网页段再从轴开始盖在它上面：两段裁剪边缘落在小数像素上时，
+        // 接缝处那一行不会两边都没盖到而露出底下的白色（交界处的白条）
+        withTransform({ clipRect(top = 0f, bottom = (p + 2f).coerceAtMost(size.height)) }) {
             withTransform({ scale(1f, -EdgeStretch, pivot = Offset(0f, p)) }) {
                 with(base) { drawBackdrop(density, coordinates, layerBlock, downscaleFactor) }
             }

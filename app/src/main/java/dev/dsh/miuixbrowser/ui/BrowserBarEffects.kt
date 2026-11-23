@@ -57,6 +57,7 @@ internal fun BrowserUiState.BarAutoHideEffects(
         var scrollUpAccum = 0f
         while (true) {
             runCatching {
+                pageAtTop = tab.url.isEmpty() || tab.scrollOffsetY <= 12
                 if (tab.geckoFullscreen) {
                     barHidden = true
                     return@runCatching

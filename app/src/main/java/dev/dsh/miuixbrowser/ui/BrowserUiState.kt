@@ -38,6 +38,8 @@ internal class BrowserUiState {
     var barOverlap by mutableStateOf(false)
     /** 悬浮三段式导航栏：页面向下滑动后缩成只显示标题的小胶囊（上滑 / 回到顶部 / 点它恢复）；其他样式恒为 false */
     var barCompact by mutableStateOf(false)
+    /** 页面滚动位置是否在顶部（偏移 ≤ 12px，或没有页面）：状态栏拉伸取样只在这个状态下使用 */
+    var pageAtTop by mutableStateOf(true)
     var favEditing by mutableStateOf(false)
     var groupEditing by mutableStateOf(false)
     var quickEditing by mutableStateOf(false)

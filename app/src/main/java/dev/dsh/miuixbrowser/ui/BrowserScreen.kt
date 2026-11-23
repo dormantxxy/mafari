@@ -500,6 +500,8 @@ fun BrowserScreen(
     }
     val keepStatusInset = statusBandActive && tab.pageHasTopBar
     val topInsetCollapsed = immersiveScrolled && !keepStatusInset
+    // 「拉伸取样」只在页面处于顶部的初始状态（含滑回顶部）使用；离开顶部后（下滑唤出状态栏等）直接采样下层网页、不拉伸。
+    // 页面自带固定顶栏时顶边静止，仍用拉伸
     val animatedTopPadding by animateDpAsState(
         // 顶栏停靠且页面已深入栏下：留白归零，网页铺到屏幕顶（栏的玻璃盖在网页上）
         targetValue = if (topInsetCollapsed || (barLayout.reservesTop && ui.barOverlap)) 0.dp else topReserved,
@@ -724,7 +726,7 @@ fun BrowserScreen(
         if (statusBandActive) {
             StatusBarMaterialBand(
                 backdrop = browserBackdrop,
-                stretched = !topInsetCollapsed,
+                stretched = (ui.pageAtTop || keepStatusInset) && !topInsetCollapsed,
             )
         }
 
@@ -758,8 +760,6 @@ fun BrowserScreen(
             }
         }
 
-        // ---- 加载进度条：放在采集层与所有渐进模糊带之外的最上层，不会被模糊采样 ----
-        ui.BrowserProgressOverlay(tab = tab, barLayout = barLayout, contentTopPx = contentTopPx)
 
         // ---- 地址栏输入中：底栏以外的区域是「收键盘」热区 ----
         // 透明遮罩盖在网页之上、底栏之下：点击只退出编辑并收起键盘，不会落到网页上
@@ -774,6 +774,8 @@ fun BrowserScreen(
                 textureBlurEnabled = glassAvailable,
             )
         }
+        // ---- 加载进度条：与下拉刷新指示器同一层（采集层与所有渐进模糊带之外、在它们之上），不会被模糊采样 ----
+        ui.BrowserProgressOverlay(tab = tab, barLayout = barLayout, contentTopPx = contentTopPx)
         BrowserFloatingBar(
             ui = ui,
             settings = settings,

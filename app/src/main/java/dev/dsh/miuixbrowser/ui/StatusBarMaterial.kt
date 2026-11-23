@@ -17,8 +17,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
@@ -65,9 +70,10 @@ internal fun StatusBarMaterialBand(
             backdrop = mirrored,
             alpha = { alpha },
             modifier = Modifier.matchParentSize(),
-            // 栏高 = 状态栏本身；下沿只留一小段渐隐，不遮住太多网页顶部内容
+            // 渐隐整段收在状态栏里（下沿正好结束，与下面的真实网页无缝衔接），不再向下盖住网页内容
             barHeight = 0.dp,
-            rampExtra = 10.dp,
+            rampExtra = 0.dp,
+            heightFactor = 1f,
             tint = MiuixTheme.colorScheme.surface.copy(alpha = 0.3f),
         )
     }
@@ -149,7 +155,24 @@ internal fun BottomBarProgressiveBand(
                     layout(constraints.maxWidth, h) { p.placeRelative(0, 0) }
                 }
                 .fillMaxWidth()
-                .graphicsLayer { this.alpha = alpha().coerceIn(0f, 1f) }
+                .graphicsLayer {
+                    this.alpha = alpha().coerceIn(0f, 1f)
+                    compositingStrategy = CompositingStrategy.Offscreen
+                }
+                // 顶端（紧贴网页底栏处）整体渐隐：镜像出来的内容在那里模糊半径接近 0，会露出倒映的底栏图标 / 文字，
+                // 所以用透明度渐变把这一段遮掉，露出原来的底色；越往下越实，到下半段完全显示
+                .drawWithContent {
+                    drawContent()
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.2f to Color.Transparent,
+                            0.65f to Color.Black,
+                            1f to Color.Black,
+                        ),
+                        blendMode = BlendMode.DstIn,
+                    )
+                }
                 .progressiveTextureBlur(
                     backdrop = mirrored,
                     shape = RectangleShape,

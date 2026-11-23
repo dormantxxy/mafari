@@ -28,7 +28,7 @@ import javax.crypto.spec.SecretKeySpec
  * - 不支持：SAMPLE-AES / 其它加密、EXT-X-BYTERANGE 分片（直接报错，不会下出坏文件）。
  */
 internal object HlsDownload {
-    /** 任务的 mime 用它标记「这是 HLS 任务」；合并完成后会换成真实的 video/* */
+    /** 任务的 mime 用它标记「这是 HLS 任务」；合并完成后会换成真实的 video/xxx */
     const val MIME_MARK = "application/x-mpegURL"
 
     private const val PARALLEL = 6

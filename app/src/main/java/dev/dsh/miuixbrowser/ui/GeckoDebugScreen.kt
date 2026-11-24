@@ -137,6 +137,17 @@ fun GeckoDebugScreen(onBack: () -> Unit, blurEnabled: Boolean = true) {
                                 checked = d.systemFont,
                                 onCheckedChange = { d.updateSystemFont(it) },
                             )
+                            AppDropdownPreference(
+                                backdrop = if (glass) backdrop else null,
+                                title = tr("渲染方式"),
+                                summary = tr("SurfaceView：省电、延迟低、滑动更跟手（默认），但不能被毛玻璃采样，界面动画时偶有错位。TextureView：可被毛玻璃采样、动画更自然，但多一次拷贝，更耗电、延迟略高，切回前台可能短暂黑屏，且「请求高刷新率」不再起作用。只对新打开的标签页生效"),
+                                items = listOf("SurfaceView", "TextureView"),
+                                selectedIndex = d.renderBackend,
+                                onSelectedIndexChange = {
+                                    d.updateRenderBackend(it)
+                                    Toast.makeText(context, tr("已切换，新打开的标签页生效"), Toast.LENGTH_SHORT).show()
+                                },
+                            )
                             AppSwitchPreference(
                                 title = tr("请求高刷新率"),
                                 summary = tr("向系统声明屏幕最高刷新率，避免滑动时被降到低刷新率"),

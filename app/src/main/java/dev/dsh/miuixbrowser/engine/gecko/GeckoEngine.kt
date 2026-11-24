@@ -125,7 +125,15 @@ class GeckoTabEngine(
 
     val session: GeckoSession = adopted ?: newGeckoSession(privateMode)
 
-    val view: GeckoView = GeckoView(context)
+    // 渲染后端必须在 view 还没挂 session 时选好（open() 之后再 setViewBackend 会重建内部 View，Surface 生命周期会错位）
+    val view: GeckoView = GeckoView(context).apply {
+        runCatching {
+            setViewBackend(
+                if (GeckoDebug.renderBackend == GeckoDebug.RENDER_TEXTURE) GeckoView.BACKEND_TEXTURE_VIEW
+                else GeckoView.BACKEND_SURFACE_VIEW,
+            )
+        }
+    }
 
     var canGoBack = false
         private set
@@ -188,9 +196,8 @@ class GeckoTabEngine(
         if (!isAdopted) session.open(runtime)
         // 拓展按钮的弹出页请求按标签页 session 路由：给这个 session 挂上拓展的 ActionDelegate / TabDelegate
         GeckoExtensionStore.registerSession(session)
-        // 使用 GeckoView 默认渲染后端（SurfaceView）。不要在 session.open() 后调用
-        // setViewBackend()：该方法会销毁并重建内部渲染 View，可能造成 Surface 生命周期错位。
-        // 网页区域不需要被毛玻璃采样，因此无需 TextureView。
+        // 渲染后端见 [view] 的初始化（设置 → Gecko 调试 → 渲染方式，默认 SurfaceView）；
+        // 不要在 session.open() 后调用 setViewBackend()：该方法会销毁并重建内部渲染 View，可能造成 Surface 生命周期错位。
         if (isAdopted) attachAdoptedSession() else view.setSession(session)
         // 网页输入框唤出系统自动填充（Google 密码管理器等）
         GeckoAutofill.enable(view, session)
@@ -440,7 +447,7 @@ class GeckoTabEngine(
 
     // ---------------------------------------------------------------- 前后台切换：防止切回应用时网页黑屏
     //
-    // 现在是 SurfaceView 后端：下面的截图 / 盖图逻辑只对 TextureView 生效，SurfaceView 下 findTextureView 为 null 自然跳过；
+    // 默认是 SurfaceView 后端：下面的截图 / 盖图逻辑只对 TextureView 生效（调试页里选了 TextureView 才会走），SurfaceView 下 findTextureView 为 null 自然跳过；
     // SurfaceView 的恢复靠 onAppForeground 里的 setActive / setFocused（Surface 由系统在后台销毁、回前台重建）。
     // 旧：GeckoView 用 TextureView 后端（为了能被毛玻璃采样）。应用退到后台后，TextureView 的缓冲会被系统回收，
     // 切回来时 Gecko 要重新建合成面再画一帧，这几秒里显示的是黑底。

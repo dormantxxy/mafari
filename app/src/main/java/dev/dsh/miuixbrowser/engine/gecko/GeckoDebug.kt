@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
  * - [profiler]：WebRender 性能叠层（gfx.webrender.debug.profiler，nightly 偏好名可能变；不存在时无副作用）
  * - [diagLog]：写 diag.txt 运行日志（含 SurfaceView 创建 / 销毁），同时作用于 [Diag]
  * - [highRefresh]：给 Gecko 的 SurfaceView 声明高刷新率，避免系统因 UI 线程没有帧而把窗口降到低刷新率
+ * - [renderBackend]：网页渲染方式（0 = SurfaceView，默认；1 = TextureView）。只在创建标签页的 GeckoView 时读取，对新打开的标签页生效
  * - [isolatedProcess]：Gecko 网页进程隔离（Android isolated process）。只在创建 Gecko 运行时读取，改动需重启应用。
  *   已知问题：隔离进程不允许 bindService，Java MediaCodec 解码器起不来 → 视频报「No video with supported format and MIME type found」
  *   （Mozilla bug 1810736 / 1988531）。所以默认关闭
@@ -44,6 +45,7 @@ object GeckoDebug {
     var highRefresh by mutableStateOf(true); private set
     var nativeImmersive by mutableStateOf(true); private set
     var isolatedProcess by mutableStateOf(false); private set
+    var renderBackend by mutableStateOf(RENDER_SURFACE); private set
     var systemFont by mutableStateOf(true); private set
 
     fun load(context: Context) {
@@ -62,6 +64,7 @@ object GeckoDebug {
         highRefresh = p.getBoolean("high_refresh", true)
         nativeImmersive = p.getBoolean("native_immersive", true)
         isolatedProcess = p.getBoolean("isolated_process", false)
+        renderBackend = if (p.getInt("render_backend", RENDER_SURFACE) == RENDER_TEXTURE) RENDER_TEXTURE else RENDER_SURFACE
         // 默认开启：从未设置过时跟随系统字体（旧版放在「Gecko 高级保护」里的同名开关不再沿用）
         systemFont = p.getBoolean("system_font", true)
     }
@@ -93,6 +96,12 @@ object GeckoDebug {
     fun updateHighRefresh(v: Boolean) {
         highRefresh = v; save { putBoolean("high_refresh", v) }
         GeckoViewLifecycle.applyFrameRate()
+    }
+
+    /** 切换渲染方式：GeckoView 只能在挂 session 之前选后端，所以只影响之后新建的标签页 */
+    fun updateRenderBackend(v: Int) {
+        renderBackend = if (v == RENDER_TEXTURE) RENDER_TEXTURE else RENDER_SURFACE
+        save { putInt("render_backend", renderBackend) }
     }
 
     fun updateIsolatedProcess(v: Boolean) {
@@ -226,7 +235,7 @@ object GeckoDebug {
         return listOf(
             tr("Gecko 版本") to field("MOZ_APP_VERSION"),
             tr("构建 ID") to field("MOZ_APP_BUILDID"),
-            tr("渲染后端") to tr("SurfaceView（GeckoView 默认）"),
+            tr("渲染后端") to if (renderBackend == RENDER_TEXTURE) "TextureView" else tr("SurfaceView（GeckoView 默认）"),
             tr("屏幕刷新率") to tr("当前 {0} Hz / 最高 {1} Hz", "%.0f".format(cur), "%.0f".format(hz)),
             tr("运行时") to if (GeckoRuntimeHolder.peek() != null) tr("已启动") else tr("未启动（打开 Gecko 标签后启动）"),
             tr("进程隔离") to when (val r = runtimeIsolated()) {
@@ -243,6 +252,9 @@ object GeckoDebug {
             },
         )
     }
+
+    const val RENDER_SURFACE = 0
+    const val RENDER_TEXTURE = 1
 
     private const val PROFILER_PREF = "gfx.webrender.debug.profiler"
 }

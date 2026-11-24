@@ -26,7 +26,8 @@ val sqliteVersion = "2.4.0"
 val bouncyCastleVersion = "1.82"
 val okhttpVersion = "5.5.1"
 // 原生播放器内核：Media3 ExoPlayer（只要 exoplayer + hls；界面用 miuix 自绘，不引 media3-ui）。网络层用自带的 HttpURLConnection，不依赖 media3-datasource-okhttp
-val media3Version = "1.8.0"
+// 1.12.0-beta01（2026-11-11）：Media3 1.12 起库自身 minSdk = 24（本项目 33）、1.11 起库用 Kotlin 2.2 编译（本项目 2.4.21），均满足
+val media3Version = "1.12.0-beta01"
 // Git 同步：JGit 5.13 是最后一个面向 Java 8 的版本，Android 上可用（6.x 起要求 Java 11）
 val jgitVersion = "5.13.3.202401111512-r"
 // Deploy key（SSH）：JGit 的 JSch 传输 + mwiede 维护的 JSch 分支（同包名直接替换，支持 ed25519 / rsa-sha2；原版 0.1.55 连 GitHub 已不可用）

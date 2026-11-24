@@ -14,6 +14,13 @@
         <item name="android:windowSplashScreenAnimationDuration">0</item>
     </style>
 
+    <!-- 原生播放页：窗口透明，卡片态只占顶部一块、下面透出网页；全屏 / 画中画时由代码把窗口背景换成黑色 -->
+    <style name="Theme.MiuixBrowser.Player" parent="Theme.MiuixBrowser">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+
     <!-- 透明承载页（系统分享面板里「发送到设备」弹出的设备列表）：背景透明，AlertDialog 跟随系统深浅色 -->
     <style name="Theme.MafariTranslucent" parent="@android:style/Theme.DeviceDefault.DayNight">
         <item name="android:windowIsTranslucent">true</item>

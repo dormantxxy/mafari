@@ -952,8 +952,8 @@ class AppSettings(context: Context) {
         syncMediaFeatures()
     }
 
-    /** 页面里识别到视频后自动弹出悬浮播放器（经脚本宿主能力 caps.autoFloat 告知脚本） */
-    var mediaAutoFloat by mutableStateOf(prefs.getBoolean(KEY_MEDIA_AUTO_FLOAT, true))
+    /** 自动悬浮播放：嗅探到视频后直接用原生悬浮播放器打开，不再先弹「发现视频」提示（默认关） */
+    var mediaAutoFloat by mutableStateOf(prefs.getBoolean(KEY_MEDIA_AUTO_FLOAT, false))
         private set
 
     fun updateMediaAutoFloat(enabled: Boolean) {
@@ -968,6 +968,47 @@ class AppSettings(context: Context) {
 
     /** 嗅探是否真正生效（弹提示的地方读这个，而不是 [mediaSniff]） */
     val mediaSniffActive: Boolean get() = mediaActive && mediaSniff
+
+    /** 自动悬浮播放是否真正生效（需要嗅探本身生效） */
+    val mediaAutoFloatActive: Boolean get() = mediaSniffActive && mediaAutoFloat
+
+    // ---- 原生播放器（读写同一份 prefs，播放页不构造 AppSettings 直接读 PlayerPrefs）----
+
+    /** 视频渲染方式：0 = TextureView（支持玻璃模糊），1 = SurfaceView（更省电、低延迟，无玻璃模糊） */
+    var playerRenderMode by mutableStateOf(dev.dsh.miuixbrowser.player.PlayerPrefs.clampRender(prefs.getInt(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_RENDER, 0)))
+        private set
+
+    fun updatePlayerRenderMode(mode: Int) {
+        playerRenderMode = dev.dsh.miuixbrowser.player.PlayerPrefs.clampRender(mode)
+        prefs.edit().putInt(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_RENDER, playerRenderMode).apply()
+    }
+
+    /** 默认倍速：每次打开播放器按这个速度起播 */
+    var playerDefaultSpeed by mutableStateOf(dev.dsh.miuixbrowser.player.PlayerPrefs.snap(prefs.getFloat(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_SPEED, 1f), dev.dsh.miuixbrowser.player.PlayerPrefs.SPEEDS, 1f))
+        private set
+
+    fun updatePlayerDefaultSpeed(v: Float) {
+        playerDefaultSpeed = dev.dsh.miuixbrowser.player.PlayerPrefs.snap(v, dev.dsh.miuixbrowser.player.PlayerPrefs.SPEEDS, 1f)
+        prefs.edit().putFloat(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_SPEED, playerDefaultSpeed).apply()
+    }
+
+    /** 长按画面时的临时倍速（松手恢复） */
+    var playerLongPressSpeed by mutableStateOf(dev.dsh.miuixbrowser.player.PlayerPrefs.snap(prefs.getFloat(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_LONG_PRESS, 2f), dev.dsh.miuixbrowser.player.PlayerPrefs.LONG_PRESS_SPEEDS, 2f))
+        private set
+
+    fun updatePlayerLongPressSpeed(v: Float) {
+        playerLongPressSpeed = dev.dsh.miuixbrowser.player.PlayerPrefs.snap(v, dev.dsh.miuixbrowser.player.PlayerPrefs.LONG_PRESS_SPEEDS, 2f)
+        prefs.edit().putFloat(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_LONG_PRESS, playerLongPressSpeed).apply()
+    }
+
+    /** 后台播放：切到后台 / 锁屏继续播放（前台服务 + 媒体通知）；关闭后离开界面就暂停 */
+    var playerBgPlay by mutableStateOf(dev.dsh.miuixbrowser.player.PlayerPrefs.bgPlay(context))
+        private set
+
+    fun updatePlayerBgPlay(on: Boolean) {
+        playerBgPlay = on
+        prefs.edit().putBoolean(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_BG_PLAY, on).apply()
+    }
 
     /** 把设置值和两层总开关合成「生效状态」推给热路径（请求拦截 / MediaHost），并通知 Gecko 后台页 */
     fun syncMediaFeatures() {

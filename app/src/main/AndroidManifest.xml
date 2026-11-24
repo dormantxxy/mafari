@@ -72,7 +72,7 @@
             android:exported="false"
             android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale"
-            android:theme="@style/Theme.MiuixBrowser" />
+            android:theme="@style/Theme.MiuixBrowser.Player" />
 
         <!-- 响应系统里的 http(s) 链接：无界面的分流入口（原来声明在 MainActivity 上），按「外部链接打开方式」转给主界面 / 自定义标签页 / 其他浏览器。
              不加 launchMode：调用方不带 NEW_TASK 时，它和后面的自定义标签页都留在调用方的任务里。

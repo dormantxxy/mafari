@@ -143,6 +143,8 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         exo.addListener(listener)
+        // 设置里的「默认倍速」：打开就按这个速度起播（播放页里仍可临时改）
+        PlayerPrefs.defaultSpeed(context).takeIf { it != 1f }?.let { changeSpeed(it) }
         exo.setMediaItem(buildItem(currentRequest), request.startMs.coerceAtLeast(0))
         exo.prepare()
         exo.playWhenReady = true

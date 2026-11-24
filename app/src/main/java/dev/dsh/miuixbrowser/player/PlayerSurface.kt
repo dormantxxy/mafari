@@ -101,7 +101,7 @@ import top.yukonga.miuix.kmp.material.GlassShape
  * 布局对应脚本里的 DOM：
  *   scrim 暗角 · 中部 后退10 / 播放 / 快进10 · 底部 时间 + 胶囊进度条 + 时间
  *   左下 静音 · 右下 倍速 / 画中画 / 全屏 · 左上 ✕（全屏时 ‹）· 右上 ⋯ 菜单（下载 / 复制 / 清晰度）
- * 手势：单击显隐，双击左 40% / 右 40% 快退 / 快进 10 秒，双击中间播放 / 暂停，长按 2x 倍速（松手恢复）。
+ * 手势：单击显隐，双击左 40% / 右 40% 快退 / 快进 10 秒，双击中间播放 / 暂停，长按倍速（默认 2x，设置里可改；松手恢复）。
  *
  * 材质：按钮 / 弹层统一用 miuix-glass（GlassIconButton / glassPanel），采样源是视频层的 LayerBackdrop。
  * 视频必须用 TextureView（画进 View 层级，和 WebView 开硬件层同理）才能被采样；SurfaceView 是独立图层，采不到。
@@ -158,7 +158,10 @@ internal fun PlayerSurface(
     var poke by remember { mutableIntStateOf(0) } // 每次操作 +1，重置自动隐藏计时
     var toast by remember { mutableStateOf<Toast?>(null) }
     var holdPrev by remember { mutableStateOf<Float?>(null) } // 长按 2x 之前的倍速
-    var textureMode by remember { mutableStateOf(true) } // true = TextureView（可玻璃采样），false = SurfaceView
+    val appCtx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    // true = TextureView（可玻璃采样），false = SurfaceView；初值来自设置 → 媒体嗅探与播放 → 渲染方式，菜单里改了会一并保存
+    var textureMode by remember { mutableStateOf(PlayerPrefs.renderMode(appCtx) == PlayerPrefs.RENDER_TEXTURE) }
+    val longPressSpeed = remember { PlayerPrefs.longPressSpeed(appCtx) } // 长按倍速（设置里可改，默认 2x）
 
     // 进度刷新：暂停时也要刷（拖动后的位置要立刻反映）
     LaunchedEffect(player) {
@@ -225,8 +228,8 @@ internal fun PlayerSurface(
                         onLongPress = {
                             if (player.isPlaying && holdPrev == null) {
                                 holdPrev = player.speed
-                                player.changeSpeed(2f)
-                                toast = Toast(tr("2x 倍速播放中"))
+                                player.changeSpeed(longPressSpeed)
+                                toast = Toast(tr("{0} 倍速播放中", speedLabel(longPressSpeed)))
                             }
                         },
                         onTap = {
@@ -505,6 +508,7 @@ internal fun PlayerSurface(
                                     columns = 2,
                                     onPick = { i ->
                                         textureMode = i == 0
+                                        PlayerPrefs.setRenderMode(appCtx, if (textureMode) PlayerPrefs.RENDER_TEXTURE else PlayerPrefs.RENDER_SURFACE)
                                         popup = POP_NONE
                                         toast = Toast(
                                             if (textureMode) tr("显示方式：TextureView（支持玻璃模糊）") else tr("显示方式：SurfaceView（无玻璃模糊，更省电）"),

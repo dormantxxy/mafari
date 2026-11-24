@@ -2219,11 +2219,20 @@ m3u8 下载完成后把 TS 转封装成 MP4（不重新编码；编码不支持�
 媒体嗅探与播放	Media sniffing & playback
 嗅探 · 悬浮播放 · 自动画中画 · HLS 转 MP4	Sniffing · Floating player · Auto picture-in-picture · HLS to MP4
 总开关	Master switch
-一键停用：嗅探、悬浮媒体播放器和 M3U8 媒体下载器脚本、自动画中画、自动悬浮播放；关闭后不再拦截 / 弹窗，刷新页面后生效	Turn off in one tap: sniffing, the Floating Media Player and M3U8 Media Downloader scripts, auto picture-in-picture and auto floating playback. When off, nothing is intercepted or prompted. Takes effect after refreshing the page
 「网页增强」已关闭，本页功能暂不运行。重新打开网页增强后恢复。	"Web enhancements" is off, so the features on this page are not running. Turn web enhancements back on to resume.
 嗅探与播放	Sniffing & playback
 嗅探媒体播放	Sniff media for playback
 退出自动画中画	Auto picture-in-picture on exit
 全屏播放视频时按 Home / 手势返回桌面，自动进入画中画小窗	When a video is playing full screen, pressing Home or swiping back to the home screen automatically opens a picture-in-picture window
 自动悬浮播放	Auto floating playback
-页面里识别到视频后自动弹出悬浮播放器；关闭后不再自动弹出，仍可手动打开（需脚本支持，刷新页面后生效）	Automatically opens the floating player when a video is detected on a page. When off, it no longer opens by itself but can still be opened manually (requires script support; takes effect after refreshing the page)
+一键停用：嗅探、原生悬浮播放、自动画中画、自动悬浮播放及相关脚本；关闭后不再拦截 / 弹窗，刷新页面后生效	Turn off in one tap: sniffing, native floating playback, auto picture-in-picture, auto floating playback and related scripts. When off, nothing is intercepted or prompted. Takes effect after refreshing the page
+嗅探到视频后直接用悬浮播放器打开，不再先弹「发现视频」提示；已有播放器开着时不会重复打开	Opens the floating player directly when a video is detected, instead of showing the "Video found" prompt first. Won't open a second player if one is already open
+播放器	Player
+渲染方式	Render mode
+TextureView 支持玻璃模糊；SurfaceView 更省电、延迟更低，但没有玻璃模糊。下次打开播放器生效	TextureView supports the glass blur effect; SurfaceView saves more power and has lower latency but no glass blur. Takes effect the next time the player opens
+默认倍速	Default speed
+每次打开播放器按这个速度起播，播放页里仍可临时修改	The player starts at this speed every time it opens; you can still change it temporarily in the player
+长按倍速	Long-press speed
+长按播放画面时临时加速，松手恢复	Temporarily speeds up playback while you press and hold the video; releases back to normal speed
+切到后台 / 锁屏继续播放，并在通知栏显示控制条；关闭后离开界面就暂停	Keeps playing when you switch apps or lock the screen, with controls in the notification shade. When off, playback pauses when you leave the player
+{0} 倍速播放中	{0} speed playback

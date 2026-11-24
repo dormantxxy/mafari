@@ -20,12 +20,6 @@ data class BuiltinScript(
 
 val BUILTIN_SCRIPTS = listOf(
     BuiltinScript(
-        name = tr("悬浮媒体播放器"),
-        description = tr("识别页面里的 M3U8 / MP4 / WebM，自动在顶部悬浮 iOS 玻璃质感播放器"),
-        userScriptUrl = "https://update.greasyfork.org/scripts/604191/%E6%82%AC%E6%B5%AE%E5%AA%92%E4%BD%93%E6%92%AD%E6%94%BE%E5%99%A8.user.js",
-        media = true,
-    ),
-    BuiltinScript(
         name = tr("M3U8媒体下载器"),
         description = tr("智能嗅探 m3u8、多线程下载，支持 AES-128 解密"),
         userScriptUrl = "https://update.greasyfork.org/scripts/584352/M3U8%E5%AA%92%E4%BD%93%E4%B8%8B%E8%BD%BD%E5%99%A8%20%28%E6%94%AF%E6%8C%81AES-128%E8%A7%A3%E5%AF%86%29.user.js",

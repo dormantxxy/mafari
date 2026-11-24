@@ -15,10 +15,14 @@ import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Color as AColor
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Icon
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Rational
+import android.view.Gravity
+import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -91,6 +95,24 @@ class NativePlayerActivity : ComponentActivity() {
         override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) = updatePip()
     }
 
+    /**
+     * 窗口形态：卡片（悬浮）= 透明窗口、只占顶部卡片那么高，其余地方透出下面的网页（不再是整屏黑底）；
+     * 全屏 / 画中画 = 铺满屏幕的黑底窗口。
+     * 卡片态加 NOT_TOUCH_MODAL：卡片以外的触摸交给下面的页面。
+     */
+    private fun applyWindowMode() {
+        val card = !fullscreen && !inPip
+        window.setBackgroundDrawable(ColorDrawable(if (card) AColor.TRANSPARENT else AColor.BLACK))
+        if (card) {
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            window.setGravity(Gravity.TOP)
+            window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        } else {
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val req = PlayerRequest.from(intent)
@@ -98,10 +120,11 @@ class NativePlayerActivity : ComponentActivity() {
             finish()
             return
         }
-        bgPlay = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_BG_PLAY, true)
+        showing = true
+        bgPlay = PlayerPrefs.bgPlay(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        applyFullscreen(false)
+        applyFullscreen(false) // 里面会 applyWindowMode()
 
         val p = MafariPlayer(this, req)
         player = p
@@ -121,45 +144,51 @@ class NativePlayerActivity : ComponentActivity() {
 
     @androidx.compose.runtime.Composable
     private fun PlayerPage(p: MafariPlayer, title: String) {
-        // 只有一处 PlayerSurface 调用，卡片 <-> 全屏切换时界面状态（弹层、控件显隐）不会丢
-        val chrome = if (fullscreen || inPip) {
-            Modifier.fillMaxSize()
+        // 只有一处 PlayerSurface 调用，卡片 <-> 全屏切换时界面状态（弹层、控件显隐）不会丢；
+        // 两种形态的外层结构相同（Column 套 Column），只换 Modifier
+        val full = fullscreen || inPip
+        val cardShape = RoundedCornerShape(20.dp)
+        val outer = if (full) {
+            Modifier.fillMaxSize().background(Color.Black)
         } else {
-            Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)
+            // 不 fillMaxHeight：窗口是 WRAP_CONTENT，铺满会把整屏变成透明的挡触摸层
+            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)
         }
-        val surface = if (fullscreen || inPip) {
+        val panel = if (full) {
             Modifier.fillMaxSize()
         } else {
-            val shape = RoundedCornerShape(18.dp)
             Modifier
                 .fillMaxWidth()
-                .aspectRatio(16f / 9f)
-                .clip(shape)
-                .border(1.dp, Color(0x1FFFFFFF), shape)
+                .clip(cardShape)
+                .background(Color(0xF2111113))
+                .border(1.dp, Color(0x1FFFFFFF), cardShape)
         }
-        Column(Modifier.fillMaxSize().background(Color.Black).then(chrome)) {
-            PlayerSurface(
-                player = p,
-                fullscreen = fullscreen,
-                onClose = { finish() },
-                onToggleFullscreen = { applyFullscreen(!fullscreen) },
-                modifier = surface,
-                onPip = if (pipSupported()) ({ enterPip() }) else null,
-                onDownload = { download(p) },
-                onCopyLink = { copyLink(p) },
-                pip = inPip,
-                bgPlay = bgPlay,
-                onBgPlayChange = { changeBgPlay(it) },
-            )
-            if (!fullscreen && !inPip) {
-                Text(
-                    text = title,
-                    color = Color(0xCCFFFFFF),
-                    fontSize = 14.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 14.dp),
+        val surface = if (full) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+        Column(outer) {
+            Column(panel) {
+                PlayerSurface(
+                    player = p,
+                    fullscreen = fullscreen,
+                    onClose = { finish() },
+                    onToggleFullscreen = { applyFullscreen(!fullscreen) },
+                    modifier = surface,
+                    onPip = if (pipSupported()) ({ enterPip() }) else null,
+                    onDownload = { download(p) },
+                    onCopyLink = { copyLink(p) },
+                    pip = inPip,
+                    bgPlay = bgPlay,
+                    onBgPlayChange = { changeBgPlay(it) },
                 )
+                if (!full) {
+                    Text(
+                        text = title,
+                        color = Color(0xCCFFFFFF),
+                        fontSize = 14.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    )
+                }
             }
         }
     }
@@ -170,6 +199,7 @@ class NativePlayerActivity : ComponentActivity() {
      */
     private fun applyFullscreen(on: Boolean) {
         fullscreen = on
+        applyWindowMode()
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.isAppearanceLightStatusBars = false
         controller.isAppearanceLightNavigationBars = false
@@ -282,6 +312,7 @@ class NativePlayerActivity : ComponentActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         inPip = isInPictureInPictureMode
+        applyWindowMode()
         if (isInPictureInPictureMode) pipAt = SystemClock.uptimeMillis()
     }
 
@@ -289,7 +320,7 @@ class NativePlayerActivity : ComponentActivity() {
 
     private fun changeBgPlay(on: Boolean) {
         bgPlay = on
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_BG_PLAY, on).apply()
+        PlayerPrefs.setBgPlay(this, on)
         if (on) startBgService() else PlayerService.stop(this)
     }
 
@@ -325,6 +356,7 @@ class NativePlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        showing = false
         PlayerService.stop(this)
         PlayerService.closeCallback = null
         PlayerService.current = null
@@ -337,8 +369,10 @@ class NativePlayerActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val PREFS = "mafari_player"
-        private const val KEY_BG_PLAY = "bg_play"
+        /** 播放页正开着：嗅探「自动悬浮播放」据此不重复拉起第二个播放器 */
+        @Volatile var showing = false
+            private set
+
         private const val ACTION_PIP = "dev.dsh.miuixbrowser.player.PIP_ACT"
         private const val EXTRA_ACT = "a"
         private const val SKIP_MS = 10_000L

@@ -104,7 +104,7 @@ internal fun BrowserNav.SubPage(route: AppRoute) {
             MediaSniffScreen(
                 settings = settings,
                 onBack = { popPage() },
-                // 总开关：一键启停悬浮媒体播放器 / M3U8 媒体下载器脚本；其余（嗅探、自动画中画、自动悬浮、宿主能力）由 MediaFeatures 即时生效
+                // 总开关：一键启停 M3U8 媒体下载器脚本；其余（嗅探、自动画中画、自动悬浮播放、宿主能力）由 MediaFeatures 即时生效
                 onMasterChange = { on -> extensions.setMediaScriptsEnabled(on) },
                 blurEnabled = settings.blurEnabled,
             )

@@ -136,8 +136,7 @@ object MediaHost {
                             reply.send(
                                 fn, "r",
                                 JSONObject().put("api", 1).put("engine", engine).put("pip", pip).put("cast", true).put("play", true).put("ext", true).put("dl", true)
-                                    // 「自动悬浮播放」开关：false 时脚本不要自动弹悬浮播放器（用户手动点开不受影响）
-                                    .put("autoFloat", MediaFeatures.autoFloatActive).put("autoPip", MediaFeatures.autoPipActive).toString(),
+                                    .put("autoPip", MediaFeatures.autoPipActive).toString(),
                             )
                         }
                     }

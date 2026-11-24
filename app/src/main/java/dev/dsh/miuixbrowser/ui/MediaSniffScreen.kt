@@ -21,6 +21,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dsh.miuixbrowser.data.AppSettings
 import dev.dsh.miuixbrowser.i18n.tr
+import dev.dsh.miuixbrowser.player.PlayerPrefs
+import dev.dsh.miuixbrowser.player.speedLabel
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -33,8 +35,9 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
  * 设置 → 高级 → 媒体嗅探与播放（两个内核共用）：
- *  - 总开关：一键停用嗅探、悬浮媒体播放器 / M3U8 媒体下载器脚本、自动画中画、脚本宿主能力；
- *  - 嗅探媒体播放 / 退出自动画中画 / 自动悬浮播放；
+ *  - 总开关：一键停用嗅探、原生悬浮播放、自动画中画、脚本宿主能力和 M3U8 媒体下载器脚本；
+ *  - 嗅探媒体播放 / 退出自动画中画 / 自动悬浮播放（嗅探到视频直接用原生悬浮播放器打开）；
+ *  - 播放器：渲染方式（TextureView / SurfaceView）、默认倍速、长按倍速、后台播放；
  *  - 下载：HLS 转 MP4（原来在下载页里）。
  * 「网页增强」（WebView）关闭时本页功能同样不运行，详见 [dev.dsh.miuixbrowser.sniff.MediaFeatures]。
  *
@@ -99,7 +102,7 @@ fun MediaSniffScreen(
                     ) {
                         AppSwitchPreference(
                             title = tr("媒体嗅探与播放"),
-                            summary = tr("一键停用：嗅探、悬浮媒体播放器和 M3U8 媒体下载器脚本、自动画中画、自动悬浮播放；关闭后不再拦截 / 弹窗，刷新页面后生效"),
+                            summary = tr("一键停用：嗅探、原生悬浮播放、自动画中画、自动悬浮播放及相关脚本；关闭后不再拦截 / 弹窗，刷新页面后生效"),
                             checked = settings.mediaMaster,
                             onCheckedChange = {
                                 settings.updateMediaMaster(it)
@@ -137,10 +140,47 @@ fun MediaSniffScreen(
                         )
                         AppSwitchPreference(
                             title = tr("自动悬浮播放"),
-                            summary = tr("页面里识别到视频后自动弹出悬浮播放器；关闭后不再自动弹出，仍可手动打开（需脚本支持，刷新页面后生效）"),
+                            summary = tr("嗅探到视频后直接用悬浮播放器打开，不再先弹「发现视频」提示；已有播放器开着时不会重复打开"),
                             checked = settings.mediaAutoFloat,
                             onCheckedChange = { settings.updateMediaAutoFloat(it) },
                             enabled = active,
+                        )
+                    }
+
+                    SmallTitle(text = tr("播放器"))
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        insideMargin = PaddingValues(0.dp),
+                    ) {
+                        AppDropdownPreference(
+                            backdrop = if (glass) backdrop else null,
+                            title = tr("渲染方式"),
+                            summary = tr("TextureView 支持玻璃模糊；SurfaceView 更省电、延迟更低，但没有玻璃模糊。下次打开播放器生效"),
+                            items = listOf("TextureView", "SurfaceView"),
+                            selectedIndex = settings.playerRenderMode,
+                            onSelectedIndexChange = { settings.updatePlayerRenderMode(it) },
+                        )
+                        AppDropdownPreference(
+                            backdrop = if (glass) backdrop else null,
+                            title = tr("默认倍速"),
+                            summary = tr("每次打开播放器按这个速度起播，播放页里仍可临时修改"),
+                            items = PlayerPrefs.SPEEDS.map { speedLabel(it) },
+                            selectedIndex = PlayerPrefs.SPEEDS.indexOf(settings.playerDefaultSpeed).coerceAtLeast(0),
+                            onSelectedIndexChange = { settings.updatePlayerDefaultSpeed(PlayerPrefs.SPEEDS[it]) },
+                        )
+                        AppDropdownPreference(
+                            backdrop = if (glass) backdrop else null,
+                            title = tr("长按倍速"),
+                            summary = tr("长按播放画面时临时加速，松手恢复"),
+                            items = PlayerPrefs.LONG_PRESS_SPEEDS.map { speedLabel(it) },
+                            selectedIndex = PlayerPrefs.LONG_PRESS_SPEEDS.indexOf(settings.playerLongPressSpeed).coerceAtLeast(0),
+                            onSelectedIndexChange = { settings.updatePlayerLongPressSpeed(PlayerPrefs.LONG_PRESS_SPEEDS[it]) },
+                        )
+                        AppSwitchPreference(
+                            title = tr("后台播放"),
+                            summary = tr("切到后台 / 锁屏继续播放，并在通知栏显示控制条；关闭后离开界面就暂停"),
+                            checked = settings.playerBgPlay,
+                            onCheckedChange = { settings.updatePlayerBgPlay(it) },
                         )
                     }
 

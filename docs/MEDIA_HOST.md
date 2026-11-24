@@ -10,7 +10,7 @@ GM_mafariHost(op, args, onEvent) -> Promise<结果 | null>   // null = 宿主不
 
 | op | 说明 |
 |---|---|
-| `caps` | 能力探测 → `{api:1, engine, pip, cast, ext, autoFloat, autoPip}`；不是主界面（如桌面轻应用 WebAppActivity），或设置 → 媒体嗅探与播放的总开关 / 网页增强关闭时回 `{api:0}`。`autoFloat:false` 表示用户关了「自动悬浮播放」：脚本不要在识别到视频后自动弹悬浮播放器（手动打开不受影响）；`autoPip:false` 表示「退出自动画中画」已关（宿主不会按 Home 自动进小窗，脚本无需处理） |
+| `caps` | 能力探测 → `{api:1, engine, pip, cast, ext, autoPip}`；不是主界面（如桌面轻应用 WebAppActivity），或设置 → 媒体嗅探与播放的总开关 / 网页增强关闭时回 `{api:0}`。`autoPip:false` 表示「退出自动画中画」已关（宿主不会按 Home 自动进小窗，脚本无需处理） |
 | `sub` | 订阅宿主事件（传 `onEvent`，常驻）：`{ev:'pip',on}` / `{ev:'act',a:'play'｜'pause'｜'back'｜'fwd'}` / `{ev:'cast',state,...}` |
 | `pip` `{w,h,playing}` | 进入系统画中画。**调用前页面必须已经全屏**，小窗里才只剩画面 |
 | `arm` `{on,w,h}` | 上报「全屏且正在播放」；为 true 时按 Home / 手势返回桌面自动进画中画（Android 12+ 走 `setAutoEnterEnabled`） |

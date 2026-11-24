@@ -439,7 +439,14 @@ BrowserChunk {
             val n = sniffList.items.size
             if (n > sniffList.promptedCount) {
                 sniffList.promptedCount = n
-                sniffDialogShow = true
+                if (settings.mediaAutoFloatActive) {
+                    // 自动悬浮播放：直接用原生悬浮播放器打开第一条，其余地址作为可切换的源；已经有播放器开着就不再拉起第二个
+                    if (!dev.dsh.miuixbrowser.player.NativePlayerActivity.showing) {
+                        tab.playSniffed(context, sniffList.items.first(), sniffList.items.toList())
+                    }
+                } else {
+                    sniffDialogShow = true
+                }
             }
         }
         // 换标签 / 换页：旧提示收起

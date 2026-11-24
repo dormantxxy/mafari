@@ -10,6 +10,7 @@ import dev.dsh.miuixbrowser.browser.AppRoute
 import dev.dsh.miuixbrowser.browser.BrowserState
 import dev.dsh.miuixbrowser.browser.BrowserTab
 import dev.dsh.miuixbrowser.browser.playSniffed
+import dev.dsh.miuixbrowser.browser.probeDurations
 import dev.dsh.miuixbrowser.browser.DefaultBrowser
 import dev.dsh.miuixbrowser.download.Downloader
 import dev.dsh.miuixbrowser.data.AppSettings
@@ -440,14 +441,26 @@ BrowserChunk {
             if (n > sniffList.promptedCount) {
                 sniffList.promptedCount = n
                 if (settings.mediaAutoFloatActive) {
-                    // 自动悬浮播放：直接用原生悬浮播放器打开第一条，其余地址作为可切换的源；已经有播放器开着就不再拉起第二个
+                    // 自动悬浮播放：只自动播「正片」。预览 / 封面循环 / 页面里的动态小元素不播：
+                    //   先探时长（页面 <video> 报的或后台探测），再按 MediaSniff.pickAutoPlay 选：
+                    //   排除页面标记的预览（循环 / 很小 / 不可见）和短于 AUTO_MIN_MS 的；时长相同取先出现的、不同取最长的。
+                    // 没有合格的就什么都不弹（地址栏的媒体图标里仍能手动点开）；已经有播放器开着就不再拉起第二个
                     if (!dev.dsh.miuixbrowser.player.NativePlayerActivity.showing) {
-                        tab.playSniffed(context, sniffList.items.first(), sniffList.items.toList())
+                        tab.probeDurations(sniffList, 4000)
+                        val pick = dev.dsh.miuixbrowser.sniff.MediaSniff.pickAutoPlay(sniffList.items, sniffList.autoPlayedUrls())
+                        if (pick != null && !dev.dsh.miuixbrowser.player.NativePlayerActivity.showing) {
+                            sniffList.markAutoPlayed(pick.url)
+                            tab.playSniffed(context, pick, sniffList.items.toList())
+                        }
                     }
                 } else {
                     sniffDialogShow = true
                 }
             }
+        }
+        // 弹窗开着时给没有时长的项探时长（结果写回列表，行里的时长随之出现）
+        androidx.compose.runtime.LaunchedEffect(sniffDialogShow, sniffItems.size) {
+            if (sniffDialogShow) tab.probeDurations(sniffList, 8000)
         }
         // 换标签 / 换页：旧提示收起
         androidx.compose.runtime.LaunchedEffect(tab.id, tab.url) { sniffDialogShow = false }

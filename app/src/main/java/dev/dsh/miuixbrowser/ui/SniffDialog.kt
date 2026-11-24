@@ -84,6 +84,9 @@ private fun SniffRow(m: SniffedMedia, onClick: () -> Unit) {
         append(" · ")
         append(m.host)
         if (m.size > 0) append(" · ").append(Formatter.formatFileSize(context, m.size))
+        // 时长：页面 <video> 报的或后台探出来的；还没出结果就先不显示，出来后这一行自动补上
+        if (m.durationMs == MediaSniff.DURATION_LIVE) append(" · ").append(tr("直播"))
+        else MediaSniff.formatDuration(m.durationMs)?.let { append(" · ").append(it) }
     }
     Row(
         modifier = Modifier

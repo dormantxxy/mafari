@@ -15,8 +15,15 @@ import dev.dsh.miuixbrowser.player.NativePlayerActivity
 import dev.dsh.miuixbrowser.player.PlayerRequest
 import dev.dsh.miuixbrowser.player.PlayerSource
 import dev.dsh.miuixbrowser.sniff.MediaSniff
+import dev.dsh.miuixbrowser.sniff.SniffList
 import dev.dsh.miuixbrowser.sniff.SniffedMedia
 import dev.dsh.miuixbrowser.util.Diag
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 /*
@@ -43,14 +50,96 @@ internal fun BrowserTab.installMediaSniff() {
     }.onFailure { Diag.log("media sniff install failed: ${it.message}") }
 }
 
-/** 页面脚本的报告（主线程；来源 / 主框架 / 长度已在 [OneWayBridge] 校验）：{u, ct, len, el} */
+/**
+ * 页面脚本的报告（主线程；来源 / 主框架 / 长度已在 [OneWayBridge] 校验）：
+ * {u, ct, len, el, d?, pv?, ua?}。d = `<video>` 的时长（秒，直播 / 无限为 -2）；pv = 页面判断这是预览 / 装饰
+ * （循环、很小、不可见）；ua = 用户刚点过播放。后几项只有来自 `<video>` 的报告才有，同一地址后到的报告会并进已有那条。
+ */
 internal fun BrowserTab.onSniffMessage(json: String) {
     if (!MediaSniff.enabled) return
     val o = runCatching { JSONObject(json) }.getOrNull() ?: return
     val u = o.optString("u")
     val len = o.optLong("len", -1)
     val type = MediaSniff.classify(u, o.optString("ct").ifEmpty { null }, len, o.optBoolean("el")) ?: return
-    webSniffs.offer(SniffedMedia(u, type, MediaSniff.hostOf(u), len))
+    val d = o.optDouble("d", Double.NaN)
+    val durationMs = when {
+        d.isNaN() || d == -1.0 -> -1L
+        d == -2.0 -> MediaSniff.DURATION_LIVE
+        d >= 0 -> (d * 1000).toLong()
+        else -> -1L
+    }
+    val preview = if (o.has("pv")) o.optBoolean("pv") else null
+    webSniffs.offer(SniffedMedia(u, type, MediaSniff.hostOf(u), len, durationMs, preview, o.optBoolean("ua")))
+}
+
+/**
+ * 给还不知道时长的嗅探项探时长（后台线程做网络，结果写回 [list]；[timeoutMs] 内没探完的下次再来）。
+ *  - HLS：取清单（主清单再取第一条子清单），累加 EXTINF；没有 ENDLIST 当作直播；
+ *  - 整段文件：MediaMetadataRetriever 读容器头。
+ * 请求带当前页的 Referer / UA / Cookie（和播放时一致）。已经探过 / 页面已报过时长的跳过。
+ * 返回时本次关心的项要么有了结果，要么确实探不出来（或超时）。
+ */
+internal suspend fun BrowserTab.probeDurations(list: SniffList, timeoutMs: Long) {
+    val todo = list.items.filter { it.durationMs == -1L && list.probePending(it.url) }
+    if (todo.isEmpty()) return
+    val pageUrl = url
+    val gecko = isGecko
+    val ua = if (gecko) GeckoGm.userAgent.orEmpty() else runCatching { webView.settings.userAgentString }.getOrNull().orEmpty()
+    // WebView 的 Cookie 在主线程取（调用方在主线程协程里）；Gecko 的要一来一回，放进下面的 IO 里
+    val cookies = if (gecko) emptyMap() else todo.associate { m ->
+        m.url to runCatching { IncognitoProfile.cookieManagerFor(webView).getCookie(m.url) }.getOrNull().orEmpty()
+    }
+    todo.forEach { m ->
+        if (!list.beginProbe(m.url)) return@forEach // 别处（弹窗 / 自动播放）正在探
+        // 探测放进独立协程域：阻塞的网络 / 解析不响应取消，调用方超时就不再等，结果之后到了照样写回
+        probeScope.launch {
+            try {
+                val cookie = if (gecko) runCatching { GeckoGm.cookieHeader(m.url) }.getOrNull().orEmpty() else cookies[m.url].orEmpty()
+                val ms = runCatching { probeOne(m, pageUrl, ua, cookie) }.getOrDefault(-1L)
+                if (ms != -1L) list.setProbedDuration(m.url, ms)
+            } finally {
+                list.endProbe(m.url)
+            }
+        }
+    }
+    withTimeoutOrNull(timeoutMs) {
+        while (todo.any { list.probePending(it.url) }) delay(120)
+    }
+}
+
+private val probeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+private fun probeOne(m: SniffedMedia, referer: String, ua: String, cookie: String): Long {
+    fun fetch(u: String): String? {
+        val c = java.net.URL(u).openConnection() as java.net.HttpURLConnection
+        return try {
+            c.connectTimeout = 4000
+            c.readTimeout = 5000
+            if (ua.isNotBlank()) c.setRequestProperty("User-Agent", ua)
+            if (referer.isNotBlank()) c.setRequestProperty("Referer", referer)
+            if (cookie.isNotBlank()) c.setRequestProperty("Cookie", cookie)
+            if (c.responseCode !in 200..299) return null
+            c.inputStream.use { it.readNBytes(256 * 1024).toString(Charsets.UTF_8) }
+        } finally {
+            c.disconnect()
+        }
+    }
+    if (m.type == "hls") {
+        val top = fetch(m.url) ?: return -1
+        val variant = MediaSniff.firstVariant(top, m.url)
+        return MediaSniff.hlsDurationMs(if (variant != null) fetch(variant) ?: return -1 else top)
+    }
+    val r = android.media.MediaMetadataRetriever()
+    return try {
+        val headers = HashMap<String, String>()
+        if (ua.isNotBlank()) headers["User-Agent"] = ua
+        if (referer.isNotBlank()) headers["Referer"] = referer
+        if (cookie.isNotBlank()) headers["Cookie"] = cookie
+        r.setDataSource(m.url, headers)
+        r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it > 0 } ?: -1
+    } finally {
+        runCatching { r.release() }
+    }
 }
 
 /**

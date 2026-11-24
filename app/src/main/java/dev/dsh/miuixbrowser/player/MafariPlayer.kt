@@ -27,6 +27,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -65,6 +66,9 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
 
     /** 直播流：时长未知 / 动态窗口。进度条按这个决定是否可拖 */
     var isLive by mutableStateOf(false); private set
+
+    /** 当前在用的视频解码器名（MediaCodec 名，如 c2.qti.avc.decoder）；还没初始化 / 已释放时为 null。菜单里「解码方式」显示它 */
+    var videoDecoder by mutableStateOf<String?>(null); private set
 
     /** 可切换的视频源（主地址在最前）；只有一个时界面不显示源列表 */
     val sources: List<PlayerSource> = request.allSources()
@@ -186,6 +190,15 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
             .build()
         exo.setSeekParameters(if (tuning.seekMode == PlayerTuning.SEEK_KEYFRAME) SeekParameters.CLOSEST_SYNC else SeekParameters.EXACT)
         exo.addListener(listener)
+        exo.addAnalyticsListener(object : AnalyticsListener {
+            override fun onVideoDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                videoDecoder = decoderName
+            }
+
+            override fun onVideoDecoderReleased(eventTime: AnalyticsListener.EventTime, decoderName: String) {
+                if (videoDecoder == decoderName) videoDecoder = null
+            }
+        })
         // 设置里的「默认倍速」：打开就按这个速度起播（播放页里仍可临时改）
         PlayerPrefs.defaultSpeed(context).takeIf { it != 1f }?.let { changeSpeed(it) }
         exo.setMediaItem(buildItem(currentRequest), request.startMs.coerceAtLeast(0))
@@ -388,4 +401,10 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
         PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES -> tr("设备不支持这种编码")
         else -> tr("播放失败：{0}", e.errorCodeName)
     }
+}
+
+/** 按 MediaCodec 名判断是不是软件解码器（Google 自带的 OMX.google / c2.android / c2.google，或 ffmpeg 类扩展）；其余按硬件算。 */
+internal fun isSoftwareDecoder(name: String): Boolean {
+    val n = name.lowercase()
+    return n.startsWith("omx.google.") || n.startsWith("c2.android.") || n.startsWith("c2.google.") || n.contains("ffmpeg")
 }

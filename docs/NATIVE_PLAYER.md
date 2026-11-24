@@ -44,7 +44,7 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 ### 阶段二没做的（按约定只做界面）
 
 - 画中画、下载视频、复制视频链接：`PlayerSurface` 留了 `onPip` / `onDownload` / `onCopyLink` 三个可空回调，传 null 时按钮照常显示但灰掉（和脚本里 disabled 的样式一致）。
-- 视频源列表、页内小窗拖动、投屏、外部播放器。
+- 页内小窗拖动、投屏、外部播放器。
 
 ### 材质（miuix-glass）
 
@@ -54,12 +54,12 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 - 代价：TextureView 比 SurfaceView 略耗电，没有 HDR / DRM 直通；视频播放时每帧都会重录 + 重算模糊，低端机可能掉帧。需要真机确认，必要时给玻璃加开关或降低模糊。
 - 进度条仍是自绘的胶囊条（和脚本一致）；miuix 的 `Slider` 外观不同，要统一的话可以换。
 
-### 显示方式切换 / 音量
+### 渲染方式切换 / 音量
 
-- ⋯ 菜单最下面的「显示方式」：Texture / Surface 二选一，默认 Texture。切换时视频 View 整个重建（`key(textureMode)`），播放不中断。`MafariPlayer.attach/detach` 同时支持 `TextureView` 和 `SurfaceView`。
+- ⋯ 菜单里的「渲染方式」：SurfaceView / TextureView 二选一（默认 TextureView），选择会写回设置（`PlayerPrefs.setRenderMode`）。菜单里「后台播放」是开关行；最下面「解码方式」只读，显示当前实际在用的视频解码器（硬件 / 软件 + MediaCodec 名，来自 `AnalyticsListener.onVideoDecoderInitialized`）。视频源切换已从菜单移除（`MafariPlayer.playSource` 仍保留）。切换时视频 View 整个重建（`key(textureMode)`），播放不中断。`MafariPlayer.attach/detach` 同时支持 `TextureView` 和 `SurfaceView`。
 - Surface 模式录不到画面：按钮 / 弹层的采样源传 null，miuix 玻璃自动退回不透明底（弹层用自带的 fallback 底）。
 - 左下音量钮改为点开弹层：喇叭点一下静音 / 取消静音，滑条拖动 0–100%，右边显示百分比。调的是 ExoPlayer 自身音量（`MafariPlayer.volume`），叠在系统媒体音量之上，不改系统音量。
-- 显示方式不持久化，每次打开播放页回到 Texture。
+- 渲染方式持久化，下次打开播放页沿用。
 
 ### 其他和脚本不一样的地方
 

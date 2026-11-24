@@ -2198,18 +2198,17 @@ m3u8 下载完成后把 TS 转封装成 MP4（不重新编码；编码不支持�
 复制视频链接	Copy video link
 清晰度	Quality
 2x 倍速播放中	Playing at 2x
-显示方式	Render mode
-显示方式：TextureView（支持玻璃模糊）	Render mode: TextureView (glass blur supported)
-显示方式：SurfaceView（无玻璃模糊，更省电）	Render mode: SurfaceView (no glass blur, lower power)
+渲染方式：TextureView（支持玻璃模糊）	Render mode: TextureView (glass blur supported)
+渲染方式：SurfaceView（无玻璃模糊，更省电）	Render mode: SurfaceView (no glass blur, lower power)
 已加入下载	Added to downloads
-视频源	Video sources
-视频源 {0}	Source {0}
-已切换视频源	Switched video source
 后台播放	Background playback
 开	On
 关	Off
 后台播放：已开启（切到后台继续播放音频）	Background playback: on (audio keeps playing in the background)
 后台播放：已关闭（切到后台会暂停）	Background playback: off (pauses when you leave)
+解码方式	Decoding
+硬件解码	Hardware decoding
+软件解码	Software decoding
 视频	Video
 正在播放	Playing
 网页里出现视频（m3u8 / mp4 等）时弹出提示，可用原生播放器打开；刷新页面后生效	Show a prompt when a page plays a video (m3u8 / mp4, etc.) so you can open it in the native player; takes effect after a page refresh

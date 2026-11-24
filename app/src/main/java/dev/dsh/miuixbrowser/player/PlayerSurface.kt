@@ -96,7 +96,7 @@ import top.yukonga.miuix.kmp.material.GlassMaterials
 import top.yukonga.miuix.kmp.material.GlassShape
 
 /*
- * 和 float-player.js 一致的播放界面；下载 / 复制链接 / 画中画 / 视频源 / 后台播放开关由调用方（[NativePlayerActivity]）接入。
+ * 和 float-player.js 一致的播放界面；下载 / 复制链接 / 画中画 / 后台播放开关由调用方（[NativePlayerActivity]）接入。
  *
  * 布局对应脚本里的 DOM：
  *   scrim 暗角 · 中部 后退10 / 播放 / 快进10 · 底部 时间 + 胶囊进度条 + 时间
@@ -202,7 +202,7 @@ internal fun PlayerSurface(
         val recorded = rememberLayerBackdrop()
         val backdrop: Backdrop? = if (textureMode) recorded else null
         Box(Modifier.fillMaxSize().layerBackdrop(recorded).background(Color.Black)) {
-            // key：切换显示方式时整个 View 重建；旧 View 在 onRelease 里 detach
+            // key：切换渲染方式时整个 View 重建；旧 View 在 onRelease 里 detach
             key(textureMode) {
                 AndroidView(
                     factory = { ctx -> (if (textureMode) TextureView(ctx) else SurfaceView(ctx)).also { player.attach(it) } },
@@ -407,7 +407,7 @@ internal fun PlayerSurface(
                         }
                     }
 
-                    // ---- 更多菜单：下载 / 复制链接 / 清晰度 / 显示方式 ----
+                    // ---- 更多菜单：下载 / 复制链接 / 投屏 / 清晰度 / 后台播放（开关）/ 渲染方式 / 解码方式（只读） ----
                     if (popup == POP_MENU) {
                         val menuWidth = minOf(180.dp * scale, boxW - 48.dp - fo * 2)
                         GlassPanel(
@@ -458,71 +458,45 @@ internal fun PlayerSurface(
                                     )
                                 }
                             }
-                            if (player.sources.size > 1) {
-                                Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
-                                MenuSectionTitle(tr("视频源"), scale)
-                                Column(Modifier.padding(start = 4.dp * scale, end = 4.dp * scale, bottom = 6.dp * scale)) {
-                                    player.sources.forEachIndexed { i, src ->
-                                        SourceRow(
-                                            label = src.label.ifBlank { sourceLabel(src.url, i) },
-                                            active = i == player.sourceIndex,
-                                            scale = scale,
-                                        ) {
-                                            popup = POP_NONE
-                                            if (i != player.sourceIndex) {
-                                                player.playSource(i)
-                                                toast = Toast(tr("已切换视频源"))
-                                            }
-                                            poke++
-                                        }
-                                    }
-                                }
-                            }
                             if (bgPlay != null) {
                                 Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
-                                MenuSectionTitle(tr("后台播放"), scale)
-                                Column(Modifier.padding(start = 9.dp * scale, end = 9.dp * scale, top = 4.dp * scale, bottom = 9.dp * scale)) {
-                                    ChipGrid(
-                                        labels = listOf(tr("开"), tr("关")),
-                                        isActive = { (it == 0) == bgPlay },
-                                        scale = scale,
-                                        chipWidth = (menuWidth - 18.dp * scale - 5.dp * scale) / 2f,
-                                        columns = 2,
-                                        onPick = { i ->
-                                            onBgPlayChange(i == 0)
-                                            popup = POP_NONE
-                                            toast = Toast(if (i == 0) tr("后台播放：已开启（切到后台继续播放音频）") else tr("后台播放：已关闭（切到后台会暂停）"))
-                                            poke++
-                                        },
-                                    )
+                                MenuSwitchRow(tr("后台播放"), checked = bgPlay, scale = scale) {
+                                    onBgPlayChange(!bgPlay)
+                                    toast = Toast(if (!bgPlay) tr("后台播放：已开启（切到后台继续播放音频）") else tr("后台播放：已关闭（切到后台会暂停）"))
+                                    poke++
                                 }
                             }
                             Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
-                            Text(
-                                text = tr("显示方式"),
-                                color = Color(0x8CFFFFFF),
-                                fontSize = (9.5f * scale).sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(start = 11.dp * scale, end = 11.dp * scale, top = 7.dp * scale, bottom = 3.dp * scale),
-                            )
+                            MenuSectionTitle(tr("渲染方式"), scale)
                             Column(Modifier.padding(start = 9.dp * scale, end = 9.dp * scale, top = 4.dp * scale, bottom = 9.dp * scale)) {
                                 ChipGrid(
-                                    labels = listOf("Texture", "Surface"),
-                                    isActive = { (it == 0) == textureMode },
+                                    labels = listOf("SurfaceView", "TextureView"),
+                                    isActive = { (it == 1) == textureMode },
                                     scale = scale,
                                     chipWidth = (menuWidth - 18.dp * scale - 5.dp * scale) / 2f,
                                     columns = 2,
                                     onPick = { i ->
-                                        textureMode = i == 0
+                                        textureMode = i == 1
                                         PlayerPrefs.setRenderMode(appCtx, if (textureMode) PlayerPrefs.RENDER_TEXTURE else PlayerPrefs.RENDER_SURFACE)
                                         popup = POP_NONE
                                         toast = Toast(
-                                            if (textureMode) tr("显示方式：TextureView（支持玻璃模糊）") else tr("显示方式：SurfaceView（无玻璃模糊，更省电）"),
+                                            if (textureMode) tr("渲染方式：TextureView（支持玻璃模糊）") else tr("渲染方式：SurfaceView（无玻璃模糊，更省电）"),
                                         )
                                         poke++
                                     },
                                 )
                             }
+                            // ---- 解码方式：只读，显示当前实际在用的视频解码器 ----
+                            Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+                            MenuSectionTitle(tr("解码方式"), scale)
+                            val dec = player.videoDecoder
+                            Text(
+                                text = if (dec == null) "—" else (if (isSoftwareDecoder(dec)) tr("软件解码") else tr("硬件解码")) + "\n" + dec,
+                                color = Color.White,
+                                fontSize = (11.5f * scale).sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(start = 11.dp * scale, end = 11.dp * scale, top = 2.dp * scale, bottom = 9.dp * scale),
+                            )
                         }
                     }
                 }
@@ -640,34 +614,46 @@ private fun MenuSectionTitle(text: String, scale: Float) {
     )
 }
 
-/** 视频源列表的一行：当前源白底黑字（和清晰度小方块的选中样式一致），其余透明底。 */
+/** 菜单里的开关行：左边文字，右边胶囊开关（开 = 白底黑点）。点整行切换，不关菜单。 */
 @Composable
-private fun SourceRow(label: String, active: Boolean, scale: Float, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(8.dp * scale)
-    Box(
+private fun MenuSwitchRow(label: String, checked: Boolean, scale: Float, onToggle: () -> Unit) {
+    val trackW = 32.dp * scale
+    val trackH = 19.dp * scale
+    val pad = 2.dp * scale
+    val thumb = trackH - pad * 2
+    val x by animateDpAsState(if (checked) trackW - thumb - pad else pad, tween(160), label = "switchThumb")
+    Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 1.dp * scale)
-            .clip(shape)
-            .background(if (active) Color.White else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp * scale, vertical = 6.dp * scale),
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 11.dp * scale, vertical = 8.dp * scale),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
-            color = if (active) Color(0xFF111111) else Color.White,
+            color = Color.White,
             fontSize = (11.5f * scale).sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        Box(
+            Modifier
+                .size(trackW, trackH)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(if (checked) Color.White else ChipFill)
+                .border(1.dp, if (checked) Color.White else PanelBorder, androidx.compose.foundation.shape.CircleShape),
+        ) {
+            Box(
+                Modifier
+                    .offset(x = x, y = pad)
+                    .size(thumb)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(if (checked) Color(0xFF111111) else Color(0xB3FFFFFF)),
+            )
+        }
     }
-}
-
-/** 没有名字的源：「源 2 · host」，一眼能分出来是哪个站的。 */
-private fun sourceLabel(url: String, index: Int): String {
-    val host = url.substringAfter("://", "").substringBefore('/').substringBefore('?').substringBefore(':')
-    return if (host.isBlank()) tr("视频源 {0}", index + 1) else tr("视频源 {0}", index + 1) + " · " + host
 }
 
 @Composable

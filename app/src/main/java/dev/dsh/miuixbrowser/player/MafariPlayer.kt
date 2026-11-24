@@ -4,6 +4,8 @@ package dev.dsh.miuixbrowser.player
 
 import android.content.Context
 import android.view.SurfaceView
+import android.view.TextureView
+import android.view.View
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -44,6 +46,10 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
     var durationMs by mutableLongStateOf(0); private set
     var bufferedMs by mutableLongStateOf(0); private set
     var speed by mutableFloatStateOf(1f); private set
+    var muted by mutableStateOf(false); private set
+
+    /** 播放器自身音量 0..1（ExoPlayer 的 volume，叠在系统媒体音量之上，不改系统音量） */
+    var volume by mutableFloatStateOf(1f); private set
     var videoWidth by mutableIntStateOf(0); private set
     var videoHeight by mutableIntStateOf(0); private set
     var error by mutableStateOf<String?>(null); private set
@@ -128,8 +134,24 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
         exo.playWhenReady = true
     }
 
-    fun attach(view: SurfaceView) = exo.setVideoSurfaceView(view)
-    fun detach(view: SurfaceView) = exo.clearVideoSurfaceView(view)
+    /**
+     * 两种显示方式：TextureView 画进 View 层级，能被 miuix 的 layerBackdrop 采样做玻璃模糊；
+     * SurfaceView 由系统合成器直接送显，更省电、延迟低，但采样不到（界面会退回不透明底）。
+     * 切换时界面会先建新 View 再释放旧的，ExoPlayer 的 clear 只在 View 仍是当前输出时才生效，顺序无所谓。
+     */
+    fun attach(view: View) {
+        when (view) {
+            is TextureView -> exo.setVideoTextureView(view)
+            is SurfaceView -> exo.setVideoSurfaceView(view)
+        }
+    }
+
+    fun detach(view: View) {
+        when (view) {
+            is TextureView -> exo.clearVideoTextureView(view)
+            is SurfaceView -> exo.clearVideoSurfaceView(view)
+        }
+    }
 
     /** 周期性刷新进度（界面每 250ms 调一次；不在播放时也要刷新拖动后的位置） */
     fun refresh() {
@@ -147,9 +169,30 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
     fun seekTo(ms: Long) { exo.seekTo(ms.coerceIn(0, durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE)); refresh() }
     fun seekBy(deltaMs: Long) = seekTo(exo.currentPosition + deltaMs)
 
-    fun setSpeed(s: Float) {
+    fun changeSpeed(s: Float) {
         exo.playbackParameters = PlaybackParameters(s)
         speed = s
+    }
+
+    /** 拖到 0 以上自动取消静音；拖到 0 等同静音（界面按 [muted] 或 volume == 0 显示喇叭关） */
+    fun changeVolume(v: Float) {
+        volume = v.coerceIn(0f, 1f)
+        if (volume > 0f) muted = false
+        applyVolume()
+    }
+
+    fun toggleMute() {
+        if (muted || volume == 0f) {
+            muted = false
+            if (volume == 0f) volume = 0.5f // 从 0 取消静音时给个可听见的音量
+        } else {
+            muted = true
+        }
+        applyVolume()
+    }
+
+    private fun applyVolume() {
+        exo.volume = if (muted) 0f else volume
     }
 
     /** null = 自动 */

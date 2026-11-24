@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Mafari Reader",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Mafari 阅读模式的 Gecko 适配层（与 WebView 共用同一份 mafari_reader.js）",
   "browser_specific_settings": { "gecko": { "id": "reader@mafari.dev" } },
   "permissions": [

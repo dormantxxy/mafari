@@ -761,6 +761,11 @@ class BrowserTab(
         private set
     private var engineActiveFlag = false
 
+    /** Gecko 诊断：内容脚本回报的视口尺寸（JSON 一行），连同原生侧的沉浸参数写进运行日志；WebView 标签无操作 */
+    fun geckoViewportDiag(pageJson: String) {
+        gecko?.logViewport(pageJson)
+    }
+
     /** Gecko 原生沉浸：最大可收起高度 + 当前底部被推出屏幕的高度（像素）；WebView 标签无操作 */
     fun geckoApplyImmersive(maxPx: Int, clipPx: Int) {
         gecko?.applyImmersive(maxPx, clipPx)

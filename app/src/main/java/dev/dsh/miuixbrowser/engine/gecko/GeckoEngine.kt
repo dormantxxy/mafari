@@ -225,6 +225,17 @@ class GeckoTabEngine(
         }
     }
 
+    /**
+     * 诊断：把页面看到的视口（scroll-metrics.js 的 vp 消息）和原生沉浸的当前参数写进运行日志，
+     * 复现「滑到底不加载更多」时对照：页面 innerHeight / visualViewport 与 GeckoView 实际高度、裁剪量差多少。
+     */
+    fun logViewport(pageJson: String) {
+        Diag.log(
+            "gecko vp: page=$pageJson native{immersiveSetting=${GeckoDebug.nativeImmersive} max=$immersiveMax clip=$immersiveClip " +
+                "viewW=${view.width} viewH=${view.height} viewTransY=${view.translationY} viewTop=${view.top}}",
+        )
+    }
+
     // ---------------------------------------------------------------- SurfaceView 帧率声明 / 诊断
     //
     // SurfaceView 的内容由 Gecko 的合成器直接送显，UI 线程在滑动时几乎不出帧；部分系统（自适应刷新率）

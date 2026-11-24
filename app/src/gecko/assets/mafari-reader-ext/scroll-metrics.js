@@ -149,11 +149,39 @@
     try { port.postMessage({ t: 'dock', b: b }); } catch (e) {}
   }
 
+  // 诊断（Gecko 调试 → 运行日志开着时原生才会记录，否则直接丢弃）：接近页面底部时回报页面看到的视口尺寸，
+  // 用来排查「原生沉浸下滑到底不触发无限滚动」。限频 250ms、只在数值变化时发
+  var lastVp = '';
+  var lastVpAt = 0;
+  function postViewport(r) {
+    if (r > 600) return;
+    var now = Date.now();
+    if (now - lastVpAt < 250) return;
+    try {
+      var de = document.documentElement, b = document.body, vv = window.visualViewport;
+      var m = {
+        t: 'vp', r: r,
+        iw: window.innerWidth, ih: window.innerHeight,
+        cw: de ? de.clientWidth : 0, ch: de ? de.clientHeight : 0,
+        vvh: vv ? Math.round(vv.height * 100) / 100 : -1, vvt: vv ? Math.round(vv.offsetTop * 100) / 100 : -1,
+        sh: Math.max(de ? de.scrollHeight : 0, b ? b.scrollHeight : 0),
+        y: Math.round((window.pageYOffset || 0) * 100) / 100,
+        dpr: window.devicePixelRatio || 1
+      };
+      var key = [m.ih, m.vvh, m.vvt, m.sh, m.y].join('/');
+      if (key === lastVp) return;
+      lastVp = key;
+      lastVpAt = now;
+      port.postMessage(m);
+    } catch (e) {}
+  }
+
   function post() {
     queued = false;
     if (!port) return;
     postDock();
     var r = remaining();
+    postViewport(r);
     if (r === last) return;
     last = r;
     try { port.postMessage({ t: 'scroll', r: r }); } catch (e) {}

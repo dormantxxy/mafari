@@ -98,6 +98,13 @@ internal object GeckoReader {
                             val r = o.optInt("r", -1)
                             main.post { tab.geckoScrollRemaining(r) }
                         }
+                        // scroll-metrics.js：接近页面底部时的视口尺寸（仅「运行日志」开着时才处理，见 GeckoEngine.logViewport）
+                        "vp" -> {
+                            if (Diag.enabled) {
+                                val line = o.toString()
+                                main.post { tab.geckoViewportDiag(line) }
+                            }
+                        }
                         // scroll-metrics.js：页面是否带固定在底部的整宽栏（悬浮三段式据此决定是否让位）
                         "dock" -> {
                             val b = o.optBoolean("b")

@@ -220,8 +220,6 @@ fun DownloadsScreen(
     onMultiThreadMinMbChange: (Int) -> Unit = {},
     externalDownloader: String = "",
     onExternalDownloaderChange: (String) -> Unit = {},
-    hlsToMp4: Boolean = true,
-    onHlsToMp4Change: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -324,13 +322,6 @@ fun DownloadsScreen(
                                     )
                                 }
                             }
-                            // m3u8 一律走内置下载器，所以这一项不受上面「下载器」选择影响
-                            AppSwitchPreference(
-                                title = tr("HLS 转 MP4"),
-                                summary = tr("m3u8 下载完成后把 TS 转封装成 MP4（不重新编码；编码不支持时保留 TS）"),
-                                checked = hlsToMp4,
-                                onCheckedChange = onHlsToMp4Change,
-                            )
                         }
                     }
                     if (tasks.isEmpty()) {

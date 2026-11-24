@@ -923,6 +923,7 @@ fun BrowserScreen(
     entry<AppRoute.PrivacyPolicyPage> { nav.SubPage(AppRoute.PrivacyPolicyPage) }
     entry<AppRoute.Downloads> { nav.SubPage(AppRoute.Downloads) }
     entry<AppRoute.AdBlockPage> { nav.SubPage(AppRoute.AdBlockPage) }
+    entry<AppRoute.MediaSniffPage> { nav.SubPage(AppRoute.MediaSniffPage) }
     entry<AppRoute.CookiePage> { nav.SubPage(AppRoute.CookiePage) }
     entry<AppRoute.PasswordPage> { nav.SubPage(AppRoute.PasswordPage) }
     entry<AppRoute.FxaPage> { nav.SubPage(AppRoute.FxaPage) }

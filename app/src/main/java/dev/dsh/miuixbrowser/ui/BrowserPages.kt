@@ -52,6 +52,7 @@ internal fun BrowserNav.SubPage(route: AppRoute) {
                 onOpenGeckoDebug = { pushPage(AppRoute.GeckoDebugPage) },
                 onOpenWebViewDebug = { pushPage(AppRoute.WebViewDebugPage) },
                 onOpenAdBlock = { pushPage(AppRoute.AdBlockPage) },
+                onOpenMediaSniff = { pushPage(AppRoute.MediaSniffPage) },
                 onOpenCookies = { pushPage(AppRoute.CookiePage) },
                 onOpenPasswords = { pushPage(AppRoute.PasswordPage) },
                 onOpenPrivacyEnhance = { pushPage(AppRoute.PrivacyEnhancePage) },
@@ -97,8 +98,15 @@ internal fun BrowserNav.SubPage(route: AppRoute) {
                 onMultiThreadMinMbChange = { settings.updateDownloadMultiThreadMinMb(it) },
                 externalDownloader = settings.externalDownloader,
                 onExternalDownloaderChange = { settings.updateExternalDownloader(it) },
-                hlsToMp4 = settings.hlsToMp4,
-                onHlsToMp4Change = { settings.updateHlsToMp4(it) },
+            )
+        }
+        AppRoute.MediaSniffPage -> {
+            MediaSniffScreen(
+                settings = settings,
+                onBack = { popPage() },
+                // 总开关：一键启停悬浮媒体播放器 / M3U8 媒体下载器脚本；其余（嗅探、自动画中画、自动悬浮、宿主能力）由 MediaFeatures 即时生效
+                onMasterChange = { on -> extensions.setMediaScriptsEnabled(on) },
+                blurEnabled = settings.blurEnabled,
             )
         }
         AppRoute.AdBlockPage -> {

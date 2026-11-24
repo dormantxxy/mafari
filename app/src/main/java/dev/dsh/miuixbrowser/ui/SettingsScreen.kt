@@ -138,6 +138,7 @@ fun SettingsScreen(
     onOpenGeckoDebug: () -> Unit = {},
     onOpenWebViewDebug: () -> Unit = {},
     onOpenAdBlock: () -> Unit,
+    onOpenMediaSniff: () -> Unit = {},
     onOpenPrivacyEnhance: () -> Unit,
     onOpenCookies: () -> Unit = {},
     onOpenPasswords: () -> Unit = {},
@@ -477,12 +478,6 @@ fun SettingsScreen(
                             },
                         )
                     }
-                    AppSwitchPreference(
-                        title = tr("嗅探网页视频"),
-                        summary = tr("网页里出现视频（m3u8 / mp4 等）时弹出提示，可用原生播放器打开；刷新页面后生效"),
-                        checked = settings.mediaSniff,
-                        onCheckedChange = { settings.updateMediaSniff(it) },
-                    )
                     // 内核切换只在带 Gecko 的版本里出现；无内核版只有系统 WebView
                     if (EngineSupport.GECKO_BUNDLED) {
                         AppDropdownPreference(
@@ -523,7 +518,7 @@ fun SettingsScreen(
                     EngineRow(visible = !settings.geckoMode) {
                         AppSwitchPreference(
                             title = tr("网页增强"),
-                            summary = tr("总开关：一键启停全部油猴脚本、去广告和拓展；关闭后全部停止加载，不占内存和资源，冷启动也不再加载"),
+                            summary = tr("总开关：一键启停全部油猴脚本、去广告、拓展和媒体嗅探与播放；关闭后全部停止加载，不占内存和资源，冷启动也不再加载"),
                             checked = settings.pageEnhancements,
                             onCheckedChange = {
                                 settings.updatePageEnhancements(it)
@@ -553,6 +548,15 @@ fun SettingsScreen(
                         title = tr("脚本管理"),
                         summary = tr("用户脚本 / 油猴脚本"),
                         onClick = onOpenScripts,
+                    )
+                    SettingsRow(
+                        title = tr("媒体嗅探与播放"),
+                        summary = when {
+                            !settings.mediaMaster -> tr("已关闭")
+                            !settings.geckoMode && !settings.pageEnhancements -> tr("网页增强已关闭 · 未运行")
+                            else -> tr("嗅探 · 悬浮播放 · 自动画中画 · HLS 转 MP4")
+                        },
+                        onClick = onOpenMediaSniff,
                     )
                     SettingsRow(
                         title = tr("代理"),

@@ -359,10 +359,51 @@ class ExtensionStore(context: Context) {
         persist()
     }
 
+    /** 「媒体嗅探与播放」里的推荐脚本（悬浮媒体播放器 / M3U8 媒体下载器）：按来源地址认 */
+    fun mediaScriptIds(): List<String> {
+        val urls = BUILTIN_SCRIPTS.filter { it.media && it.userScriptUrl.isNotBlank() }.map { it.userScriptUrl }.toSet()
+        return items.filter { it.sourceUrl in urls }.map { it.id }
+    }
+
+    /**
+     * 媒体总开关联动：关 = 把这些脚本停用，并记下「是我停的」；开 = 只把记下的那些恢复。
+     * 用户自己单独停用的媒体脚本不会被总开关擅自打开。
+     */
+    fun setMediaScriptsEnabled(enabled: Boolean) {
+        val ids = mediaScriptIds().toSet()
+        if (!enabled) {
+            val stopped = prefs.getStringSet("media_stopped", emptySet()).orEmpty().toMutableSet()
+            var changed = false
+            items.forEachIndexed { index, script ->
+                if (script.id in ids && script.enabled) {
+                    items[index] = script.copy(enabled = false)
+                    stopped += script.id
+                    changed = true
+                }
+            }
+            prefs.edit().putStringSet("media_stopped", stopped).apply()
+            if (changed) persist()
+        } else {
+            val stopped = prefs.getStringSet("media_stopped", emptySet()).orEmpty()
+            var changed = false
+            items.forEachIndexed { index, script ->
+                if (script.id in stopped && !script.enabled) {
+                    items[index] = script.copy(enabled = true)
+                    changed = true
+                }
+            }
+            prefs.edit().remove("media_stopped").apply()
+            if (changed) persist()
+        }
+    }
+
     /** 网页增强总开关联动：全部脚本一起开 / 关 */
     fun setAllEnabled(enabled: Boolean) {
         var changed = false
+        // 媒体总开关还关着时，网页增强重新打开也不把媒体脚本带起来
+        val keepOff = if (enabled && !dev.dsh.miuixbrowser.sniff.MediaFeatures.master) mediaScriptIds().toSet() else emptySet()
         items.forEachIndexed { index, script ->
+            if (script.id in keepOff) return@forEachIndexed
             if (script.enabled != enabled) {
                 items[index] = script.copy(enabled = enabled)
                 changed = true

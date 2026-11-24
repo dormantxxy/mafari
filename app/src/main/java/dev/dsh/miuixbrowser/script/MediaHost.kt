@@ -1,6 +1,7 @@
 package dev.dsh.miuixbrowser.script
 
 import dev.dsh.miuixbrowser.i18n.tr
+import dev.dsh.miuixbrowser.sniff.MediaFeatures
 
 import android.app.Activity
 import android.app.PendingIntent
@@ -120,6 +121,11 @@ object MediaHost {
             val o = runCatching { JSONObject(json) }.getOrDefault(JSONObject())
             fun ok(extra: JSONObject = JSONObject()) = reply.send(fn, "r", extra.put("ok", true).toString())
             fun fail(why: String) = reply.send(fn, "r", JSONObject().put("ok", false).put("error", why).toString())
+            // 设置 → 媒体嗅探与播放 的总开关 / 网页增强关闭：宿主能力整体停用，脚本按「没有宿主」退回原行为。
+            // release 照常放行（清理状态）。
+            if (!MediaFeatures.active && op != "release") {
+                return@post if (op == "caps") reply.send(fn, "r", JSONObject().put("api", 0).toString()) else fail("disabled")
+            }
             try {
                 when (op) {
                     "caps" -> {
@@ -129,7 +135,9 @@ object MediaHost {
                             val pip = a.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
                             reply.send(
                                 fn, "r",
-                                JSONObject().put("api", 1).put("engine", engine).put("pip", pip).put("cast", true).put("play", true).put("ext", true).put("dl", true).toString(),
+                                JSONObject().put("api", 1).put("engine", engine).put("pip", pip).put("cast", true).put("play", true).put("ext", true).put("dl", true)
+                                    // 「自动悬浮播放」开关：false 时脚本不要自动弹悬浮播放器（用户手动点开不受影响）
+                                    .put("autoFloat", MediaFeatures.autoFloatActive).put("autoPip", MediaFeatures.autoPipActive).toString(),
                             )
                         }
                     }
@@ -295,7 +303,7 @@ object MediaHost {
             .setAspectRatio(ratio(armW, armH))
             .setActions(actions)
             // Android 12+：播放中按 Home / 手势返回桌面，系统直接进画中画（比 onUserLeaveHint 更稳，没有切换闪烁）
-            .setAutoEnterEnabled(armed && SystemClock.uptimeMillis() >= suppressUntil)
+            .setAutoEnterEnabled(armed && MediaFeatures.autoPipActive && SystemClock.uptimeMillis() >= suppressUntil)
             .setSeamlessResizeEnabled(false)
             .build()
     }
@@ -314,7 +322,7 @@ object MediaHost {
 
     /** MainActivity.onUserLeaveHint：按 Home / 切任务。系统已替我们自动进画中画（Android 12+）时这里是兜底 */
     fun onUserLeaveHint(a: Activity) {
-        if (!armed || pipOn || SystemClock.uptimeMillis() < suppressUntil) return
+        if (!armed || !MediaFeatures.autoPipActive || pipOn || SystemClock.uptimeMillis() < suppressUntil) return
         if (!a.isInPictureInPictureMode) enterPip(a)
     }
 

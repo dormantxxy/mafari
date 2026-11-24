@@ -1638,7 +1638,7 @@ WebView（系统）	WebView (system)
  内核	 engine
 管理 Firefox 扩展	Manage Firefox extensions
 网页增强	Web enhancements
-总开关：一键启停全部油猴脚本、去广告和拓展；关闭后全部停止加载，不占内存和资源，冷启动也不再加载	Master switch: turns all userscripts, ad blocking and extensions on or off at once. When off, everything stops loading and uses no memory or resources, and nothing loads at cold start either
+总开关：一键启停全部油猴脚本、去广告、拓展和媒体嗅探与播放；关闭后全部停止加载，不占内存和资源，冷启动也不再加载	Master switch: turns all userscripts, ad blocking, extensions and media sniffing & playback on or off at once. When off, everything stops loading and uses no memory or resources, and nothing loads at cold start either
 已开启 · 	On · 
  个订阅 · 订阅源导入、自定义规则	 subscriptions · import subscriptions, custom rules
 脚本管理	Script management
@@ -2212,8 +2212,18 @@ m3u8 下载完成后把 TS 转封装成 MP4（不重新编码；编码不支持�
 后台播放：已关闭（切到后台会暂停）	Background playback: off (pauses when you leave)
 视频	Video
 正在播放	Playing
-嗅探网页视频	Detect web videos
 网页里出现视频（m3u8 / mp4 等）时弹出提示，可用原生播放器打开；刷新页面后生效	Show a prompt when a page plays a video (m3u8 / mp4, etc.) so you can open it in the native player; takes effect after a page refresh
 发现视频	Video found
 用原生播放器打开，支持画中画和后台播放	Open in the native player, with picture-in-picture and background playback
 忽略	Dismiss
+媒体嗅探与播放	Media sniffing & playback
+嗅探 · 悬浮播放 · 自动画中画 · HLS 转 MP4	Sniffing · Floating player · Auto picture-in-picture · HLS to MP4
+总开关	Master switch
+一键停用：嗅探、悬浮媒体播放器和 M3U8 媒体下载器脚本、自动画中画、自动悬浮播放；关闭后不再拦截 / 弹窗，刷新页面后生效	Turn off in one tap: sniffing, the Floating Media Player and M3U8 Media Downloader scripts, auto picture-in-picture and auto floating playback. When off, nothing is intercepted or prompted. Takes effect after refreshing the page
+「网页增强」已关闭，本页功能暂不运行。重新打开网页增强后恢复。	"Web enhancements" is off, so the features on this page are not running. Turn web enhancements back on to resume.
+嗅探与播放	Sniffing & playback
+嗅探媒体播放	Sniff media for playback
+退出自动画中画	Auto picture-in-picture on exit
+全屏播放视频时按 Home / 手势返回桌面，自动进入画中画小窗	When a video is playing full screen, pressing Home or swiping back to the home screen automatically opens a picture-in-picture window
+自动悬浮播放	Auto floating playback
+页面里识别到视频后自动弹出悬浮播放器；关闭后不再自动弹出，仍可手动打开（需脚本支持，刷新页面后生效）	Automatically opens the floating player when a video is detected on a page. When off, it no longer opens by itself but can still be opened manually (requires script support; takes effect after refreshing the page)

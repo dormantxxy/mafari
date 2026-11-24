@@ -37,6 +37,9 @@ sealed interface AppRoute : NavKey {
     /** 设置 → 高级 → 去广告 */
     data object AdBlockPage : AppRoute
 
+    /** 设置 → 高级 → 媒体嗅探与播放（总开关 / 嗅探 / 自动画中画 / 自动悬浮播放 / HLS 转 MP4，两个内核共用） */
+    data object MediaSniffPage : AppRoute
+
     /** 设置 → 隐私与安全 → Cookie 管理（两个内核共用） */
     data object CookiePage : AppRoute
 

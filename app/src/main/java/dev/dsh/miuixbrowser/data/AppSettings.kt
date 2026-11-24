@@ -426,6 +426,7 @@ class AppSettings(context: Context) {
     fun updateBrowserEngine(engine: Int) {
         browserEngine = engine.coerceIn(ENGINE_WEBVIEW, ENGINE_GECKO)
         prefs.edit().putInt(KEY_ENGINE, browserEngine).apply()
+        syncMediaFeatures() // 网页增强总开关只在 WebView 内核下约束媒体功能
     }
 
     /** 切到 Gecko 前的状态快照：去广告 / DNT / 禁 WebRTC / 指纹保护（网页增强与脚本总开关两种内核通用，不动） */
@@ -769,6 +770,7 @@ class AppSettings(context: Context) {
         pageEnhancements = enabled
         prefs.edit().putBoolean(KEY_ENHANCE, enabled).apply()
         EngineSupport.notePageEnhancements(enabled)
+        syncMediaFeatures()
     }
 
     /** 手动标记广告：长按网页元素时是否出现「标记为广告」（需要网页增强开启，WebView 内核） */
@@ -920,17 +922,68 @@ class AppSettings(context: Context) {
         prefs.edit().putBoolean(KEY_DNT, enabled).apply()
     }
 
-    /** 嗅探网页视频：发现 m3u8 / mp4 等地址时弹出提示，用原生播放器打开（见 sniff/MediaSniff） */
-    var mediaSniff by mutableStateOf(prefs.getBoolean(KEY_SNIFF, true).also { dev.dsh.miuixbrowser.sniff.MediaSniff.enabled = it })
+    /** 嗅探媒体播放：发现 m3u8 / mp4 等地址时弹出提示，用原生播放器打开（见 sniff/MediaSniff）。设置 → 媒体嗅探与播放 */
+    var mediaSniff by mutableStateOf(prefs.getBoolean(KEY_SNIFF, true))
         private set
 
     fun updateMediaSniff(enabled: Boolean) {
         mediaSniff = enabled
-        dev.dsh.miuixbrowser.sniff.MediaSniff.enabled = enabled
         prefs.edit().putBoolean(KEY_SNIFF, enabled).apply()
+        syncMediaFeatures()
+    }
+
+    /** 媒体嗅探与播放总开关：一键停用嗅探、悬浮播放脚本、自动画中画、脚本宿主能力 */
+    var mediaMaster by mutableStateOf(prefs.getBoolean(KEY_MEDIA_MASTER, true))
+        private set
+
+    fun updateMediaMaster(enabled: Boolean) {
+        mediaMaster = enabled
+        prefs.edit().putBoolean(KEY_MEDIA_MASTER, enabled).apply()
+        syncMediaFeatures()
+    }
+
+    /** 退出（按 Home / 手势返回桌面）时，全屏播放中的视频自动进入画中画 */
+    var mediaAutoPip by mutableStateOf(prefs.getBoolean(KEY_MEDIA_AUTO_PIP, true))
+        private set
+
+    fun updateMediaAutoPip(enabled: Boolean) {
+        mediaAutoPip = enabled
+        prefs.edit().putBoolean(KEY_MEDIA_AUTO_PIP, enabled).apply()
+        syncMediaFeatures()
+    }
+
+    /** 页面里识别到视频后自动弹出悬浮播放器（经脚本宿主能力 caps.autoFloat 告知脚本） */
+    var mediaAutoFloat by mutableStateOf(prefs.getBoolean(KEY_MEDIA_AUTO_FLOAT, true))
+        private set
+
+    fun updateMediaAutoFloat(enabled: Boolean) {
+        mediaAutoFloat = enabled
+        prefs.edit().putBoolean(KEY_MEDIA_AUTO_FLOAT, enabled).apply()
+        syncMediaFeatures()
+    }
+
+    /** 本页整体是否在工作：总开关开，且（WebView 内核下）网页增强开 */
+    val mediaActive: Boolean
+        get() = mediaMaster && (geckoMode || pageEnhancements)
+
+    /** 嗅探是否真正生效（弹提示的地方读这个，而不是 [mediaSniff]） */
+    val mediaSniffActive: Boolean get() = mediaActive && mediaSniff
+
+    /** 把设置值和两层总开关合成「生效状态」推给热路径（请求拦截 / MediaHost），并通知 Gecko 后台页 */
+    fun syncMediaFeatures() {
+        val f = dev.dsh.miuixbrowser.sniff.MediaFeatures
+        f.master = mediaMaster
+        f.pageEnhancements = pageEnhancements
+        f.enhancementsApply = !geckoMode
+        f.sniffSwitch = mediaSniff
+        f.autoPipSwitch = mediaAutoPip
+        f.autoFloatSwitch = mediaAutoFloat
+        dev.dsh.miuixbrowser.sniff.MediaSniff.enabled = f.sniffActive
         // Gecko：后台页按开关装 / 卸 onHeadersReceived 监听
         runCatching { dev.dsh.miuixbrowser.engine.gecko.GeckoGm.sendSniffRules() }
     }
+
+    init { syncMediaFeatures() }
 
     /** 禁用 WebRTC（防 IP 泄露） */
     var webrtcDisabled by mutableStateOf(prefs.getBoolean(KEY_WEBRTC, false))
@@ -1165,6 +1218,9 @@ class AppSettings(context: Context) {
         const val KEY_ADBLOCK_WEBAPP = "adblock_in_webapp"
         const val KEY_DNT = "send_dnt"
         const val KEY_SNIFF = "media_sniff"
+        const val KEY_MEDIA_MASTER = "media_master"
+        const val KEY_MEDIA_AUTO_PIP = "media_auto_pip"
+        const val KEY_MEDIA_AUTO_FLOAT = "media_auto_float"
         const val KEY_WEBRTC = "webrtc_disabled"
         const val KEY_3P_COOKIE = "third_party_cookie"
         const val KEY_COOKIE_MODE = "cookie_mode"

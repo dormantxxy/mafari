@@ -149,7 +149,7 @@ class NativePlayerActivity : ComponentActivity() {
                 onCopyLink = { copyLink(p) },
                 pip = inPip,
                 bgPlay = bgPlay,
-                onBgPlayChange = { setBgPlay(it) },
+                onBgPlayChange = { changeBgPlay(it) },
             )
             if (!fullscreen && !inPip) {
                 Text(
@@ -287,7 +287,7 @@ class NativePlayerActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------ 后台播放
 
-    private fun setBgPlay(on: Boolean) {
+    private fun changeBgPlay(on: Boolean) {
         bgPlay = on
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_BG_PLAY, on).apply()
         if (on) startBgService() else PlayerService.stop(this)

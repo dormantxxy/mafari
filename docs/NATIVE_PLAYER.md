@@ -141,11 +141,11 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 | 分组 | 选项 | 落到哪 |
 |---|---|---|
 | HDR 与画质 | HDR 策略（自动 / 优先 SDR / 优先 HDR） | `MafariPlayer.applyHdrPreference`：流里 HDR / SDR 轨道并存时，给视频组加轨道子集覆盖（自适应仍有效）；用户手动选清晰度后不干预。清晰度列表里 HDR 轨道带「HDR」后缀 |
-| | 最高清晰度（不限 / 2160 / 1440 / 1080 / 720 / 480p） | `TrackSelectionParameters.setMaxVideoSize(长边, 长边)`，横竖屏都适用；手动选更高档不受限 |
+| | 最高清晰度（不限 / 2160 / 1440 / 1080 / 720 / 480p） | `DefaultTrackSelector` 参数 `setMaxVideoSize(长边, 长边)`，横竖屏都适用；手动选更高档不受限 |
 | 解码 | 解码器偏好（自动 / 硬件优先 / 软件优先） | 自定义 `MediaCodecSelector`：只重排候选，不删候选 |
 | | 解码器回退 | `DefaultRenderersFactory.setEnableDecoderFallback` |
 | | MediaCodec 异步队列（自动 / 强制开 / 强制关） | `forceEnable/DisableMediaCodecAsynchronousQueueing` |
-| | 隧道播放 | `setTunnelingEnabled`；只在打开时渲染方式为 SurfaceView 才开（TextureView 下画面出不来） |
+| | 隧道播放 | `DefaultTrackSelector.Parameters.Builder.setTunnelingEnabled`；只在打开时渲染方式为 SurfaceView 才开（TextureView 下画面出不来） |
 | 缓冲与内存 | 缓冲策略（省内存 / 均衡 / 流畅优先 / 大缓冲） | `DefaultLoadControl.setBufferDurationsMs`；省内存档在大小「自动」时附带 48 MB 上限 |
 | | 缓冲大小上限（自动 / 32 / 64 / 128 / 256 MB） | `setTargetBufferBytes` |
 | | 后向缓冲（不保留 / 15 / 30 / 60 秒） | `setBackBuffer(ms, true)` |

@@ -30,6 +30,7 @@ import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import dev.dsh.miuixbrowser.i18n.tr
 
 /** 清晰度条目：[group] / [index] 对应 ExoPlayer 轨道，选中时用 TrackSelectionOverride。 */
@@ -157,7 +158,19 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
             }
             .build()
 
+        // 轨道选择：清晰度上限 + 隧道播放。隧道开关只在 DefaultTrackSelector 的参数里有（TrackSelectionParameters 没有）
+        val trackSelector = DefaultTrackSelector(context).also { ts ->
+            ts.parameters = ts.buildUponParameters().apply {
+                // 清晰度上限（长边）：自动选档时不超过它；手动选更高的档不受限
+                tuning.maxLongSide.takeIf { it > 0 }?.let { setMaxVideoSize(it, it) }
+                // 隧道播放：要 SurfaceView + 硬解 + 设备支持；TextureView 下画面出不来，所以只在渲染方式是 SurfaceView 时开
+                // （播放页里临时切回 TextureView 不会重建播放器，此时请关掉这个选项）
+                if (tuning.tunneling && PlayerPrefs.renderMode(context) == PlayerPrefs.RENDER_SURFACE) setTunnelingEnabled(true)
+            }.build()
+        }
+
         exo = ExoPlayer.Builder(context, renderers)
+            .setTrackSelector(trackSelector)
             .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(dataSource))
             .setLoadControl(loadControl)
             // 音频焦点：来电 / 别的播放器抢焦点时自动暂停（后台播放必须有，否则会和别的音频叠在一起）；
@@ -172,13 +185,6 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         exo.setSeekParameters(if (tuning.seekMode == PlayerTuning.SEEK_KEYFRAME) SeekParameters.CLOSEST_SYNC else SeekParameters.EXACT)
-        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().apply {
-            // 清晰度上限（长边）：自动选档时不超过它；手动选更高的档不受限
-            tuning.maxLongSide.takeIf { it > 0 }?.let { setMaxVideoSize(it, it) }
-            // 隧道播放：要 SurfaceView + 硬解 + 设备支持；TextureView 下画面出不来，所以只在渲染方式是 SurfaceView 时开
-            // （播放页里临时切回 TextureView 不会重建播放器，此时请关掉这个选项）
-            if (tuning.tunneling && PlayerPrefs.renderMode(context) == PlayerPrefs.RENDER_SURFACE) setTunnelingEnabled(true)
-        }.build()
         exo.addListener(listener)
         // 设置里的「默认倍速」：打开就按这个速度起播（播放页里仍可临时改）
         PlayerPrefs.defaultSpeed(context).takeIf { it != 1f }?.let { changeSpeed(it) }

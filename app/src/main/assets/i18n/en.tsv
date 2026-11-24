@@ -2242,3 +2242,8 @@ TextureView 支持玻璃模糊；SurfaceView 更省电、延迟更低，但没�
 等待电视开始播放…	Waiting for the TV to start playing…
 结束投屏	Stop casting
 这个视频地址无法投屏	This video address can't be cast
+截屏	Screenshot
+倍速	Speed
+截屏失败：当前没有可截取的画面（还没出画面，或是受保护的内容）	Screenshot failed: there is no frame to capture (no picture yet, or the content is protected)
+截图已保存到相册（Mafari）	Screenshot saved to your gallery (Mafari)
+截图保存失败	Couldn't save the screenshot

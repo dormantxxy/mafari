@@ -65,7 +65,24 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.Player
 import dev.dsh.miuixbrowser.download.Downloader
 import dev.dsh.miuixbrowser.i18n.tr
-import dev.dsh.miuixbrowser.ui.CastPickerDialog
+import top.yukonga.miuix.kmp.icon.glass.Link
+import top.yukonga.miuix.kmp.icon.glass.Download
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import dev.dsh.miuixbrowser.ui.CastPickerInline
+import dev.dsh.miuixbrowser.ui.AppIcons
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.Image
+import android.widget.Toast
+import android.provider.MediaStore
+import android.os.Environment
+import android.graphics.Bitmap
+import android.content.ContentValues
 import dev.dsh.miuixbrowser.util.Diag
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
@@ -209,6 +226,7 @@ class NativePlayerActivity : ComponentActivity() {
                 .border(1.dp, Color(0x1FFFFFFF), cardShape)
         }
         val surface = if (full) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+        Box {
         Column(outer) {
             Column(panel) {
                 Box(surface) {
@@ -230,6 +248,7 @@ class NativePlayerActivity : ComponentActivity() {
                     if (cast != null && cast.active && !inPip) CastOverlay(cast)
                 }
                 if (!full) {
+                    QuickActions(p, cast)
                     Text(
                         text = title,
                         color = Color(0xCCFFFFFF),
@@ -241,7 +260,107 @@ class NativePlayerActivity : ComponentActivity() {
                 }
             }
         }
-        if (cast != null) CastPickerDialog(ui = cast.pickerUi, backdrop = null)
+        // 「投屏到」面板：直接画在播放页里（miuix 弹窗要 Scaffold 的弹窗宿主，这里没有，用它点了投屏什么都不显示）
+        if (cast != null) CastPickerInline(cast.pickerUi, Modifier.matchParentSize())
+        }
+    }
+
+    /** 卡片下方、标题上方的快捷菜单：投屏 / 下载 / 截屏 / 倍速 / 复制链接（图标 + 文字）；点「倍速」这一排换成倍速选项 */
+    @androidx.compose.runtime.Composable
+    private fun QuickActions(p: MafariPlayer, cast: NativeCast?) {
+        var speeds by remember { mutableStateOf(false) }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x1FFFFFFF)))
+        if (speeds) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CastButton(tr("返回")) { speeds = false }
+                PlayerPrefs.SPEEDS.forEach { v ->
+                    val on = Math.abs(p.speed - v) < 0.01f
+                    CastButton(speedLabel(v), strong = on) { p.changeSpeed(v); speeds = false }
+                }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp)) {
+                QuickAction(AppIcons.ScreenMirror, tr("投屏"), Modifier.weight(1f), enabled = cast != null) { cast?.openPicker() }
+                QuickAction(MiuixIcons.Glass.Download, tr("下载"), Modifier.weight(1f)) {
+                    download(p)
+                    Toast.makeText(this@NativePlayerActivity, tr("已加入下载"), Toast.LENGTH_SHORT).show()
+                }
+                QuickAction(AppIcons.Screenshot, tr("截屏"), Modifier.weight(1f)) { screenshot(p) }
+                QuickAction(AppIcons.Speed, if (p.speed == 1f) tr("倍速") else speedLabel(p.speed), Modifier.weight(1f)) { speeds = true }
+                QuickAction(MiuixIcons.Glass.Link, tr("复制链接"), Modifier.weight(1f)) {
+                    copyLink(p)
+                    Toast.makeText(this@NativePlayerActivity, tr("已复制链接"), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun QuickAction(icon: ImageVector, label: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+        Column(
+            modifier
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(enabled = enabled, onClick = onClick)
+                .padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Image(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                colorFilter = ColorFilter.tint(if (enabled) Color.White else Color(0x59FFFFFF)),
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = label,
+                color = if (enabled) Color(0xCCFFFFFF) else Color(0x59FFFFFF),
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------ 截屏
+
+    /** 截取当前画面，存到 图片/Mafari（MediaStore，免存储权限）。拿不到画面（还没出画面 / 受保护内容）会提示 */
+    private fun screenshot(p: MafariPlayer) {
+        p.captureFrame { bmp ->
+            if (bmp == null) {
+                Toast.makeText(this, tr("截屏失败：当前没有可截取的画面（还没出画面，或是受保护的内容）"), Toast.LENGTH_LONG).show()
+                return@captureFrame
+            }
+            val ctx = applicationContext
+            Thread {
+                val ok = runCatching {
+                    val name = "Mafari_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date()) + ".jpg"
+                    val values = ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Mafari")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                    val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("insert failed")
+                    try {
+                        ctx.contentResolver.openOutputStream(uri)!!.use { bmp.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+                        values.clear()
+                        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        ctx.contentResolver.update(uri, values, null, null)
+                    } catch (e: Exception) {
+                        ctx.contentResolver.delete(uri, null, null)
+                        throw e
+                    }
+                }.isSuccess
+                bmp.recycle()
+                runOnUiThread {
+                    Toast.makeText(ctx, if (ok) tr("截图已保存到相册（Mafari）") else tr("截图保存失败"), Toast.LENGTH_SHORT).show()
+                }
+            }.start()
+        }
     }
 
     /** 投屏遥控：设备名 / 状态 / 进度 + 后退 · 播放暂停 · 快进 · 结束投屏 */

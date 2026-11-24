@@ -30,6 +30,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,80 +64,7 @@ internal fun CastPickerDialog(ui: CastPickerUi, backdrop: Backdrop?) {
         onDismissRequest = { ui.cancel() },
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 8.dp, bottom = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = if (ui.scanning) tr("正在搜索…") else tr("附近设备"),
-                        fontSize = 13.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    val spin = rememberInfiniteTransition(label = "castRefresh")
-                    val angle by spin.animateFloat(
-                        initialValue = 0f,
-                        targetValue = 360f,
-                        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
-                        label = "angle",
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .clickable(enabled = !ui.scanning) { ui.refresh() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Image(
-                            imageVector = AppIcons.Refresh,
-                            contentDescription = tr("重新搜索"),
-                            modifier = Modifier.size(20.dp).rotate(if (ui.scanning) angle else 0f),
-                            colorFilter = ColorFilter.tint(
-                                if (ui.scanning) MiuixTheme.colorScheme.onSurfaceVariantSummary else MiuixTheme.colorScheme.primary,
-                            ),
-                        )
-                    }
-                }
-                ui.devices.forEach { d ->
-                    CastRow(text = d.name, onClick = { ui.pickDevice(d) })
-                }
-                if (ui.devices.isEmpty()) {
-                    Text(
-                        text = ui.status,
-                        fontSize = 14.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
-                    )
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                        .height(IntrinsicSize.Min),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    CastTile(
-                        icon = AppIcons.ScreenMirror,
-                        title = tr("屏幕镜像"),
-                        hint = tr("系统投屏，投出整个画面"),
-                        onClick = { ui.pickMirror() },
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
-                    CastTile(
-                        icon = AppIcons.OpenExternal,
-                        title = tr("外部打开"),
-                        hint = tr("交给播放器或投屏 App"),
-                        onClick = { ui.pickExternal() },
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
-                }
-            }
+            CastPickerBody(ui)
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -141,6 +72,133 @@ internal fun CastPickerDialog(ui: CastPickerUi, backdrop: Backdrop?) {
                 AppDialogButton(onClick = { ui.cancel() }, modifier = Modifier.weight(1f)) {
                     Text(text = tr("取消"), style = MiuixTheme.textStyles.button)
                 }
+            }
+        }
+    }
+}
+
+/** 面板主体：设备列表 + 屏幕镜像 / 外部打开。弹窗版和播放页内嵌版共用。 */
+@Composable
+internal fun CastPickerBody(ui: CastPickerUi) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 320.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 8.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (ui.scanning) tr("正在搜索…") else tr("附近设备"),
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.weight(1f),
+                )
+                val spin = rememberInfiniteTransition(label = "castRefresh")
+                val angle by spin.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
+                    label = "angle",
+                )
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .clickable(enabled = !ui.scanning) { ui.refresh() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        imageVector = AppIcons.Refresh,
+                        contentDescription = tr("重新搜索"),
+                        modifier = Modifier.size(20.dp).rotate(if (ui.scanning) angle else 0f),
+                        colorFilter = ColorFilter.tint(
+                            if (ui.scanning) MiuixTheme.colorScheme.onSurfaceVariantSummary else MiuixTheme.colorScheme.primary,
+                        ),
+                    )
+                }
+            }
+            ui.devices.forEach { d ->
+                CastRow(text = d.name, onClick = { ui.pickDevice(d) })
+            }
+            if (ui.devices.isEmpty()) {
+                Text(
+                    text = ui.status,
+                    fontSize = 14.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                CastTile(
+                    icon = AppIcons.ScreenMirror,
+                    title = tr("屏幕镜像"),
+                    hint = tr("系统投屏，投出整个画面"),
+                    onClick = { ui.pickMirror() },
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+                CastTile(
+                    icon = AppIcons.OpenExternal,
+                    title = tr("外部打开"),
+                    hint = tr("交给播放器或投屏 App"),
+                    onClick = { ui.pickExternal() },
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+            }
+        }
+}
+
+/**
+ * 播放页用的内嵌版「投屏到」面板：直接画在播放页窗口里（压暗背景 + 居中圆角面板），不依赖 miuix 弹窗层。
+ * miuix 的玻璃弹窗要挂在 Scaffold 的弹窗宿主里，播放页没有这一层，用 [CastPickerDialog] 点了投屏会什么都不显示。
+ */
+@Composable
+internal fun CastPickerInline(ui: CastPickerUi, modifier: Modifier = Modifier) {
+    if (!ui.show) return
+    val noRipple = remember { MutableInteractionSource() }
+    Box(
+        modifier = modifier
+            .background(Color(0x99000000))
+            .clickable(interactionSource = noRipple, indication = null) { ui.cancel() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(24.dp)
+                .widthIn(max = 420.dp)
+                .fillMaxWidth()
+                .squircleClip(28.dp)
+                .background(MiuixTheme.colorScheme.surface)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { /* 挡住点击，不让它落到背景的取消 */ }
+                .padding(20.dp),
+        ) {
+            Text(
+                text = tr("投屏到"),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 8.dp, bottom = 10.dp),
+            )
+            CastPickerBody(ui)
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp)
+                    .fillMaxWidth()
+                    .squircleClip(16.dp)
+                    .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                    .clickable { ui.cancel() }
+                    .padding(vertical = 13.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(text = tr("取消"), fontSize = 16.sp, fontWeight = FontWeight.Medium, color = MiuixTheme.colorScheme.onSurface)
             }
         }
     }

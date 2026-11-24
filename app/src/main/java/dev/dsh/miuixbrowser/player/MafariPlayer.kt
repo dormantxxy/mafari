@@ -176,7 +176,11 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
      * SurfaceView 由系统合成器直接送显，更省电、延迟低，但采样不到（界面会退回不透明底）。
      * 切换时界面会先建新 View 再释放旧的，ExoPlayer 的 clear 只在 View 仍是当前输出时才生效，顺序无所谓。
      */
+    /** 当前接着视频输出的 View：截屏要从它取画面 */
+    private var videoView: View? = null
+
     fun attach(view: View) {
+        videoView = view
         when (view) {
             is TextureView -> exo.setVideoTextureView(view)
             is SurfaceView -> exo.setVideoSurfaceView(view)
@@ -184,9 +188,35 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
     }
 
     fun detach(view: View) {
+        if (videoView === view) videoView = null
         when (view) {
             is TextureView -> exo.clearVideoTextureView(view)
             is SurfaceView -> exo.clearVideoSurfaceView(view)
+        }
+    }
+
+    /**
+     * 截取当前正在播放的画面（按视频原始分辨率，长边最多 3840）。必须在主线程调用，回调也在主线程；
+     * 拿不到（还没出画面 / 受保护内容 / View 已销毁）回 null。
+     * TextureView 直接读纹理；SurfaceView 走 PixelCopy（两种渲染方式都能截）。
+     */
+    fun captureFrame(onDone: (android.graphics.Bitmap?) -> Unit) {
+        val v = videoView
+        val size = exo.videoSize
+        if (v == null || size.width <= 0 || size.height <= 0) { onDone(null); return }
+        val k = minOf(1f, 3840f / maxOf(size.width, size.height))
+        val w = (size.width * k).toInt().coerceAtLeast(2)
+        val h = (size.height * k).toInt().coerceAtLeast(2)
+        when (v) {
+            is TextureView -> onDone(runCatching { v.getBitmap(w, h) }.getOrNull())
+            is SurfaceView -> {
+                val bmp = runCatching { android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888) }.getOrNull()
+                if (bmp == null) { onDone(null); return }
+                runCatching {
+                    android.view.PixelCopy.request(v, bmp, { r -> onDone(if (r == android.view.PixelCopy.SUCCESS) bmp else null) }, android.os.Handler(android.os.Looper.getMainLooper()))
+                }.onFailure { onDone(null) }
+            }
+            else -> onDone(null)
         }
     }
 

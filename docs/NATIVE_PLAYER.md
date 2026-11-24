@@ -107,7 +107,10 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 
 ## 投屏（`player/NativeCast.kt`）
 
-播放页 ⋯ 菜单 →「投屏」，弹「投屏到」面板（`ui/CastPickerDialog`，和脚本悬浮播放器共用同一个面板组件，状态在 `NativeCast.pickerUi`）：
+入口：悬浮卡片下方的快捷菜单「投屏」（全屏 / 画中画里用 ⋯ 菜单）。面板是 `ui/CastPickerInline`，直接画在播放页窗口里；
+内容 `CastPickerBody` 和脚本悬浮播放器用的 `CastPickerDialog` 共用，状态在 `NativeCast.pickerUi`。
+**不能用 `CastPickerDialog`**：miuix 的玻璃弹窗要挂在 Scaffold 的弹窗宿主里，播放页没有，点了什么都不显示。
+选项：
 
 - **DLNA 设备**：`MediaHost.discoverDevices`（SSDP，绑 Wi-Fi 网络直连）搜索 → 选中后本地暂停，电视从当前进度 `setUriAndPlay`；
   每秒 `query` 轮询进度，播放页盖 `CastOverlay` 遥控（后退 / 播放·暂停 / 快进 10 秒 / 结束投屏）。
@@ -119,3 +122,11 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 - Android 17 的「附近设备」权限由 `NativePlayerActivity.withLocalNetworkPermission` 申请（和 `MainActivity` 同一套）。
 - 面板打开时播放页窗口临时铺满（背景仍透明），避免面板被「只有卡片那么高」的窗口裁掉。
 - 限制：DLNA 由电视自己拉流，带不了 Referer / Cookie，防盗链源会失败（25 秒没开始播放会提示）；blob: / data: 流没有可投的地址。
+
+## 快捷菜单与截屏
+
+悬浮卡片（非全屏 / 非画中画）下方、标题上方有一排快捷菜单（`NativePlayerActivity.QuickActions`）：投屏 / 下载 / 截屏 / 倍速 / 复制链接。
+- 倍速：点开后这一排换成倍速选项（`PlayerPrefs.SPEEDS`），选完恢复；按钮上显示当前倍速。
+- 截屏：`MafariPlayer.captureFrame` 从当前接着视频输出的 View 取帧——TextureView 用 `getBitmap(w, h)`，SurfaceView 用 `PixelCopy`；
+  分辨率取视频原始大小（长边最多 3840）。保存走 MediaStore（图片/Mafari，minSdk 33 免存储权限）。
+  受保护（DRM）内容拿到的是黑帧 / 失败，还没出画面时 `videoSize` 为 0，都按失败提示。

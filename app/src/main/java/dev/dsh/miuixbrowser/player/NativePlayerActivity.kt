@@ -34,6 +34,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.font.FontWeight
@@ -68,7 +69,14 @@ import dev.dsh.miuixbrowser.i18n.tr
 import top.yukonga.miuix.kmp.icon.glass.Link
 import top.yukonga.miuix.kmp.icon.glass.Download
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import dev.dsh.miuixbrowser.appContainer
+import dev.dsh.miuixbrowser.data.BLUR_OFF
 import dev.dsh.miuixbrowser.ui.AppBottomSheet
+import dev.dsh.miuixbrowser.ui.GlassLook
+import dev.dsh.miuixbrowser.ui.LocalBlurMode
+import dev.dsh.miuixbrowser.ui.LocalGlassParams
+import dev.dsh.miuixbrowser.ui.LocalLiquidParams
+import dev.dsh.miuixbrowser.ui.isAppDarkTheme
 import dev.dsh.miuixbrowser.ui.CastPickerBody
 import top.yukonga.miuix.kmp.basic.Scaffold
 import dev.dsh.miuixbrowser.ui.AppIcons
@@ -202,11 +210,25 @@ class NativePlayerActivity : ComponentActivity() {
         registerPipReceiver()
         updatePip()
         setContent {
-            // 播放页始终是深色：控件叠在视频上，浅色主题下反而看不清
-            val themeController = remember { ThemeController(ColorSchemeMode.Dark) }
+            // 卡片下方的快捷菜单 / 标题 / 投屏面板跟随应用的显示模式（浅色 / 深色 / 跟随系统）和「高级材质」；
+            // 叠在视频上的控件仍固定深色（见 PlayerPage 里嵌套的深色主题）
+            val settings = remember { applicationContext.appContainer.settings }
+            val mode = when (settings.themeMode) {
+                1 -> ColorSchemeMode.Light
+                2 -> ColorSchemeMode.Dark
+                else -> ColorSchemeMode.System
+            }
+            val themeController = remember(mode) { ThemeController(mode) }
             MiuixTheme(controller = themeController) {
-                BackHandler(enabled = fullscreen) { applyFullscreen(false) }
-                PlayerPage(p, title = req.title.ifBlank { req.url })
+                GlassLook.update(settings.blurMode, settings.glassParams)
+                CompositionLocalProvider(
+                    LocalBlurMode provides settings.blurMode,
+                    LocalGlassParams provides settings.glassParams,
+                    LocalLiquidParams provides settings.liquidParams,
+                ) {
+                    BackHandler(enabled = fullscreen) { applyFullscreen(false) }
+                    PlayerPage(p, title = req.title.ifBlank { req.url })
+                }
             }
         }
     }
@@ -218,6 +240,12 @@ class NativePlayerActivity : ComponentActivity() {
         // 弹窗出现：先挂宿主并撑满窗口；收起动画结束（onDismissFinished）再还原
         LaunchedEffect(pickerOpen) { if (pickerOpen) castSheetHost = true }
         LaunchedEffect(castSheetHost) { applyWindowMode() }
+
+        val dark = isAppDarkTheme()
+        val glass = LocalBlurMode.current != BLUR_OFF
+        val videoTheme = remember { ThemeController(ColorSchemeMode.Dark) }
+        val surfaceColor = MiuixTheme.colorScheme.surfaceContainer.let { if (glass) it.copy(alpha = 0.88f) else it }
+        val edgeColor = MiuixTheme.colorScheme.onSurface.copy(alpha = if (dark) 0.14f else 0.10f)
 
         // 只有一处 PlayerSurface 调用，卡片 <-> 全屏切换时界面状态（弹层、控件显隐）不会丢；
         // 两种形态的外层结构相同（Column 套 Column），只换 Modifier
@@ -233,17 +261,26 @@ class NativePlayerActivity : ComponentActivity() {
         val panel = if (full) {
             Modifier.fillMaxSize()
         } else {
+            // 底色不再写死黑：视频区自己带黑底（letterbox），下面的快捷菜单 / 标题区用材质底色
             Modifier
                 .fillMaxWidth()
                 .clip(cardShape)
-                .background(Color(0xF2111113))
-                .border(1.dp, Color(0x1FFFFFFF), cardShape)
+                .border(1.dp, edgeColor, cardShape)
         }
         val surface = if (full) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+        // 卡片态状态栏在网页上方：图标颜色跟随显示模式；全屏 / 画中画是黑底，固定白图标
+        LaunchedEffect(dark, full) {
+            val c = WindowInsetsControllerCompat(window, window.decorView)
+            val light = !dark && !full
+            c.isAppearanceLightStatusBars = light
+            c.isAppearanceLightNavigationBars = light
+        }
         Box {
         Column(outer) {
             Column(panel) {
                 Box(surface) {
+                    // 视频上的控件固定深色主题：不受浅色模式影响
+                    MiuixTheme(controller = videoTheme) {
                     PlayerSurface(
                         player = p,
                         fullscreen = fullscreen,
@@ -260,17 +297,21 @@ class NativePlayerActivity : ComponentActivity() {
                     )
                     // 投屏中：盖一层遥控（视频此时在电视上播，本地已暂停）
                     if (cast != null && cast.active && !inPip) CastOverlay(cast)
+                    }
                 }
                 if (!full) {
-                    QuickActions(p, cast)
-                    Text(
-                        text = title,
-                        color = Color(0xCCFFFFFF),
-                        fontSize = 14.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    )
+                    // 快捷菜单 + 标题：同一块材质底色，浅色 / 深色随应用主题
+                    Column(Modifier.fillMaxWidth().background(surfaceColor)) {
+                        QuickActions(p, cast)
+                        Text(
+                            text = title,
+                            color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                            fontSize = 13.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        )
+                    }
                 }
             }
         }
@@ -305,7 +346,7 @@ class NativePlayerActivity : ComponentActivity() {
         if (quickItems.isEmpty()) return
         // 0 = 按钮排；1 = 倍速选项；2 = 清晰度选项
         var page by remember { mutableStateOf(0) }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x1FFFFFFF)))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(MiuixTheme.colorScheme.onSurface.copy(alpha = 0.10f)))
         when (page) {
             1 -> OptionRow(onBack = { page = 0 }) {
                 PlayerPrefs.SPEEDS.forEach { v ->
@@ -318,7 +359,7 @@ class NativePlayerActivity : ComponentActivity() {
                     CastButton(q.label, strong = p.selectedQuality == q, compact = true) { p.selectQuality(q); page = 0 }
                 }
             }
-            else -> Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp)) {
+            else -> Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 1.dp)) {
                 quickItems.forEach { id ->
                     when (id) {
                         "cast" -> QuickAction(AppIcons.ScreenMirror, tr("投屏"), Modifier.weight(1f), enabled = cast != null) { cast?.openPicker() }
@@ -344,7 +385,7 @@ class NativePlayerActivity : ComponentActivity() {
     @androidx.compose.runtime.Composable
     private fun OptionRow(onBack: () -> Unit, content: @androidx.compose.runtime.Composable () -> Unit) {
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -355,24 +396,25 @@ class NativePlayerActivity : ComponentActivity() {
 
     @androidx.compose.runtime.Composable
     private fun QuickAction(icon: ImageVector, label: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+        val fg = MiuixTheme.colorScheme.onSurface
         Column(
             modifier
                 .clip(RoundedCornerShape(10.dp))
                 .clickable(enabled = enabled, onClick = onClick)
-                .padding(vertical = 5.dp),
+                .padding(vertical = 3.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Image(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(19.dp),
-                colorFilter = ColorFilter.tint(if (enabled) Color.White else Color(0x59FFFFFF)),
+                modifier = Modifier.size(16.dp),
+                colorFilter = ColorFilter.tint(if (enabled) fg else fg.copy(alpha = 0.35f)),
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(1.dp))
             Text(
                 text = label,
-                color = if (enabled) Color(0xCCFFFFFF) else Color(0x59FFFFFF),
-                fontSize = 10.5.sp,
+                color = if (enabled) fg.copy(alpha = 0.8f) else fg.copy(alpha = 0.35f),
+                fontSize = 9.5.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -443,11 +485,11 @@ class NativePlayerActivity : ComponentActivity() {
                     modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CastButton(tr("后退 10 秒"), enabled = !cast.connecting) { cast.seekBy(-10) }
-                    CastButton(if (cast.playing) tr("暂停") else tr("播放"), enabled = !cast.connecting) { cast.togglePlay() }
-                    CastButton(tr("快进 10 秒"), enabled = !cast.connecting) { cast.seekBy(10) }
+                    CastButton(tr("后退 10 秒"), onVideo = true, enabled = !cast.connecting) { cast.seekBy(-10) }
+                    CastButton(if (cast.playing) tr("暂停") else tr("播放"), onVideo = true, enabled = !cast.connecting) { cast.togglePlay() }
+                    CastButton(tr("快进 10 秒"), onVideo = true, enabled = !cast.connecting) { cast.seekBy(10) }
                 }
-                CastButton(tr("结束投屏"), strong = true, modifier = Modifier.padding(top = 10.dp)) { cast.stop() }
+                CastButton(tr("结束投屏"), strong = true, onVideo = true, modifier = Modifier.padding(top = 10.dp)) { cast.stop() }
             }
         }
     }
@@ -459,21 +501,25 @@ class NativePlayerActivity : ComponentActivity() {
         enabled: Boolean = true,
         strong: Boolean = false,
         compact: Boolean = false,
+        /** true = 叠在视频上（固定白字深底）；false = 在卡片下方的材质底上，随主题 */
+        onVideo: Boolean = false,
         onClick: () -> Unit,
     ) {
         val shape = RoundedCornerShape(if (compact) 12.dp else 14.dp)
+        val fg = if (onVideo) Color.White else MiuixTheme.colorScheme.onSurface
+        val chip = if (onVideo) Color(0x26FFFFFF) else MiuixTheme.colorScheme.onSurface.copy(alpha = 0.08f)
         Box(
             modifier
                 .clip(shape)
-                .background(if (strong) Color(0xFF3B7DFF) else Color(0x26FFFFFF))
+                .background(if (strong) Color(0xFF3B7DFF) else chip)
                 .clickable(enabled = enabled, onClick = onClick)
-                .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 5.dp else 8.dp),
+                .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 3.dp else 8.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = label,
-                color = if (enabled) Color.White else Color(0x59FFFFFF),
-                fontSize = 13.sp,
+                color = if (strong) Color.White else if (enabled) fg else fg.copy(alpha = 0.35f),
+                fontSize = if (compact) 12.sp else 13.sp,
                 fontWeight = FontWeight.Medium,
             )
         }

@@ -185,43 +185,6 @@ fun MediaSniffScreen(
                         )
                     }
 
-                    SmallTitle(text = tr("解码与画质"))
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                        insideMargin = PaddingValues(0.dp),
-                    ) {
-                        AppDropdownPreference(
-                            backdrop = if (glass) backdrop else null,
-                            title = tr("解码方式"),
-                            summary = tr("自动：系统默认顺序；优先硬件：省电、发热低；优先软件：硬解花屏 / 绿屏时试试。只调整优先顺序，下次打开播放器生效"),
-                            items = listOf(tr("自动"), tr("优先硬件解码"), tr("优先软件解码")),
-                            selectedIndex = settings.playerDecoderMode,
-                            onSelectedIndexChange = { settings.updatePlayerDecoderMode(it) },
-                        )
-                        AppSwitchPreference(
-                            title = tr("解码器回退"),
-                            summary = tr("首选解码器初始化失败时自动换备用解码器（可能更耗电）。下次打开播放器生效"),
-                            checked = settings.playerDecoderFallback,
-                            onCheckedChange = { settings.updatePlayerDecoderFallback(it) },
-                        )
-                        AppDropdownPreference(
-                            backdrop = if (glass) backdrop else null,
-                            title = tr("HDR 视频"),
-                            summary = tr("自动：设备支持就按 HDR 播放；优先 SDR：流里同时有 HDR 和 SDR 清晰度时选 SDR（HDR 偏暗 / 偏色时用）。只对声明了 HDR 的流有效，下次打开播放器生效"),
-                            items = listOf(tr("自动"), tr("优先 SDR")),
-                            selectedIndex = settings.playerHdrMode,
-                            onSelectedIndexChange = { settings.updatePlayerHdrMode(it) },
-                        )
-                        AppDropdownPreference(
-                            backdrop = if (glass) backdrop else null,
-                            title = tr("缓冲策略"),
-                            summary = tr("快速起播：首帧最快；均衡；大缓冲：弱网更稳，但更占内存、更费流量。下次打开播放器生效"),
-                            items = listOf(tr("快速起播"), tr("均衡"), tr("大缓冲")),
-                            selectedIndex = settings.playerBufferMode,
-                            onSelectedIndexChange = { settings.updatePlayerBufferMode(it) },
-                        )
-                    }
-
                     SmallTitle(text = tr("快捷菜单"))
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),

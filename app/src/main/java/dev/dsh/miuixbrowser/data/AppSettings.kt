@@ -1029,42 +1029,6 @@ class AppSettings(context: Context) {
         prefs.edit().putBoolean(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_BG_PLAY, on).apply()
     }
 
-    /** 解码方式（0 自动 / 1 优先硬件 / 2 优先软件），下次打开播放器生效 */
-    var playerDecoderMode by mutableStateOf(dev.dsh.miuixbrowser.player.PlayerPrefs.clampMode(prefs.getInt(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_DECODER, 0), dev.dsh.miuixbrowser.player.PlayerPrefs.DECODER_SOFTWARE))
-        private set
-
-    fun updatePlayerDecoderMode(mode: Int) {
-        playerDecoderMode = dev.dsh.miuixbrowser.player.PlayerPrefs.clampMode(mode, dev.dsh.miuixbrowser.player.PlayerPrefs.DECODER_SOFTWARE)
-        prefs.edit().putInt(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_DECODER, playerDecoderMode).apply()
-    }
-
-    /** 解码器回退：首选解码器初始化失败时自动换备用解码器 */
-    var playerDecoderFallback by mutableStateOf(prefs.getBoolean(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_DECODER_FALLBACK, true))
-        private set
-
-    fun updatePlayerDecoderFallback(on: Boolean) {
-        playerDecoderFallback = on
-        prefs.edit().putBoolean(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_DECODER_FALLBACK, on).apply()
-    }
-
-    /** HDR 视频（0 自动 / 1 优先 SDR），下次打开播放器生效 */
-    var playerHdrMode by mutableStateOf(dev.dsh.miuixbrowser.player.PlayerPrefs.clampMode(prefs.getInt(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_HDR, 0), dev.dsh.miuixbrowser.player.PlayerPrefs.HDR_PREFER_SDR))
-        private set
-
-    fun updatePlayerHdrMode(mode: Int) {
-        playerHdrMode = dev.dsh.miuixbrowser.player.PlayerPrefs.clampMode(mode, dev.dsh.miuixbrowser.player.PlayerPrefs.HDR_PREFER_SDR)
-        prefs.edit().putInt(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_HDR, playerHdrMode).apply()
-    }
-
-    /** 缓冲策略（0 快速起播 / 1 均衡 / 2 大缓冲），下次打开播放器生效 */
-    var playerBufferMode by mutableStateOf(dev.dsh.miuixbrowser.player.PlayerPrefs.clampMode(prefs.getInt(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_BUFFER, 0), dev.dsh.miuixbrowser.player.PlayerPrefs.BUFFER_LARGE))
-        private set
-
-    fun updatePlayerBufferMode(mode: Int) {
-        playerBufferMode = dev.dsh.miuixbrowser.player.PlayerPrefs.clampMode(mode, dev.dsh.miuixbrowser.player.PlayerPrefs.BUFFER_LARGE)
-        prefs.edit().putInt(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_BUFFER, playerBufferMode).apply()
-    }
-
     /** 把设置值和两层总开关合成「生效状态」推给热路径（请求拦截 / MediaHost），并通知 Gecko 后台页 */
     fun syncMediaFeatures() {
         val f = dev.dsh.miuixbrowser.sniff.MediaFeatures

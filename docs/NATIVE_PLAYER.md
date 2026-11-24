@@ -1,7 +1,5 @@
 # 原生播放器（Media3 ExoPlayer）
 
-> 内核版本：Media3 1.12.0-beta01（只依赖 `media3-exoplayer` + `media3-exoplayer-hls`）。要求 minSdk ≥ 24、Kotlin ≥ 2.2，本项目均满足。
-
 目标：脱离 `float-player.js`，播放内核、界面、画中画都由原生承担；页面里只留一小段 App 自带的嗅探脚本。分阶段推进。
 
 | 阶段 | 内容 | 状态 |

@@ -14,7 +14,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -26,9 +25,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import dev.dsh.miuixbrowser.i18n.tr
 
@@ -75,9 +72,6 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
     val currentRequest: PlayerRequest
         get() = sources.getOrNull(sourceIndex)?.let { request.copy(url = it.url, type = it.type) } ?: request
 
-    /** 设置里的「HDR 视频 = 优先 SDR」：开页时读一次 */
-    private var preferSdr = false
-
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             this@MafariPlayer.isPlaying = isPlaying
@@ -112,7 +106,6 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
             }
             // 同高度只留码率最高的一条，高到低排列
             qualities = list.groupBy { it.height }.map { (_, v) -> v.maxBy { it.bitrate } }.sortedByDescending { it.height }
-            applySdrPreference(tracks)
         }
 
         override fun onPlayerError(e: PlaybackException) {
@@ -131,18 +124,12 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
             .apply { if (request.ua.isNotBlank()) setUserAgent(request.ua) }
         // 只有 http(s) 走裁剪包装；file / content 等由 DefaultDataSource 处理
         val dataSource = DefaultDataSource.Factory(context, StripImageHeaderDataSource.Factory(http))
-        preferSdr = PlayerPrefs.hdrMode(context) == PlayerPrefs.HDR_PREFER_SDR
-        // 解码方式 / 解码器回退（设置 → 媒体嗅探与播放 → 解码与画质）
-        val renderers = DefaultRenderersFactory(context)
-            .setEnableDecoderFallback(PlayerPrefs.decoderFallback(context))
-            .setMediaCodecSelector(decoderSelector(PlayerPrefs.decoderMode(context)))
-        // 缓冲策略：默认「快速起播」（比 ExoPlayer 默认更早起播：网页视频场景更在意首帧速度，而不是缓冲余量）
-        val buf = PlayerPrefs.bufferDurationsMs(PlayerPrefs.bufferMode(context))
-        exo = ExoPlayer.Builder(context, renderers)
+        exo = ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(dataSource))
+            // 比默认更早起播：网页视频场景更在意首帧速度，而不是缓冲余量
             .setLoadControl(
                 DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(buf[0], buf[1], buf[2], buf[3])
+                    .setBufferDurationsMs(15_000, 60_000, 1_000, 2_000)
                     .build(),
             )
             // 音频焦点：来电 / 别的播放器抢焦点时自动暂停（后台播放必须有，否则会和别的音频叠在一起）
@@ -169,48 +156,6 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
             setMediaMetadata(androidx.media3.common.MediaMetadata.Builder().setTitle(r.title).build())
         }
     }.build()
-
-    /**
-     * 「优先 SDR」：同一组视频轨里既有 HDR 又有 SDR 清晰度时，只让 ExoPlayer 在 SDR 轨之间自适应。
-     * 只对流里声明了 HDR 的情况有效（HLS 的 VIDEO-RANGE / 编码串里带的色彩信息）；全是 HDR 或没有声明时不处理。
-     * 已手动选了清晰度、或这一组已经有覆盖时不动；应用覆盖会再触发一次轨道变化回调，此时已有覆盖，不会循环。
-     * 用户在清晰度里选「自动」会清掉覆盖，回调里再按这个偏好重新套上。
-     */
-    private fun applySdrPreference(tracks: Tracks) {
-        if (!preferSdr || selectedQuality != null) return
-        val params = exo.trackSelectionParameters
-        for (g in tracks.groups) {
-            if (g.type != C.TRACK_TYPE_VIDEO || g.length < 2) continue
-            if (params.overrides.containsKey(g.mediaTrackGroup)) continue
-            val supported = (0 until g.length).filter { g.isTrackSupported(it) }
-            val sdr = supported.filter { !isHdr(g.getTrackFormat(it)) }
-            if (sdr.isEmpty() || sdr.size == supported.size) continue
-            exo.trackSelectionParameters = params.buildUpon()
-                .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, sdr))
-                .build()
-            return
-        }
-    }
-
-    private fun isHdr(f: Format): Boolean {
-        val t = f.colorInfo?.colorTransfer
-        return t == C.COLOR_TRANSFER_ST2084 || t == C.COLOR_TRANSFER_HLG || f.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION
-    }
-
-    /**
-     * 解码方式：只调整解码器的优先顺序（稳定排序，同类保持系统给的顺序），不是强制。
-     * 优先硬件：硬件解码器排前面（省电、发热低）；优先软件：软件解码器排前面（个别机型硬解花屏 / 绿屏时用）。
-     * 排前面的初始化失败时，是否换下一个由「解码器回退」决定。
-     */
-    private fun decoderSelector(mode: Int): MediaCodecSelector = when (mode) {
-        PlayerPrefs.DECODER_HARDWARE -> MediaCodecSelector { mime, secure, tunneling ->
-            MediaCodecSelector.DEFAULT.getDecoderInfos(mime, secure, tunneling).sortedBy { !it.hardwareAccelerated }
-        }
-        PlayerPrefs.DECODER_SOFTWARE -> MediaCodecSelector { mime, secure, tunneling ->
-            MediaCodecSelector.DEFAULT.getDecoderInfos(mime, secure, tunneling).sortedBy { it.hardwareAccelerated }
-        }
-        else -> MediaCodecSelector.DEFAULT
-    }
 
     /** 切到第 [i] 个视频源，保留当前进度（直播流从头 / 现场开始）；清晰度选择随新源重置。 */
     fun playSource(i: Int) {

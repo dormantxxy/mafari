@@ -2249,18 +2249,3 @@ TextureView 支持玻璃模糊；SurfaceView 更省电、延迟更低，但没�
 截图保存失败	Couldn't save the screenshot
 悬浮播放器卡片下方的一排快捷按钮（全屏 / 画中画里不显示）	The row of quick buttons under the floating player card (not shown in full screen or picture-in-picture)
 嗅探到的媒体	Media detected
-解码与画质	Decoding & picture
-解码方式	Decoder
-自动：系统默认顺序；优先硬件：省电、发热低；优先软件：硬解花屏 / 绿屏时试试。只调整优先顺序，下次打开播放器生效	Auto: system default order. Prefer hardware: saves power, runs cooler. Prefer software: try it if hardware decoding shows corrupted / green frames. Only changes the priority order; applies the next time the player opens
-优先硬件解码	Prefer hardware decoding
-优先软件解码	Prefer software decoding
-解码器回退	Decoder fallback
-首选解码器初始化失败时自动换备用解码器（可能更耗电）。下次打开播放器生效	Switches to a backup decoder when the preferred one fails to initialize (may use more power). Applies the next time the player opens
-HDR 视频	HDR video
-自动：设备支持就按 HDR 播放；优先 SDR：流里同时有 HDR 和 SDR 清晰度时选 SDR（HDR 偏暗 / 偏色时用）。只对声明了 HDR 的流有效，下次打开播放器生效	Auto: plays HDR when the device supports it. Prefer SDR: picks SDR when a stream offers both HDR and SDR qualities (use it if HDR looks dark or off-color). Only works for streams that declare HDR; applies the next time the player opens
-优先 SDR	Prefer SDR
-缓冲策略	Buffering
-快速起播：首帧最快；均衡；大缓冲：弱网更稳，但更占内存、更费流量。下次打开播放器生效	Fast start: quickest first frame. Balanced. Large buffer: steadier on weak networks, but uses more memory and data. Applies the next time the player opens
-快速起播	Fast start
-均衡	Balanced
-大缓冲	Large buffer

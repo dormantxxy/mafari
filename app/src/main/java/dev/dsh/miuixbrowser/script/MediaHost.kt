@@ -173,6 +173,9 @@ object MediaHost {
                             cookie = o.optString("cookie"),
                             type = o.optString("type"),
                             startMs = (o.optDouble("pos", 0.0) * 1000).toLong(),
+                            // 脚本嗅探到的其他源：[{url,label,type}…]，原生页菜单里可切换
+                            sources = PlayerRequest.decodeSources(o.optJSONArray("sources")?.toString()),
+                            gecko = engine == "gecko",
                         )
                         if (!isHttp(req.url)) return@post fail("bad_url")
                         suppressPip(a)

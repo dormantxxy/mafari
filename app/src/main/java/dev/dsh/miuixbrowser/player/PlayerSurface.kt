@@ -95,7 +95,7 @@ import top.yukonga.miuix.kmp.material.GlassMaterials
 import top.yukonga.miuix.kmp.material.GlassShape
 
 /*
- * 阶段二：和 float-player.js 一致的播放界面（只做界面，不接下载 / 画中画 / 复制链接 / 视频源列表）。
+ * 和 float-player.js 一致的播放界面；下载 / 复制链接 / 画中画 / 视频源 / 后台播放开关由调用方（[NativePlayerActivity]）接入。
  *
  * 布局对应脚本里的 DOM：
  *   scrim 暗角 · 中部 后退10 / 播放 / 快进10 · 底部 时间 + 胶囊进度条 + 时间
@@ -133,7 +133,9 @@ private class Toast(val text: String)
 
 /**
  * @param fullscreen 是否全屏：全屏时左上角是「‹ 退出全屏」，控件整体内缩（避开刘海 / 圆角）。
- * @param onPip / [onDownload] / [onCopyLink] 阶段二不接：传 null 时按钮照常显示，但灰掉、点了没反应（和脚本里 disabled 的样式一致）。
+ * @param pip 系统画中画小窗里：只剩画面，不画控件 / 手势 / 提示（操作走系统小窗的操作栏）。
+ * @param onPip / [onDownload] / [onCopyLink] 传 null 时按钮照常显示，但灰掉、点了没反应（和脚本里 disabled 的样式一致）。
+ * @param bgPlay 「后台播放」开关当前值；null = 不提供这个选项（菜单里不显示）。
  */
 @Composable
 internal fun PlayerSurface(
@@ -145,6 +147,9 @@ internal fun PlayerSurface(
     onPip: (() -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
     onCopyLink: (() -> Unit)? = null,
+    pip: Boolean = false,
+    bgPlay: Boolean? = null,
+    onBgPlayChange: (Boolean) -> Unit = {},
 ) {
     var controls by remember { mutableStateOf(true) }
     var popup by remember { mutableIntStateOf(POP_NONE) }
@@ -201,8 +206,8 @@ internal fun PlayerSurface(
             }
         }
 
-        // 手势层：在控件层下面；控件层空白处不拦截，事件会落到这里
-        Box(
+        // 手势层：在控件层下面；控件层空白处不拦截，事件会落到这里（画中画小窗里不要，点击交给系统）
+        if (!pip) Box(
             Modifier
                 .fillMaxSize()
                 .pointerInput(player) {
@@ -245,7 +250,7 @@ internal fun PlayerSurface(
                 },
         )
 
-        if (controlsAlpha > 0.01f) {
+        if (!pip && controlsAlpha > 0.01f) {
             Box(Modifier.fillMaxSize().alpha(controlsAlpha)) {
                 Box(Modifier.fillMaxSize().background(Scrim))
 
@@ -411,10 +416,12 @@ internal fun PlayerSurface(
                         ) {
                             MenuItem(MiuixIcons.Glass.Download, tr("下载视频"), enabled = onDownload != null, scale = scale) {
                                 onDownload?.invoke(); popup = POP_NONE
+                                toast = Toast(tr("已加入下载"))
                             }
                             Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
                             MenuItem(MiuixIcons.Glass.Link, tr("复制视频链接"), enabled = onCopyLink != null, scale = scale) {
                                 onCopyLink?.invoke(); popup = POP_NONE
+                                toast = Toast(tr("已复制链接"))
                             }
                             if (player.qualities.size > 1) {
                                 Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
@@ -436,6 +443,45 @@ internal fun PlayerSurface(
                                         onPick = { i ->
                                             player.selectQuality(if (i == 0) null else player.qualities[i - 1])
                                             popup = POP_NONE
+                                            poke++
+                                        },
+                                    )
+                                }
+                            }
+                            if (player.sources.size > 1) {
+                                Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+                                MenuSectionTitle(tr("视频源"), scale)
+                                Column(Modifier.padding(start = 4.dp * scale, end = 4.dp * scale, bottom = 6.dp * scale)) {
+                                    player.sources.forEachIndexed { i, src ->
+                                        SourceRow(
+                                            label = src.label.ifBlank { sourceLabel(src.url, i) },
+                                            active = i == player.sourceIndex,
+                                            scale = scale,
+                                        ) {
+                                            popup = POP_NONE
+                                            if (i != player.sourceIndex) {
+                                                player.playSource(i)
+                                                toast = Toast(tr("已切换视频源"))
+                                            }
+                                            poke++
+                                        }
+                                    }
+                                }
+                            }
+                            if (bgPlay != null) {
+                                Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+                                MenuSectionTitle(tr("后台播放"), scale)
+                                Column(Modifier.padding(start = 9.dp * scale, end = 9.dp * scale, top = 4.dp * scale, bottom = 9.dp * scale)) {
+                                    ChipGrid(
+                                        labels = listOf(tr("开"), tr("关")),
+                                        isActive = { (it == 0) == bgPlay },
+                                        scale = scale,
+                                        chipWidth = (menuWidth - 18.dp * scale - 5.dp * scale) / 2f,
+                                        columns = 2,
+                                        onPick = { i ->
+                                            onBgPlayChange(i == 0)
+                                            popup = POP_NONE
+                                            toast = Toast(if (i == 0) tr("后台播放：已开启（切到后台继续播放音频）") else tr("后台播放：已关闭（切到后台会暂停）"))
                                             poke++
                                         },
                                     )
@@ -478,7 +524,7 @@ internal fun PlayerSurface(
         }
 
         // ---- 提示条：顶部居中，在左上 / 右上按钮下方 ----
-        toast?.let { t ->
+        toast?.takeIf { !pip }?.let { t ->
             Box(
                 Modifier
                     .align(Alignment.TopCenter)
@@ -515,7 +561,7 @@ internal fun PlayerSurface(
 
 /**
  * 圆形玻璃按钮：miuix 的 [GlassIconButton]，以视频层为采样源（内置按压反馈）。
- * [enabled] 为 false 时变灰、点击无效（画中画 / 下载 / 复制在阶段二未接）。
+ * [enabled] 为 false 时变灰、点击无效（调用方没接这个功能时）。
  */
 @Composable
 private fun PlayerGlassButton(
@@ -570,6 +616,47 @@ private fun SpeedButton(label: String, onClick: () -> Unit) {
             .padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center,
     ) { Text(text = label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+}
+
+@Composable
+private fun MenuSectionTitle(text: String, scale: Float) {
+    Text(
+        text = text,
+        color = Color(0x8CFFFFFF),
+        fontSize = (9.5f * scale).sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 11.dp * scale, end = 11.dp * scale, top = 7.dp * scale, bottom = 3.dp * scale),
+    )
+}
+
+/** 视频源列表的一行：当前源白底黑字（和清晰度小方块的选中样式一致），其余透明底。 */
+@Composable
+private fun SourceRow(label: String, active: Boolean, scale: Float, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(8.dp * scale)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 1.dp * scale)
+            .clip(shape)
+            .background(if (active) Color.White else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp * scale, vertical = 6.dp * scale),
+    ) {
+        Text(
+            text = label,
+            color = if (active) Color(0xFF111111) else Color.White,
+            fontSize = (11.5f * scale).sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 没有名字的源：「源 2 · host」，一眼能分出来是哪个站的。 */
+private fun sourceLabel(url: String, index: Int): String {
+    val host = url.substringAfter("://", "").substringBefore('/').substringBefore('?').substringBefore(':')
+    return if (host.isBlank()) tr("视频源 {0}", index + 1) else tr("视频源 {0}", index + 1) + " · " + host
 }
 
 @Composable

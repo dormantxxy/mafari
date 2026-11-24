@@ -2,6 +2,11 @@ package dev.dsh.miuixbrowser.player
 
 import android.content.Context
 import android.content.Intent
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** 同一个视频的另一个可播放地址（脚本嗅探到多个源 / 多个清晰度的独立地址时用）。 */
+data class PlayerSource(val url: String, val label: String = "", val type: String = "")
 
 /**
  * 一次播放请求：地址加上原网页带的请求头。
@@ -16,6 +21,10 @@ data class PlayerRequest(
     /** 提示类型：hls / mp4 / 空（按地址和响应嗅探） */
     val type: String = "",
     val startMs: Long = 0,
+    /** 其他可切换的视频源（不含 [url] 本身也行，会自动补上）；空 = 只有一个源，界面不显示源列表 */
+    val sources: List<PlayerSource> = emptyList(),
+    /** 请求来自 Gecko 引擎的页面：下载时 Cookie 要从 Gecko 取，而不是 WebView 的 CookieManager */
+    val gecko: Boolean = false,
 ) {
     /** 要附加到每个网络请求上的头（UA 单独走 setUserAgent，不放这里） */
     fun headers(): Map<String, String> = buildMap {
@@ -31,10 +40,33 @@ data class PlayerRequest(
         return path.endsWith(".m3u8") || path.endsWith(".m3u")
     }
 
+    /**
+     * 完整的源列表：主地址在最前，[sources] 里与它重复的去掉，其余按地址去重。
+     * 只有一个源时界面不显示源列表。
+     */
+    fun allSources(): List<PlayerSource> {
+        val main = PlayerSource(url, label = "", type = type)
+        return (listOf(main) + sources.filter { it.url.startsWith("http", true) }).distinctBy { it.url }
+    }
+
+    /**
+     * 下载时用的文件名：标题去掉文件系统不接受的字符；扩展名取地址路径里的常见视频后缀，HLS 合并后统一是 mp4。
+     */
+    fun downloadName(): String {
+        val base = title.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), " ").replace(Regex("\\s+"), " ").trim().take(80).trim('.', ' ')
+            .ifBlank { "video" }
+        if (isHls()) return "$base.mp4"
+        val path = url.substringBefore('#').substringBefore('?').lowercase()
+        val ext = path.substringAfterLast('.', "").takeIf { it in VIDEO_EXTS } ?: "mp4"
+        return "$base.$ext"
+    }
+
     fun toIntent(context: Context): Intent =
         Intent(context, NativePlayerActivity::class.java)
             .putExtra(K_URL, url).putExtra(K_TITLE, title).putExtra(K_REFERER, referer)
             .putExtra(K_UA, ua).putExtra(K_COOKIE, cookie).putExtra(K_TYPE, type).putExtra(K_START, startMs)
+            .putExtra(K_GECKO, gecko)
+            .apply { if (sources.isNotEmpty()) putExtra(K_SOURCES, encodeSources(sources)) }
 
     companion object {
         private const val K_URL = "url"
@@ -44,6 +76,10 @@ data class PlayerRequest(
         private const val K_COOKIE = "cookie"
         private const val K_TYPE = "type"
         private const val K_START = "startMs"
+        private const val K_GECKO = "gecko"
+        private const val K_SOURCES = "sources"
+
+        private val VIDEO_EXTS = setOf("mp4", "m4v", "mkv", "webm", "mov", "flv", "ts", "avi", "3gp")
 
         fun from(i: Intent): PlayerRequest? {
             val url = i.getStringExtra(K_URL)?.trim().orEmpty()
@@ -56,7 +92,26 @@ data class PlayerRequest(
                 cookie = i.getStringExtra(K_COOKIE).orEmpty(),
                 type = i.getStringExtra(K_TYPE).orEmpty(),
                 startMs = i.getLongExtra(K_START, 0),
+                sources = decodeSources(i.getStringExtra(K_SOURCES)),
+                gecko = i.getBooleanExtra(K_GECKO, false),
             )
+        }
+
+        private fun encodeSources(list: List<PlayerSource>): String = JSONArray().also { a ->
+            list.forEach { a.put(JSONObject().put("url", it.url).put("label", it.label).put("type", it.type)) }
+        }.toString()
+
+        /** 脚本 `play` 操作的 `sources` 数组（[{url,label,type}…]）和 Intent 里的编码是同一格式；坏数据一律当没有。 */
+        fun decodeSources(json: String?): List<PlayerSource> {
+            if (json.isNullOrBlank()) return emptyList()
+            return runCatching {
+                val a = JSONArray(json)
+                (0 until a.length()).mapNotNull { n ->
+                    val o = a.optJSONObject(n) ?: return@mapNotNull null
+                    val u = o.optString("url").trim()
+                    if (u.isEmpty()) null else PlayerSource(u, o.optString("label"), o.optString("type"))
+                }
+            }.getOrDefault(emptyList())
         }
     }
 }

@@ -17,6 +17,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 原生播放器后台播放：媒体前台服务 + ExoPlayer 熄屏时保持 CPU / Wi-Fi 唤醒 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Android 16 实时更新（Live Updates）：下载进度显示在状态栏胶囊 / 锁屏 -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -63,10 +66,11 @@
             android:theme="@style/Theme.MiuixBrowser">
         </activity>
 
-        <!-- 原生播放页（阶段一）：只接受应用内显式 Intent，不导出。画中画 / 后台播放在后续阶段加 -->
+        <!-- 原生播放页：只接受应用内显式 Intent，不导出。支持系统画中画；后台播放由下面的 PlayerService 保活 -->
         <activity
             android:name=".player.NativePlayerActivity"
             android:exported="false"
+            android:supportsPictureInPicture="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale"
             android:theme="@style/Theme.MiuixBrowser" />
 
@@ -264,6 +268,12 @@
         <receiver
             android:name=".ext.ExtensionNotificationReceiver"
             android:exported="false" />
+
+        <!-- 原生播放器后台播放：前台服务 + 媒体通知，只由 NativePlayerActivity 在界面可见时启动 -->
+        <service
+            android:name=".player.PlayerService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <service
             android:name=".download.DownloadService"

@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -60,6 +61,16 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
 
     /** 直播流：时长未知 / 动态窗口。进度条按这个决定是否可拖 */
     var isLive by mutableStateOf(false); private set
+
+    /** 可切换的视频源（主地址在最前）；只有一个时界面不显示源列表 */
+    val sources: List<PlayerSource> = request.allSources()
+
+    /** 当前正在播的源下标 */
+    var sourceIndex by mutableIntStateOf(0); private set
+
+    /** 当前播放的请求（地址 / 类型随切源变化，请求头不变）：复制链接 / 下载用它 */
+    val currentRequest: PlayerRequest
+        get() = sources.getOrNull(sourceIndex)?.let { request.copy(url = it.url, type = it.type) } ?: request
 
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -121,17 +132,41 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
                     .setBufferDurationsMs(15_000, 60_000, 1_000, 2_000)
                     .build(),
             )
+            // 音频焦点：来电 / 别的播放器抢焦点时自动暂停（后台播放必须有，否则会和别的音频叠在一起）
+            .setAudioAttributes(
+                AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
+                true,
+            )
+            // 拔耳机 / 蓝牙断开时暂停，免得外放
+            .setHandleAudioBecomingNoisy(true)
+            // 后台播放（屏幕关闭）时保持 CPU 和 Wi-Fi 唤醒，否则几分钟后系统会掐掉网络
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         exo.addListener(listener)
-        val item = MediaItem.Builder().setUri(request.url).apply {
-            if (request.isHls()) setMimeType(MimeTypes.APPLICATION_M3U8)
-            if (request.title.isNotBlank()) {
-                setMediaMetadata(androidx.media3.common.MediaMetadata.Builder().setTitle(request.title).build())
-            }
-        }.build()
-        exo.setMediaItem(item, request.startMs.coerceAtLeast(0))
+        exo.setMediaItem(buildItem(currentRequest), request.startMs.coerceAtLeast(0))
         exo.prepare()
         exo.playWhenReady = true
+    }
+
+    private fun buildItem(r: PlayerRequest): MediaItem = MediaItem.Builder().setUri(r.url).apply {
+        if (r.isHls()) setMimeType(MimeTypes.APPLICATION_M3U8)
+        if (r.title.isNotBlank()) {
+            setMediaMetadata(androidx.media3.common.MediaMetadata.Builder().setTitle(r.title).build())
+        }
+    }.build()
+
+    /** 切到第 [i] 个视频源，保留当前进度（直播流从头 / 现场开始）；清晰度选择随新源重置。 */
+    fun playSource(i: Int) {
+        if (i !in sources.indices || i == sourceIndex) return
+        val pos = if (isLive) 0L else exo.currentPosition.coerceAtLeast(0)
+        sourceIndex = i
+        error = null
+        selectedQuality = null
+        qualities = emptyList()
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
+        exo.setMediaItem(buildItem(currentRequest), pos)
+        exo.prepare()
+        exo.play()
     }
 
     /**

@@ -15,6 +15,7 @@ GM_mafariHost(op, args, onEvent) -> Promise<结果 | null>   // null = 宿主不
 | `pip` `{w,h,playing}` | 进入系统画中画。**调用前页面必须已经全屏**，小窗里才只剩画面 |
 | `arm` `{on,w,h}` | 上报「全屏且正在播放」；为 true 时按 Home / 手势返回桌面自动进画中画（Android 12+ 走 `setAutoEnterEnabled`） |
 | `pipState` `{playing}` | 刷新小窗操作栏的播放 / 暂停图标 |
+| `play` `{url,type,title,referer,ua,cookie,pos,sources}` | 用原生播放器（ExoPlayer）打开。`sources` 可选：`[{url,label,type}…]`，多于一个源时原生页菜单里可切换。原生页支持画中画 / 后台播放 / 下载 / 复制链接 |
 | `cast` `{url,type,title,referer,ua,cookie,pos}` | 弹原生面板：DLNA 设备 / 屏幕镜像（系统投屏）/ 外部播放器。状态经 `cast` 事件回来 |
 | `castCtl` `{a:'play'｜'pause'｜'seek'｜'stop',pos}` | 控制正在投的设备 |
 | `external` `{…同 cast}` | 外部播放器选择器，带 `headers`（UA / Referer / Cookie）、`title`、`position` extras |

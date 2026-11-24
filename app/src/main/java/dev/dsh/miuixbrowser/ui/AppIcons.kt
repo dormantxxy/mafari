@@ -214,6 +214,16 @@ object AppIcons {
         )
     }
 
+    /** 视频源：叠放的两层方块（多个来源可切换）。 */
+    val Source: ImageVector by lazy {
+        stroked(
+            "Source",
+            "M12,3L21,8L12,13L3,8Z",
+            "M3,12L12,17L21,12",
+            "M3,16L12,21L21,16",
+        )
+    }
+
     /** 倍速：仪表盘半圆 + 指针。 */
     val Speed: ImageVector by lazy {
         stroked(

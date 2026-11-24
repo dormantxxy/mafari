@@ -341,14 +341,14 @@ class NativePlayerActivity : ComponentActivity() {
     }
 
     /**
-     * 卡片下方、标题上方的快捷菜单（图标 + 文字）：投屏 / 下载 / 截屏 / 倍速 / 清晰度，
+     * 卡片下方、标题上方的快捷菜单（图标 + 文字）：投屏 / 下载 / 截屏 / 倍速 / 清晰度 / 视频源，
      * 设置 → 媒体嗅探与播放 → 快捷菜单 里可整排关掉或逐个关。
-     * 点「倍速」/「清晰度」这一排换成对应的选项，选完（或点返回）恢复。
+     * 点「倍速」/「清晰度」/「视频源」这一排换成对应的选项，选完（或点返回）恢复。
      */
     @androidx.compose.runtime.Composable
     private fun QuickActions(p: MafariPlayer, cast: NativeCast?) {
         if (quickItems.isEmpty()) return
-        // 0 = 按钮排；1 = 倍速选项；2 = 清晰度选项
+        // 0 = 按钮排；1 = 倍速选项；2 = 清晰度选项；3 = 视频源选项
         var page by remember { mutableStateOf(0) }
         Box(Modifier.fillMaxWidth().height(1.dp).background(MiuixTheme.colorScheme.onSurface.copy(alpha = 0.10f)))
         when (page) {
@@ -361,6 +361,21 @@ class NativePlayerActivity : ComponentActivity() {
                 CastButton(tr("自动"), strong = p.selectedQuality == null, compact = true) { p.selectQuality(null); page = 0 }
                 p.qualities.forEach { q ->
                     CastButton(q.label, strong = p.selectedQuality == q, compact = true) { p.selectQuality(q); page = 0 }
+                }
+            }
+            3 -> OptionRow(onBack = { page = 0 }) {
+                p.sources.forEachIndexed { i, s ->
+                    CastButton(
+                        s.label.ifBlank { tr("视频源 {0}", i + 1) },
+                        strong = p.sourceIndex == i,
+                        compact = true,
+                    ) {
+                        if (i != p.sourceIndex) {
+                            p.playSource(i)
+                            Toast.makeText(this@NativePlayerActivity, tr("已切换视频源"), Toast.LENGTH_SHORT).show()
+                        }
+                        page = 0
+                    }
                 }
             }
             else -> Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 1.dp)) {
@@ -379,6 +394,12 @@ class NativePlayerActivity : ComponentActivity() {
                             Modifier.weight(1f),
                             enabled = p.qualities.size > 1, // 只有一档（或还没解析出来）就灰掉
                         ) { page = 2 }
+                        "source" -> QuickAction(
+                            AppIcons.Source,
+                            if (p.sources.size > 1) tr("视频源 {0}", p.sourceIndex + 1) else tr("视频源"),
+                            Modifier.weight(1f),
+                            enabled = p.sources.size > 1, // 只有一个源就灰掉
+                        ) { page = 3 }
                     }
                 }
             }

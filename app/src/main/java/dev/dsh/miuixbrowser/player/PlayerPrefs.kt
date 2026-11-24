@@ -17,7 +17,7 @@ object PlayerPrefs {
     const val KEY_QUICK_MENU = "player_quick_menu"
 
     /** 悬浮播放器下方快捷菜单里的按钮（顺序即显示顺序）；每个按钮可在设置里单独关 */
-    val QUICK_IDS = listOf("cast", "download", "shot", "speed", "quality")
+    val QUICK_IDS = listOf("cast", "download", "shot", "speed", "quality", "source")
     fun quickKey(id: String) = "player_quick_$id"
 
     /** 老版本把后台播放存在播放页自己的 prefs 里（mafari_player / bg_play），第一次读时沿用 */

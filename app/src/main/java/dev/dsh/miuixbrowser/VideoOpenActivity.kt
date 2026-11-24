@@ -9,7 +9,7 @@ import android.provider.OpenableColumns
 import dev.dsh.miuixbrowser.player.PlayerRequest
 
 /**
- * 系统「打开方式」里的本地视频入口（清单里 VIEW + content / file + video/* 等过滤器声明在这里）。
+ * 系统「打开方式」里的本地视频入口（清单里 VIEW + content / file + 视频 MIME 等过滤器声明在这里）。
  * 无界面：直接把地址交给原生播放页全屏播放（Media3 的 DefaultDataSource 能读 content:// / file://，不拷贝文件），随即结束。
  * 读权限靠 ClipData + FLAG_GRANT_READ_URI_PERMISSION 转给播放页；独立 taskAffinity，返回直接回到调用方应用。
  */

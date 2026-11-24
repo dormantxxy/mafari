@@ -25,7 +25,12 @@ data class PlayerRequest(
     val sources: List<PlayerSource> = emptyList(),
     /** 请求来自 Gecko 引擎的页面：下载时 Cookie 要从 Gecko 取，而不是 WebView 的 CookieManager */
     val gecko: Boolean = false,
+    /** 从系统「打开方式」直接打开的本地视频（见 VideoOpenActivity）：一开始就全屏、返回即退出；没有网页可浮在上面，也没有下载 / 投屏 */
+    val standalone: Boolean = false,
 ) {
+    /** 本地文件（content:// / file://）：没有可下载的网络地址，也不能投屏 */
+    val isLocal: Boolean get() = !url.startsWith("http://", true) && !url.startsWith("https://", true)
+
     /** 要附加到每个网络请求上的头（UA 单独走 setUserAgent，不放这里） */
     fun headers(): Map<String, String> = buildMap {
         if (referer.isNotBlank()) put("Referer", referer)
@@ -65,7 +70,7 @@ data class PlayerRequest(
         Intent(context, NativePlayerActivity::class.java)
             .putExtra(K_URL, url).putExtra(K_TITLE, title).putExtra(K_REFERER, referer)
             .putExtra(K_UA, ua).putExtra(K_COOKIE, cookie).putExtra(K_TYPE, type).putExtra(K_START, startMs)
-            .putExtra(K_GECKO, gecko)
+            .putExtra(K_GECKO, gecko).putExtra(K_STANDALONE, standalone)
             .apply { if (sources.isNotEmpty()) putExtra(K_SOURCES, encodeSources(sources)) }
 
     companion object {
@@ -78,12 +83,17 @@ data class PlayerRequest(
         private const val K_START = "startMs"
         private const val K_GECKO = "gecko"
         private const val K_SOURCES = "sources"
+        private const val K_STANDALONE = "standalone"
 
         private val VIDEO_EXTS = setOf("mp4", "m4v", "mkv", "webm", "mov", "flv", "ts", "avi", "3gp")
 
         fun from(i: Intent): PlayerRequest? {
             val url = i.getStringExtra(K_URL)?.trim().orEmpty()
-            if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) return null
+            val standalone = i.getBooleanExtra(K_STANDALONE, false)
+            val web = url.startsWith("http://", true) || url.startsWith("https://", true)
+            // 本地文件只认「打开方式」入口发来的（standalone），其余来源仍只接受 http(s)
+            val local = standalone && (url.startsWith("content://", true) || url.startsWith("file://", true))
+            if (!web && !local) return null
             return PlayerRequest(
                 url = url,
                 title = i.getStringExtra(K_TITLE).orEmpty(),
@@ -94,6 +104,7 @@ data class PlayerRequest(
                 startMs = i.getLongExtra(K_START, 0),
                 sources = decodeSources(i.getStringExtra(K_SOURCES)),
                 gecko = i.getBooleanExtra(K_GECKO, false),
+                standalone = standalone,
             )
         }
 

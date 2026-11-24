@@ -124,6 +124,10 @@ class NativePlayerActivity : ComponentActivity() {
     private var fullscreen by mutableStateOf(false)
     private var inPip by mutableStateOf(false)
     private var bgPlay by mutableStateOf(true)
+
+    /** 从系统「打开方式」直接打开的本地视频：全屏起步，返回 / 退出全屏即关闭，没有卡片形态 */
+    private var standalone = false
+    private var orientationFitted = false
     private var pipAt = 0L // 最近一次进入画中画的时间，用来分辨「刚进小窗的过渡性 onStop」和「用户点 ✕ 关了小窗」
     private var pipReceiver: BroadcastReceiver? = null
     private var cast: NativeCast? = null
@@ -168,7 +172,14 @@ class NativePlayerActivity : ComponentActivity() {
     /** ExoPlayer 状态变了就刷新画中画参数：操作栏的播放 / 暂停图标、宽高比、「播放中才自动进入」 */
     private val pipSync = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) = updatePip()
-        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) = updatePip()
+        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+            updatePip()
+            // 全屏起步时还不知道视频方向：第一次拿到尺寸后再按竖 / 横屏视频定一次屏幕方向
+            if (standalone && fullscreen && !orientationFitted && videoSize.width > 0) {
+                orientationFitted = true
+                applyFullscreen(true)
+            }
+        }
     }
 
     /**
@@ -204,7 +215,8 @@ class NativePlayerActivity : ComponentActivity() {
         quickItems = PlayerPrefs.quickItems(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        applyFullscreen(false) // 里面会 applyWindowMode()
+        standalone = req.standalone
+        applyFullscreen(standalone) // 里面会 applyWindowMode()；「打开方式」进来的本地视频直接全屏
 
         val p = MafariPlayer(this, req)
         player = p
@@ -230,7 +242,7 @@ class NativePlayerActivity : ComponentActivity() {
                     LocalGlassParams provides settings.glassParams,
                     LocalLiquidParams provides settings.liquidParams,
                 ) {
-                    BackHandler(enabled = fullscreen) { applyFullscreen(false) }
+                    BackHandler(enabled = fullscreen) { if (standalone) finish() else applyFullscreen(false) }
                     PlayerPage(p, title = req.title.ifBlank { req.url })
                 }
             }
@@ -239,7 +251,7 @@ class NativePlayerActivity : ComponentActivity() {
 
     @androidx.compose.runtime.Composable
     private fun PlayerPage(p: MafariPlayer, title: String) {
-        val cast = cast
+        val cast = if (p.request.isLocal) null else cast // 本地文件不能投屏
         val pickerOpen = cast?.pickerUi?.show == true
         // 弹窗出现：先挂宿主并撑满窗口；收起动画结束（onDismissFinished）再还原
         LaunchedEffect(pickerOpen) { if (pickerOpen) castSheetHost = true }
@@ -289,11 +301,11 @@ class NativePlayerActivity : ComponentActivity() {
                         player = p,
                         fullscreen = fullscreen,
                         onClose = { finish() },
-                        onToggleFullscreen = { applyFullscreen(!fullscreen) },
+                        onToggleFullscreen = { if (standalone) finish() else applyFullscreen(!fullscreen) },
                         modifier = Modifier.fillMaxSize(),
                         onPip = if (pipSupported()) ({ enterPip() }) else null,
-                        onDownload = { download(p) },
-                        onCopyLink = { copyLink(p) },
+                        onDownload = if (p.request.isLocal) null else ({ download(p) }),
+                        onCopyLink = if (p.request.isLocal) null else ({ copyLink(p) }),
                         onCast = if (cast != null) ({ cast.openPicker() }) else null,
                         pip = inPip,
                         bgPlay = bgPlay,
@@ -382,7 +394,7 @@ class NativePlayerActivity : ComponentActivity() {
                 quickItems.forEach { id ->
                     when (id) {
                         "cast" -> QuickAction(AppIcons.ScreenMirror, tr("投屏"), Modifier.weight(1f), enabled = cast != null) { cast?.openPicker() }
-                        "download" -> QuickAction(MiuixIcons.Glass.Download, tr("下载"), Modifier.weight(1f)) {
+                        "download" -> QuickAction(MiuixIcons.Glass.Download, tr("下载"), Modifier.weight(1f), enabled = !p.request.isLocal) {
                             download(p)
                             Toast.makeText(this@NativePlayerActivity, tr("已加入下载"), Toast.LENGTH_SHORT).show()
                         }

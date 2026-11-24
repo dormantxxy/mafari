@@ -94,8 +94,8 @@
             </intent-filter>
         </activity>
 
-        <!-- 系统「打开方式」里的 HTML 文件：文件管理器 / 聊天 / 邮件等交来的 content:// 或 file:// 本地网页。
-             无界面：先把文件拷进应用私有目录再交给 MainActivity 打开（见 LocalHtml）。
+        <!-- 系统「打开方式」里的网页 / 纯文本文件：文件管理器 / 聊天 / 邮件等交来的 content:// 或 file:// 本地文件。
+             无界面：先把文件拷进应用私有目录（纯文本会包成一页可读的 HTML）再交给 MainActivity 打开（见 LocalHtml）。
              不是 http(s) 链接，所以不影响「默认浏览器」的判定 -->
         <activity
             android:name=".HtmlOpenActivity"
@@ -103,7 +103,7 @@
             android:excludeFromRecents="true"
             android:taskAffinity="${applicationId}.htmlopen"
             android:theme="@style/Theme.MafariTranslucent">
-            <!-- 1) 系统给出了正确的 MIME -->
+            <!-- 1) 系统给出了正确的 MIME（网页 / MHTML / 纯文本） -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -112,8 +112,13 @@
                 <data android:scheme="file" />
                 <data android:mimeType="text/html" />
                 <data android:mimeType="application/xhtml+xml" />
+                <data android:mimeType="multipart/related" />
+                <data android:mimeType="application/x-mimearchive" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
             </intent-filter>
-            <!-- 2) 文件管理器没给 MIME（或给了 octet-stream / */*）：按扩展名匹配。
+            <!-- 2) 文件管理器没给 MIME（或给了 octet-stream / */*）：按扩展名匹配（含大写）。
                  文件名中间带点（a.b.html）时单个 .*\\. 匹配不稳，所以多写几档 -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -126,11 +131,208 @@
                 <data android:pathPattern=".*\\.html" />
                 <data android:pathPattern=".*\\..*\\.html" />
                 <data android:pathPattern=".*\\..*\\..*\\.html" />
+                <data android:pathPattern=".*\\.HTML" />
+                <data android:pathPattern=".*\\..*\\.HTML" />
+                <data android:pathPattern=".*\\..*\\..*\\.HTML" />
                 <data android:pathPattern=".*\\.htm" />
                 <data android:pathPattern=".*\\..*\\.htm" />
                 <data android:pathPattern=".*\\..*\\..*\\.htm" />
+                <data android:pathPattern=".*\\.HTM" />
+                <data android:pathPattern=".*\\..*\\.HTM" />
+                <data android:pathPattern=".*\\..*\\..*\\.HTM" />
                 <data android:pathPattern=".*\\.xhtml" />
                 <data android:pathPattern=".*\\..*\\.xhtml" />
+                <data android:pathPattern=".*\\..*\\..*\\.xhtml" />
+                <data android:pathPattern=".*\\.XHTML" />
+                <data android:pathPattern=".*\\..*\\.XHTML" />
+                <data android:pathPattern=".*\\..*\\..*\\.XHTML" />
+                <data android:pathPattern=".*\\.xht" />
+                <data android:pathPattern=".*\\..*\\.xht" />
+                <data android:pathPattern=".*\\..*\\..*\\.xht" />
+                <data android:pathPattern=".*\\.XHT" />
+                <data android:pathPattern=".*\\..*\\.XHT" />
+                <data android:pathPattern=".*\\..*\\..*\\.XHT" />
+                <data android:pathPattern=".*\\.shtml" />
+                <data android:pathPattern=".*\\..*\\.shtml" />
+                <data android:pathPattern=".*\\..*\\..*\\.shtml" />
+                <data android:pathPattern=".*\\.SHTML" />
+                <data android:pathPattern=".*\\..*\\.SHTML" />
+                <data android:pathPattern=".*\\..*\\..*\\.SHTML" />
+                <data android:pathPattern=".*\\.shtm" />
+                <data android:pathPattern=".*\\..*\\.shtm" />
+                <data android:pathPattern=".*\\..*\\..*\\.shtm" />
+                <data android:pathPattern=".*\\.SHTM" />
+                <data android:pathPattern=".*\\..*\\.SHTM" />
+                <data android:pathPattern=".*\\..*\\..*\\.SHTM" />
+                <data android:pathPattern=".*\\.mhtml" />
+                <data android:pathPattern=".*\\..*\\.mhtml" />
+                <data android:pathPattern=".*\\..*\\..*\\.mhtml" />
+                <data android:pathPattern=".*\\.MHTML" />
+                <data android:pathPattern=".*\\..*\\.MHTML" />
+                <data android:pathPattern=".*\\..*\\..*\\.MHTML" />
+                <data android:pathPattern=".*\\.mht" />
+                <data android:pathPattern=".*\\..*\\.mht" />
+                <data android:pathPattern=".*\\..*\\..*\\.mht" />
+                <data android:pathPattern=".*\\.MHT" />
+                <data android:pathPattern=".*\\..*\\.MHT" />
+                <data android:pathPattern=".*\\..*\\..*\\.MHT" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\..*\\.txt" />
+                <data android:pathPattern=".*\\..*\\..*\\.txt" />
+                <data android:pathPattern=".*\\.TXT" />
+                <data android:pathPattern=".*\\..*\\.TXT" />
+                <data android:pathPattern=".*\\..*\\..*\\.TXT" />
+                <data android:pathPattern=".*\\.text" />
+                <data android:pathPattern=".*\\..*\\.text" />
+                <data android:pathPattern=".*\\..*\\..*\\.text" />
+                <data android:pathPattern=".*\\.TEXT" />
+                <data android:pathPattern=".*\\..*\\.TEXT" />
+                <data android:pathPattern=".*\\..*\\..*\\.TEXT" />
+                <data android:pathPattern=".*\\.log" />
+                <data android:pathPattern=".*\\..*\\.log" />
+                <data android:pathPattern=".*\\..*\\..*\\.log" />
+                <data android:pathPattern=".*\\.LOG" />
+                <data android:pathPattern=".*\\..*\\.LOG" />
+                <data android:pathPattern=".*\\..*\\..*\\.LOG" />
+                <data android:pathPattern=".*\\.md" />
+                <data android:pathPattern=".*\\..*\\.md" />
+                <data android:pathPattern=".*\\..*\\..*\\.md" />
+                <data android:pathPattern=".*\\.MD" />
+                <data android:pathPattern=".*\\..*\\.MD" />
+                <data android:pathPattern=".*\\..*\\..*\\.MD" />
+            </intent-filter>
+        </activity>
+
+        <!-- 系统「打开方式」里的本地视频：无界面，直接交给原生播放页全屏播放（见 VideoOpenActivity）。
+             独立 taskAffinity：返回直接回到调用方应用，不拉起 Mafari 主界面 -->
+        <activity
+            android:name=".VideoOpenActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="${applicationId}.videoopen"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="application/x-matroska" />
+                <data android:mimeType="application/vnd.rn-realmedia" />
+            </intent-filter>
+            <!-- 没给 MIME 时按扩展名匹配 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.mp4" />
+                <data android:pathPattern=".*\\..*\\.mp4" />
+                <data android:pathPattern=".*\\..*\\..*\\.mp4" />
+                <data android:pathPattern=".*\\.MP4" />
+                <data android:pathPattern=".*\\..*\\.MP4" />
+                <data android:pathPattern=".*\\..*\\..*\\.MP4" />
+                <data android:pathPattern=".*\\.m4v" />
+                <data android:pathPattern=".*\\..*\\.m4v" />
+                <data android:pathPattern=".*\\..*\\..*\\.m4v" />
+                <data android:pathPattern=".*\\.M4V" />
+                <data android:pathPattern=".*\\..*\\.M4V" />
+                <data android:pathPattern=".*\\..*\\..*\\.M4V" />
+                <data android:pathPattern=".*\\.mkv" />
+                <data android:pathPattern=".*\\..*\\.mkv" />
+                <data android:pathPattern=".*\\..*\\..*\\.mkv" />
+                <data android:pathPattern=".*\\.MKV" />
+                <data android:pathPattern=".*\\..*\\.MKV" />
+                <data android:pathPattern=".*\\..*\\..*\\.MKV" />
+                <data android:pathPattern=".*\\.webm" />
+                <data android:pathPattern=".*\\..*\\.webm" />
+                <data android:pathPattern=".*\\..*\\..*\\.webm" />
+                <data android:pathPattern=".*\\.WEBM" />
+                <data android:pathPattern=".*\\..*\\.WEBM" />
+                <data android:pathPattern=".*\\..*\\..*\\.WEBM" />
+                <data android:pathPattern=".*\\.mov" />
+                <data android:pathPattern=".*\\..*\\.mov" />
+                <data android:pathPattern=".*\\..*\\..*\\.mov" />
+                <data android:pathPattern=".*\\.MOV" />
+                <data android:pathPattern=".*\\..*\\.MOV" />
+                <data android:pathPattern=".*\\..*\\..*\\.MOV" />
+                <data android:pathPattern=".*\\.avi" />
+                <data android:pathPattern=".*\\..*\\.avi" />
+                <data android:pathPattern=".*\\..*\\..*\\.avi" />
+                <data android:pathPattern=".*\\.AVI" />
+                <data android:pathPattern=".*\\..*\\.AVI" />
+                <data android:pathPattern=".*\\..*\\..*\\.AVI" />
+                <data android:pathPattern=".*\\.flv" />
+                <data android:pathPattern=".*\\..*\\.flv" />
+                <data android:pathPattern=".*\\..*\\..*\\.flv" />
+                <data android:pathPattern=".*\\.FLV" />
+                <data android:pathPattern=".*\\..*\\.FLV" />
+                <data android:pathPattern=".*\\..*\\..*\\.FLV" />
+                <data android:pathPattern=".*\\.3gp" />
+                <data android:pathPattern=".*\\..*\\.3gp" />
+                <data android:pathPattern=".*\\..*\\..*\\.3gp" />
+                <data android:pathPattern=".*\\.3GP" />
+                <data android:pathPattern=".*\\..*\\.3GP" />
+                <data android:pathPattern=".*\\..*\\..*\\.3GP" />
+                <data android:pathPattern=".*\\.3g2" />
+                <data android:pathPattern=".*\\..*\\.3g2" />
+                <data android:pathPattern=".*\\..*\\..*\\.3g2" />
+                <data android:pathPattern=".*\\.3G2" />
+                <data android:pathPattern=".*\\..*\\.3G2" />
+                <data android:pathPattern=".*\\..*\\..*\\.3G2" />
+                <data android:pathPattern=".*\\.wmv" />
+                <data android:pathPattern=".*\\..*\\.wmv" />
+                <data android:pathPattern=".*\\..*\\..*\\.wmv" />
+                <data android:pathPattern=".*\\.WMV" />
+                <data android:pathPattern=".*\\..*\\.WMV" />
+                <data android:pathPattern=".*\\..*\\..*\\.WMV" />
+                <data android:pathPattern=".*\\.mpg" />
+                <data android:pathPattern=".*\\..*\\.mpg" />
+                <data android:pathPattern=".*\\..*\\..*\\.mpg" />
+                <data android:pathPattern=".*\\.MPG" />
+                <data android:pathPattern=".*\\..*\\.MPG" />
+                <data android:pathPattern=".*\\..*\\..*\\.MPG" />
+                <data android:pathPattern=".*\\.mpeg" />
+                <data android:pathPattern=".*\\..*\\.mpeg" />
+                <data android:pathPattern=".*\\..*\\..*\\.mpeg" />
+                <data android:pathPattern=".*\\.MPEG" />
+                <data android:pathPattern=".*\\..*\\.MPEG" />
+                <data android:pathPattern=".*\\..*\\..*\\.MPEG" />
+                <data android:pathPattern=".*\\.ogv" />
+                <data android:pathPattern=".*\\..*\\.ogv" />
+                <data android:pathPattern=".*\\..*\\..*\\.ogv" />
+                <data android:pathPattern=".*\\.OGV" />
+                <data android:pathPattern=".*\\..*\\.OGV" />
+                <data android:pathPattern=".*\\..*\\..*\\.OGV" />
+                <data android:pathPattern=".*\\.mts" />
+                <data android:pathPattern=".*\\..*\\.mts" />
+                <data android:pathPattern=".*\\..*\\..*\\.mts" />
+                <data android:pathPattern=".*\\.MTS" />
+                <data android:pathPattern=".*\\..*\\.MTS" />
+                <data android:pathPattern=".*\\..*\\..*\\.MTS" />
+                <data android:pathPattern=".*\\.m2ts" />
+                <data android:pathPattern=".*\\..*\\.m2ts" />
+                <data android:pathPattern=".*\\..*\\..*\\.m2ts" />
+                <data android:pathPattern=".*\\.M2TS" />
+                <data android:pathPattern=".*\\..*\\.M2TS" />
+                <data android:pathPattern=".*\\..*\\..*\\.M2TS" />
+                <data android:pathPattern=".*\\.rmvb" />
+                <data android:pathPattern=".*\\..*\\.rmvb" />
+                <data android:pathPattern=".*\\..*\\..*\\.rmvb" />
+                <data android:pathPattern=".*\\.RMVB" />
+                <data android:pathPattern=".*\\..*\\.RMVB" />
+                <data android:pathPattern=".*\\..*\\..*\\.RMVB" />
+                <data android:pathPattern=".*\\.vob" />
+                <data android:pathPattern=".*\\..*\\.vob" />
+                <data android:pathPattern=".*\\..*\\..*\\.vob" />
+                <data android:pathPattern=".*\\.VOB" />
+                <data android:pathPattern=".*\\..*\\.VOB" />
+                <data android:pathPattern=".*\\..*\\..*\\.VOB" />
             </intent-filter>
         </activity>
 

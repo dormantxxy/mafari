@@ -29,4 +29,28 @@ class LocalHtmlTest {
         assertTrue(name.length <= 85)
         assertTrue(name.endsWith(".html"))
     }
+
+    @Test fun keepsMoreWebExtensions() {
+        assertEquals("a.mhtml", LocalHtml.cleanName("a.mhtml"))
+        assertEquals("a.SHTML", LocalHtml.cleanName("a.SHTML"))
+        assertEquals("a.xht", LocalHtml.cleanName("a.xht"))
+    }
+
+    @Test fun detectsText() {
+        assertTrue(LocalHtml.isText("a.txt", null))
+        assertTrue(LocalHtml.isText("a.LOG", "application/octet-stream"))
+        assertTrue(LocalHtml.isText("noext", "text/plain"))
+        assertTrue(!LocalHtml.isText("a.html", "text/plain"))
+        assertTrue(!LocalHtml.isText("a.mp4", null))
+    }
+
+    @Test fun decodesCommonEncodings() {
+        assertEquals("你好", LocalHtml.decodeText("你好".toByteArray(Charsets.UTF_8)))
+        assertEquals("你好", LocalHtml.decodeText("你好".toByteArray(java.nio.charset.Charset.forName("GBK"))))
+        assertEquals("hi", LocalHtml.decodeText(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte(), 'h'.code.toByte(), 'i'.code.toByte())))
+    }
+
+    @Test fun escapesHtml() {
+        assertEquals("&lt;script&gt;a&amp;b", LocalHtml.escape("<script>a&b"))
+    }
 }

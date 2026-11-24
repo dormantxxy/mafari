@@ -25,7 +25,22 @@ object LocalHtml {
     /** 旧副本保留时间：超过就在下次打开时清掉 */
     private const val KEEP_MS = 7L * 24 * 60 * 60 * 1000
 
-    private val HTML_EXT = setOf("html", "htm", "xhtml")
+    /** 网页文件后缀（含 shtml / xht / mhtml 等）；MHTML 只有 WebView 内核能渲染，Gecko 不支持 */
+    val HTML_EXT = setOf("html", "htm", "xhtml", "xht", "shtml", "shtm", "mhtml", "mht")
+
+    /** 当纯文本打开的后缀（包成一页可读的 HTML 再加载） */
+    val TEXT_EXT = setOf("txt", "text", "log", "md")
+
+    /** 纯文本最多读多少：超出的部分不显示（整页 <pre> 太大会拖垮渲染） */
+    private const val MAX_TEXT_BYTES = 8 * 1024 * 1024
+
+    /** [name] / [mime] 看起来是纯文本（后缀优先；后缀是网页就不算，没有后缀再看 MIME） */
+    fun isText(name: String?, mime: String?): Boolean {
+        val ext = name.orEmpty().substringAfterLast('.', "").lowercase()
+        if (ext in HTML_EXT) return false
+        if (ext in TEXT_EXT) return true
+        return ext.isEmpty() && mime.orEmpty().lowercase().startsWith("text/plain")
+    }
 
     /** 放在 filesDir 而不是 cacheDir：冷启动会清空 cacheDir（见 CacheCleaner），标签恢复时文件就没了 */
     fun dir(context: Context): File = File(context.applicationContext.filesDir, DIR)
@@ -50,11 +65,17 @@ object LocalHtml {
     }
 
     /** 把 [src] 拷成本地副本。失败（读不到 / 太大 / 磁盘满）返回 failure，并清掉没写完的文件。 */
-    fun import(context: Context, src: Uri): Result<File> = runCatching {
+    fun import(context: Context, src: Uri, mime: String? = null): Result<File> = runCatching {
         val app = context.applicationContext
         val folder = File(dir(app), digest(src.toString())).apply { mkdirs() }
-        val target = File(folder, fileNameOf(app, src))
+        val rawName = rawNameOf(app, src)
+        val target = File(folder, cleanName(rawName))
         try {
+            if (isText(rawName, mime)) {
+                writeTextPage(app, src, rawName, target)
+                prune(app, keep = folder)
+                return@runCatching target
+            }
             val input = app.contentResolver.openInputStream(src) ?: error("cannot open $src")
             input.use { ins ->
                 target.outputStream().use { out ->
@@ -87,8 +108,53 @@ object LocalHtml {
         }
     }
 
-    /** 取显示名：先问提供方的 DISPLAY_NAME，再用路径最后一段；去掉路径分隔符 / 控制字符，缺 html 扩展名就补 .html。 */
-    private fun fileNameOf(context: Context, uri: Uri): String {
+    /** 纯文本 → 一页可读的 HTML：自动判断编码、保留换行、自动折行、跟随深浅色；文本内容全部转义，不会执行里面的脚本。 */
+    private fun writeTextPage(context: Context, src: Uri, rawName: String?, target: File) {
+        val input = context.contentResolver.openInputStream(src) ?: error("cannot open $src")
+        val buf = java.io.ByteArrayOutputStream()
+        var truncated = false
+        input.use { ins ->
+            val chunk = ByteArray(64 * 1024)
+            while (true) {
+                val n = ins.read(chunk)
+                if (n < 0) break
+                val room = MAX_TEXT_BYTES - buf.size()
+                if (n > room) { buf.write(chunk, 0, room); truncated = true; break }
+                buf.write(chunk, 0, n)
+            }
+        }
+        val text = decodeText(buf.toByteArray())
+        val title = (rawName ?: "text").substringAfterLast('/').substringAfterLast('\\')
+        val mono = if (title.substringAfterLast('.', "").lowercase() == "log") "ui-monospace,Menlo,Consolas,monospace" else "system-ui,-apple-system,'Segoe UI',sans-serif"
+        val note = if (truncated) "\n\n—— 文件较大，仅显示前 8 MB ——" else ""
+        val html = "<!doctype html><html><head><meta charset=\"utf-8\">" +
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+            "<meta name=\"color-scheme\" content=\"light dark\"><title>${escape(title)}</title>" +
+            "<style>body{margin:0;padding:16px}pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;" +
+            "font:15px/1.65 $mono;tab-size:4}</style></head><body><pre>${escape(text + note)}</pre></body></html>"
+        target.writeText(html, Charsets.UTF_8)
+    }
+
+    /** 编码判断：BOM → 严格 UTF-8 → GB18030（兼容 GBK）→ 容错 UTF-8。 */
+    internal fun decodeText(bytes: ByteArray): String {
+        fun strict(cs: java.nio.charset.Charset, off: Int = 0): String? = runCatching {
+            cs.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(bytes, off, bytes.size - off)).toString()
+        }.getOrNull()
+        if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
+            return String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
+        }
+        if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) return String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
+        if (bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte()) return String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
+        return strict(Charsets.UTF_8) ?: strict(java.nio.charset.Charset.forName("GB18030")) ?: String(bytes, Charsets.UTF_8)
+    }
+
+    internal fun escape(s: String): String = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    /** 取显示名：先问提供方的 DISPLAY_NAME，再用路径最后一段（未清洗）。 */
+    private fun rawNameOf(context: Context, uri: Uri): String? {
         var name: String? = null
         if ("content".equals(uri.scheme, ignoreCase = true)) {
             name = runCatching {
@@ -98,7 +164,7 @@ object LocalHtml {
             }.getOrNull()
         }
         if (name.isNullOrBlank()) name = uri.lastPathSegment
-        return cleanName(name)
+        return name
     }
 
     /** 文件名清洗：去掉路径分隔符 / 控制字符 / 非法字符，限长 80，缺 html 扩展名就补 .html。 */

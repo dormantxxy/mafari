@@ -402,6 +402,9 @@ class BrowserTab(
     /** 本标签用的是 Gecko 内核（和引擎此刻是否已创建无关） */
     val isGecko: Boolean get() = engineKind == EngineKind.GECKO
 
+    /** Gecko 标签且渲染后端是 TextureView：网页画面能被 layerBackdrop 采样（底栏 / 弹窗可用高级材质） */
+    val geckoTextureGlass: Boolean get() = isGecko && geckoEngine?.usesTexture == true
+
     /** 两种内核共有的基础操作（导航 / 查找 / 滚动 / 标题）：内核分支都收在 [TabEngineOps] 的两个实现里。 */
     private val ops: TabEngineOps by lazy {
         if (isGecko) GeckoTabOps(current = { geckoEngine }, ensure = { ensureGecko() })

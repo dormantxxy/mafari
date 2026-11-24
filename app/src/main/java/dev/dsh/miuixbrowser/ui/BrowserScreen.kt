@@ -251,8 +251,9 @@ fun BrowserScreen(
     val homeBlurAvailable = tab.url.isEmpty() && !tab.loading && webViewHidden
     // WebView 内核：WebView 已显式开启硬件层（见 BrowserTab.initWebView），录进 layerBackdrop 不再闪烁/崩溃，
     // 所以网页态下底栏 / 弹窗也可以采样整页（含 WebView）使用高级材质。
-    // Gecko 内核（SurfaceView 合成）仍不采样，继续用假玻璃回退。
-    val webGlassAvailable = !tab.isGecko && tab.url.isNotEmpty()
+    // Gecko 内核：SurfaceView 后端由系统合成器直接送显，采样不到，继续用假玻璃回退；
+    // 选了 TextureView 后端（设置 → Gecko 调试 → 渲染方式）的标签，画面在 View 层级里，和 WebView 一样可以采样。
+    val webGlassAvailable = tab.url.isNotEmpty() && (!tab.isGecko || tab.geckoTextureGlass)
     // 玻璃能否采样：主页（Compose 内容）或 WebView 网页态
     val glassAvailable = homeBlurAvailable || webGlassAvailable
     // 底栏 / 弹窗统一用的 MIUIX 采样层：网页态必须取整页采集层（壁纸层此时没有绘制），主页沿用 homeBackdrop
@@ -678,7 +679,7 @@ fun BrowserScreen(
             modifier = Modifier
                 .fillMaxSize()
                 // MIUIX backdrop 在主页采集 Compose 内容；WebView 内核的网页态也采集（WebView 已显式开启硬件层，
-                // 不会再与 RuntimeShader 组合闪烁 / 崩溃）。Gecko 内核（SurfaceView）不采集，继续用假玻璃。
+                // 不会再与 RuntimeShader 组合闪烁 / 崩溃）。Gecko 内核：TextureView 后端同样采集，SurfaceView 后端不采集，继续用假玻璃。
                 .then(
                     if (glassAvailable) {
                         Modifier.layerBackdrop(browserBackdrop).then(

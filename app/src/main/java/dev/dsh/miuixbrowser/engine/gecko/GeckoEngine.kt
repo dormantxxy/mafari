@@ -125,13 +125,17 @@ class GeckoTabEngine(
 
     val session: GeckoSession = adopted ?: newGeckoSession(privateMode)
 
+    /**
+     * 这个标签的 GeckoView 是不是 TextureView 后端（创建时按调试页设置定下，之后不变）。
+     * TextureView 的画面是普通 View 层级的一部分，能被 layerBackdrop 录制，底栏 / 弹窗才可以像 WebView 那样采样网页做玻璃；
+     * SurfaceView 由系统合成器直接送显，采样不到。
+     */
+    val usesTexture: Boolean = GeckoDebug.renderBackend == GeckoDebug.RENDER_TEXTURE
+
     // 渲染后端必须在 view 还没挂 session 时选好（open() 之后再 setViewBackend 会重建内部 View，Surface 生命周期会错位）
     val view: GeckoView = GeckoView(context).apply {
         runCatching {
-            setViewBackend(
-                if (GeckoDebug.renderBackend == GeckoDebug.RENDER_TEXTURE) GeckoView.BACKEND_TEXTURE_VIEW
-                else GeckoView.BACKEND_SURFACE_VIEW,
-            )
+            setViewBackend(if (usesTexture) GeckoView.BACKEND_TEXTURE_VIEW else GeckoView.BACKEND_SURFACE_VIEW)
         }
     }
 

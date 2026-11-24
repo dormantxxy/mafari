@@ -499,7 +499,15 @@ fun BrowserScreen(
         }
     }
     val keepStatusInset = statusBandActive && tab.pageHasTopBar
-    val topInsetCollapsed = immersiveScrolled && !keepStatusInset
+    // 页面一离开顶部就让网页铺到屏幕顶（不管栏是收起还是下滑后重新展开），状态栏的渐进模糊直接采样网页，
+    // 范围包含整个状态栏；只有初始 / 滑回最顶部才是「留白 + 拉伸取样」（见 StatusInsetPolicy）
+    val topInsetCollapsed = StatusInsetPolicy.collapsed(
+        immersiveScrolled = immersiveScrolled,
+        keepStatusInset = keepStatusInset,
+        statusBandActive = statusBandActive,
+        hasPage = tab.url.isNotEmpty(),
+        pageAtTop = ui.pageAtTop,
+    )
     // 「拉伸取样」只在页面处于顶部的初始状态（含滑回顶部）使用；离开顶部后（下滑唤出状态栏等）直接采样下层网页、不拉伸。
     // 页面自带固定顶栏时顶边静止，仍用拉伸
     val animatedTopPadding by animateDpAsState(
@@ -726,7 +734,7 @@ fun BrowserScreen(
         if (statusBandActive) {
             StatusBarMaterialBand(
                 backdrop = browserBackdrop,
-                stretched = (ui.pageAtTop || keepStatusInset) && !topInsetCollapsed,
+                stretched = StatusInsetPolicy.stretched(ui.pageAtTop, keepStatusInset, topInsetCollapsed),
             )
         }
 

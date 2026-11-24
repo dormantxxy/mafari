@@ -101,6 +101,35 @@ internal fun StatusBarMaterialBand(
     }
 }
 
+/**
+ * 网页态状态栏的两种形态，由页面滚动位置决定（纯函数，见 StatusInsetPolicyTest）：
+ *
+ * - **留白 + 拉伸取样**：网页从状态栏下面开始（状态栏这一条是空的），用「拉伸的网页顶边」填出渐进模糊。
+ *   只在初始加载完成、页面还没滑动，以及从下面彻底滑回最顶部时使用；页面自带固定顶栏时顶边静止，也用它。
+ * - **铺到屏幕顶 + 直接取样**：网页铺到屏幕顶，渐进模糊直接采样状态栏下的网页（不拉伸），渐进范围从屏幕顶边算起、
+ *   包含整个状态栏区域。页面一离开顶部就是这一种，不管底栏当前是收起还是因下滑重新展开——
+ *   否则下滑唤出栏时留白会回落，状态栏区域是空的，只剩状态栏以下那一小段在模糊，层级就断了。
+ */
+internal object StatusInsetPolicy {
+    /** 状态栏留白是否收起（网页铺到屏幕顶） */
+    fun collapsed(
+        immersiveScrolled: Boolean,
+        keepStatusInset: Boolean,
+        statusBandActive: Boolean,
+        hasPage: Boolean,
+        pageAtTop: Boolean,
+    ): Boolean {
+        if (keepStatusInset) return false
+        // 页面已经离开顶部：栏是否收起都不再给状态栏留白
+        val offTop = statusBandActive && hasPage && !pageAtTop
+        return immersiveScrolled || offTop
+    }
+
+    /** 是否用「拉伸取样」；否则直接采样网页 */
+    fun stretched(pageAtTop: Boolean, keepStatusInset: Boolean, collapsed: Boolean): Boolean =
+        (pageAtTop || keepStatusInset) && !collapsed
+}
+
 /** 状态栏渐进模糊在状态栏下沿以下继续向下渐隐的高度，用来盖住状态栏与网页之间的分割白块 */
 private val StatusBarRampExtra = 16.5.dp
 

@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.dsh.miuixbrowser.MainActivity
+import dev.dsh.miuixbrowser.player.PlayerRequest
 import dev.dsh.miuixbrowser.util.Diag
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -128,7 +129,7 @@ object MediaHost {
                             val pip = a.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
                             reply.send(
                                 fn, "r",
-                                JSONObject().put("api", 1).put("engine", engine).put("pip", pip).put("cast", true).put("ext", true).put("dl", true).toString(),
+                                JSONObject().put("api", 1).put("engine", engine).put("pip", pip).put("cast", true).put("play", true).put("ext", true).put("dl", true).toString(),
                             )
                         }
                     }
@@ -160,6 +161,22 @@ object MediaHost {
                         armH = o.optInt("h", 9)
                         playing = o.optBoolean("playing", false)
                         if (enterPip(a)) ok() else fail("pip_failed")
+                    }
+                    "play" -> {
+                        // 原生播放器（ExoPlayer）：脚本把嗅探到的地址和请求头交过来，由原生页播放
+                        if (a == null || !heavyOk()) return@post fail("unsupported")
+                        val req = PlayerRequest(
+                            url = o.optString("url"),
+                            title = o.optString("title"),
+                            referer = o.optString("referer"),
+                            ua = o.optString("ua"),
+                            cookie = o.optString("cookie"),
+                            type = o.optString("type"),
+                            startMs = (o.optDouble("pos", 0.0) * 1000).toLong(),
+                        )
+                        if (!isHttp(req.url)) return@post fail("bad_url")
+                        suppressPip(a)
+                        if (runCatching { a.startActivity(req.toIntent(a)) }.isSuccess) ok() else fail("start_failed")
                     }
                     "cast" -> {
                         if (a == null || !heavyOk()) return@post fail("unsupported")

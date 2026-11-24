@@ -2181,3 +2181,16 @@ m3u8 清单里没有分片	The m3u8 playlist has no segments
 HLS 转 MP4	HLS to MP4
 m3u8 下载完成后把 TS 转封装成 MP4（不重新编码；编码不支持时保留 TS）	Remux TS to MP4 after an m3u8 download (no re-encoding; keeps TS if the codecs aren't supported)
 转封装为 MP4… {0}%	Remuxing to MP4… {0}%
+-10 秒	-10 s
++10 秒	+10 s
+缓冲中…	Buffering…
+直播	Live
+倍速 {0}	Speed {0}
+服务器拒绝访问（{0}），可能需要登录或带防盗链信息	Access denied by the server ({0}); you may need to sign in or send the original referer
+资源不存在（404）	Not found (404)
+服务器返回了错误状态	The server returned an error
+服务器返回错误（{0}）	Server error ({0})
+网络连接失败	Network connection failed
+无法识别的视频格式	Unrecognized video format
+设备不支持这种编码	This device doesn't support the codec
+播放失败：{0}	Playback failed: {0}

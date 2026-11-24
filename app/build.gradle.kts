@@ -25,6 +25,8 @@ val sqliteVersion = "2.4.0"
 // 加密引擎：ML-KEM-768（FIPS 203）与 X25519 用 BouncyCastle 轻量 API（需 ≥ 1.79 才有 ML-KEM）
 val bouncyCastleVersion = "1.82"
 val okhttpVersion = "5.5.1"
+// 原生播放器内核：Media3 ExoPlayer（只要 exoplayer + hls；界面用 miuix 自绘，不引 media3-ui）。网络层用自带的 HttpURLConnection，不依赖 media3-datasource-okhttp
+val media3Version = "1.8.0"
 // Git 同步：JGit 5.13 是最后一个面向 Java 8 的版本，Android 上可用（6.x 起要求 Java 11）
 val jgitVersion = "5.13.3.202401111512-r"
 // Deploy key（SSH）：JGit 的 JSch 传输 + mwiede 维护的 JSch 分支（同包名直接替换，支持 ed25519 / rsa-sha2；原版 0.1.55 连 GitHub 已不可用）
@@ -77,6 +79,7 @@ fun dependencyVersionsOf(withGecko: Boolean, withSync: Boolean): String = listOf
     Triple("androidx", "CameraX", cameraxVersion),
     Triple("engine", "ML Kit Barcode Scanning", mlkitBarcodeVersion),
     Triple("androidx", "NavigationEvent", navigationEventVersion),
+    Triple("androidx", "Media3 ExoPlayer", media3Version),
     Triple("androidx", "SQLite", sqliteVersion),
     Triple("storage", "SQLCipher", sqlcipherVersion),
     if (withGecko) Triple("engine", "GeckoView", if (geckoViewVersion == "+") "nightly（最新）" else geckoViewVersion) else null,
@@ -250,6 +253,9 @@ dependencies {
     implementation("androidx.camera:camera-view:$cameraxVersion")
     implementation("com.google.mlkit:barcode-scanning:$mlkitBarcodeVersion")
     implementation("androidx.navigationevent:navigationevent-compose:$navigationEventVersion")
+    // 原生播放器（player/）：ExoPlayer + HLS；伪装图片头的分片由 StripImageHeaderDataSource 裁掉
+    implementation("androidx.media3:media3-exoplayer:$media3Version")
+    implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     // 后量子混合加密引擎（CryptoEngine.kt）
     implementation("org.bouncycastle:bcprov-jdk18on:$bouncyCastleVersion")
     // WebDAV 同步（PROPFIND / MKCOL 等扩展方法 HttpURLConnection 不支持）

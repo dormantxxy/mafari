@@ -2249,3 +2249,52 @@ TextureView 支持玻璃模糊；SurfaceView 更省电、延迟更低，但没�
 截图保存失败	Couldn't save the screenshot
 悬浮播放器卡片下方的一排快捷按钮（全屏 / 画中画里不显示）	The row of quick buttons under the floating player card (not shown in full screen or picture-in-picture)
 嗅探到的媒体	Media detected
+Media3 高级选项 · HDR 与画质	Media3 advanced · HDR & quality
+Media3 高级选项 · 解码	Media3 advanced · Decoding
+Media3 高级选项 · 缓冲与内存	Media3 advanced · Buffering & memory
+Media3 高级选项 · 其他	Media3 advanced · Other
+HDR 策略	HDR policy
+流里同时有 HDR 和 SDR 清晰度（常见于 HLS）时，自动选档只在偏好的一类里挑；只有一类时不起作用。HDR 直出需要 SurfaceView 渲染，TextureView 下 HDR 画面可能发灰	When a stream offers both HDR and SDR qualities (common with HLS), automatic selection only picks from the preferred kind; it does nothing when there is only one kind. HDR output needs SurfaceView rendering; with TextureView, HDR video may look washed out
+优先 SDR	Prefer SDR
+优先 HDR	Prefer HDR
+最高清晰度	Maximum quality
+自动选档时不超过这个清晰度（省流量 / 省电 / 低端机防卡顿）；手动选更高的档不受限	Automatic selection won't go above this quality (saves data / battery / avoids stutter on low-end phones); manually picking a higher one is not restricted
+不限	No limit
+解码器偏好	Decoder preference
+只调整候选顺序、不会删掉候选：硬件优先省电，软件优先兼容性好但耗电发热（高分辨率可能掉帧）	Only reorders the candidates, never removes any: hardware first saves power; software first is more compatible but uses more power and heat (may drop frames at high resolutions)
+硬件优先	Hardware first
+软件优先	Software first
+解码器回退	Decoder fallback
+首选解码器初始化失败时自动换下一个（比如硬解起不来换软解），而不是直接报错	If the preferred decoder fails to initialize, try the next one (e.g. software when hardware fails) instead of showing an error
+MediaCodec 异步队列	MediaCodec async queueing
+自动 = 由 Media3 按系统版本决定。个别机型解码花屏 / 卡死时可以试试强制关闭	Auto lets Media3 decide by Android version. If a device shows corrupted frames or freezes while decoding, try forcing it off
+强制开启	Force on
+强制关闭	Force off
+隧道播放	Tunneled playback
+音视频直通硬件解码器，省电、同步更准；只在渲染方式为 SurfaceView 且设备支持时生效，部分机型有兼容问题	Passes audio and video straight through the hardware decoder: saves power and keeps A/V sync tighter. Only works with SurfaceView rendering on supported devices; some devices have compatibility issues
+缓冲策略	Buffering strategy
+省内存：提前缓冲 30 秒；均衡：60 秒（默认）；流畅优先：2 分钟；大缓冲：5 分钟。越大越不容易卡，但占内存、费流量；实际还受下面的大小上限约束	Low memory: buffer 30 s ahead; Balanced: 60 s (default); Smooth: 2 min; Large: 5 min. Larger means fewer stalls but more memory and data; the size limit below still applies
+省内存	Low memory
+均衡	Balanced
+流畅优先	Smooth
+大缓冲	Large buffer
+缓冲大小上限	Buffer size limit
+缓冲占用内存的上限。自动 = 由 Media3 按视频估算（省内存档为 48 MB）；超过上限就暂停缓冲，哪怕还没缓冲够	Memory cap for buffering. Auto lets Media3 estimate it from the video (48 MB for Low memory); buffering pauses once the cap is hit even if the time target isn't reached
+后向缓冲	Back buffer
+已播放的部分在内存里多留一会儿，往回拖不用重新下载；会多占内存	Keeps already-played video in memory for a while so seeking back doesn't re-download it; uses more memory
+不保留	None
+{0} 秒	{0} s
+拖动定位	Seek mode
+精确：落在你拖到的那一帧，要多解码一段；就近关键帧：落在最近的关键帧，快很多，但位置会有几秒偏差	Exact: lands on the frame you dragged to, needs extra decoding; Nearest keyframe: lands on the closest keyframe, much faster but may be off by a few seconds
+精确	Exact
+就近关键帧	Nearest keyframe
+网络超时	Network timeout
+连接 / 读取超时：严格 8 秒 / 10 秒，默认 15 秒 / 20 秒，宽松 30 秒 / 40 秒。线路慢时用宽松，想快速失败后换源用严格	Connect / read timeout: Strict 8 s / 10 s, Default 15 s / 20 s, Relaxed 30 s / 40 s. Use Relaxed on slow lines, Strict if you want to fail fast and switch source
+宽松	Relaxed
+管理音频焦点	Manage audio focus
+来电 / 其他应用播放声音时自动暂停。关闭后会和其他应用的声音混在一起播放	Pauses automatically on calls or when another app plays audio. When off, it mixes with other apps' audio
+拔出耳机时暂停	Pause when headphones unplug
+耳机拔出 / 蓝牙断开时自动暂停，免得突然外放	Pauses when headphones are unplugged or Bluetooth disconnects, so sound doesn't suddenly play out loud
+把上面所有 Media3 高级选项恢复成默认值	Reset all the Media3 advanced options above to their defaults
+保持当前	Keep current
+以上选项在下次打开播放器时生效。出现花屏、黑屏或无法播放时，先试试「恢复默认」。	These options take effect the next time the player opens. If you see corrupted frames, a black screen or playback failures, try "Reset to defaults" first.

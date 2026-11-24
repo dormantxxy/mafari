@@ -1029,6 +1029,41 @@ class AppSettings(context: Context) {
         prefs.edit().putBoolean(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_BG_PLAY, on).apply()
     }
 
+    // ---- Media3 高级选项（取值见 PlayerTuning；下次打开播放器生效）----
+
+    /** 下拉类选项的当前下标（键见 PlayerTuning.CHOICE_SIZES） */
+    val playerAdvChoices = androidx.compose.runtime.mutableStateMapOf<String, Int>().apply {
+        val t = dev.dsh.miuixbrowser.player.PlayerTuning
+        t.CHOICE_SIZES.forEach { (k, size) -> put(k, t.clamp(prefs.getInt(k, t.choiceDefault(k)), size)) }
+    }
+
+    /** 开关类选项的当前值（键见 PlayerTuning.SWITCH_DEFAULTS） */
+    val playerAdvFlags = androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply {
+        dev.dsh.miuixbrowser.player.PlayerTuning.SWITCH_DEFAULTS.forEach { (k, def) -> put(k, prefs.getBoolean(k, def)) }
+    }
+
+    fun updatePlayerAdvChoice(key: String, index: Int) {
+        val t = dev.dsh.miuixbrowser.player.PlayerTuning
+        val size = t.CHOICE_SIZES[key] ?: return
+        val v = t.clamp(index, size)
+        playerAdvChoices[key] = v
+        prefs.edit().putInt(key, v).apply()
+    }
+
+    fun updatePlayerAdvFlag(key: String, on: Boolean) {
+        if (key !in dev.dsh.miuixbrowser.player.PlayerTuning.SWITCH_DEFAULTS) return
+        playerAdvFlags[key] = on
+        prefs.edit().putBoolean(key, on).apply()
+    }
+
+    /** 全部 Media3 高级选项恢复默认（删掉键，读取时自然回到默认值） */
+    fun resetPlayerAdvanced() {
+        val t = dev.dsh.miuixbrowser.player.PlayerTuning
+        prefs.edit().apply { t.ALL_KEYS.forEach { remove(it) } }.apply()
+        t.CHOICE_SIZES.keys.forEach { playerAdvChoices[it] = t.choiceDefault(it) }
+        t.SWITCH_DEFAULTS.forEach { (k, def) -> playerAdvFlags[k] = def }
+    }
+
     /** 把设置值和两层总开关合成「生效状态」推给热路径（请求拦截 / MediaHost），并通知 Gecko 后台页 */
     fun syncMediaFeatures() {
         val f = dev.dsh.miuixbrowser.sniff.MediaFeatures

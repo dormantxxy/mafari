@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import dev.dsh.miuixbrowser.data.AppSettings
 import dev.dsh.miuixbrowser.i18n.tr
 import dev.dsh.miuixbrowser.player.PlayerPrefs
+import dev.dsh.miuixbrowser.player.PlayerTuning
 import dev.dsh.miuixbrowser.player.speedLabel
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -39,7 +40,8 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
  *  - 嗅探媒体播放 / 退出自动画中画 / 自动悬浮播放（嗅探到视频直接用原生悬浮播放器打开）；
  *  - 播放器：渲染方式（TextureView / SurfaceView）、默认倍速、长按倍速、后台播放；
  *  - 快捷菜单：悬浮播放器下方那排按钮的总开关和各按钮开关；
- *  - 下载：HLS 转 MP4（原来在下载页里）。
+ *  - 下载：HLS 转 MP4（原来在下载页里）；
+ *  - Media3 高级选项：HDR / 清晰度上限、解码、缓冲与内存、其他（见 [PlayerTuning]，下次打开播放器生效）。
  * 「网页增强」（WebView）关闭时本页功能同样不运行，详见 [dev.dsh.miuixbrowser.sniff.MediaFeatures]。
  *
  * [onMasterChange]：总开关变化后的联动（启停推荐的媒体脚本）；开关值本身已由本页写入 [AppSettings]。
@@ -225,6 +227,151 @@ fun MediaSniffScreen(
                             onCheckedChange = { settings.updateHlsToMp4(it) },
                         )
                     }
+
+                    // ---- Media3 高级选项：默认值 = 加这些选项之前的行为；改了下次打开播放器生效 ----
+                    val bk = if (glass) backdrop else null
+                    val choices = settings.playerAdvChoices
+                    val flags = settings.playerAdvFlags
+                    fun choice(key: String) = choices[key] ?: PlayerTuning.choiceDefault(key)
+                    fun flag(key: String) = flags[key] ?: PlayerTuning.SWITCH_DEFAULTS.getValue(key)
+
+                    SmallTitle(text = tr("Media3 高级选项 · HDR 与画质"))
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        insideMargin = PaddingValues(0.dp),
+                    ) {
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("HDR 策略"),
+                            summary = tr("流里同时有 HDR 和 SDR 清晰度（常见于 HLS）时，自动选档只在偏好的一类里挑；只有一类时不起作用。HDR 直出需要 SurfaceView 渲染，TextureView 下 HDR 画面可能发灰"),
+                            items = listOf(tr("自动"), tr("优先 SDR"), tr("优先 HDR")),
+                            selectedIndex = choice(PlayerTuning.KEY_HDR),
+                            onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_HDR, it) },
+                        )
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("最高清晰度"),
+                            summary = tr("自动选档时不超过这个清晰度（省流量 / 省电 / 低端机防卡顿）；手动选更高的档不受限"),
+                            items = PlayerTuning.MAX_RES_LABELS_P.map { if (it == 0) tr("不限") else "${it}p" },
+                            selectedIndex = choice(PlayerTuning.KEY_MAX_RES),
+                            onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_MAX_RES, it) },
+                        )
+                    }
+
+                    SmallTitle(text = tr("Media3 高级选项 · 解码"))
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        insideMargin = PaddingValues(0.dp),
+                    ) {
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("解码器偏好"),
+                            summary = tr("只调整候选顺序、不会删掉候选：硬件优先省电，软件优先兼容性好但耗电发热（高分辨率可能掉帧）"),
+                            items = listOf(tr("自动"), tr("硬件优先"), tr("软件优先")),
+                            selectedIndex = choice(PlayerTuning.KEY_DECODER),
+                            onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_DECODER, it) },
+                        )
+                        AppSwitchPreference(
+                            title = tr("解码器回退"),
+                            summary = tr("首选解码器初始化失败时自动换下一个（比如硬解起不来换软解），而不是直接报错"),
+                            checked = flag(PlayerTuning.KEY_DECODER_FALLBACK),
+                            onCheckedChange = { settings.updatePlayerAdvFlag(PlayerTuning.KEY_DECODER_FALLBACK, it) },
+                        )
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("MediaCodec 异步队列"),
+                            summary = tr("自动 = 由 Media3 按系统版本决定。个别机型解码花屏 / 卡死时可以试试强制关闭"),
+                            items = listOf(tr("自动"), tr("强制开启"), tr("强制关闭")),
+                            selectedIndex = choice(PlayerTuning.KEY_ASYNC),
+                            onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_ASYNC, it) },
+                        )
+                        AppSwitchPreference(
+                            title = tr("隧道播放"),
+                            summary = tr("音视频直通硬件解码器，省电、同步更准；只在渲染方式为 SurfaceView 且设备支持时生效，部分机型有兼容问题"),
+                            checked = flag(PlayerTuning.KEY_TUNNELING),
+                            onCheckedChange = { settings.updatePlayerAdvFlag(PlayerTuning.KEY_TUNNELING, it) },
+                        )
+                    }
+
+                    SmallTitle(text = tr("Media3 高级选项 · 缓冲与内存"))
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        insideMargin = PaddingValues(0.dp),
+                    ) {
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("缓冲策略"),
+                            summary = tr("省内存：提前缓冲 30 秒；均衡：60 秒（默认）；流畅优先：2 分钟；大缓冲：5 分钟。越大越不容易卡，但占内存、费流量；实际还受下面的大小上限约束"),
+                            items = listOf(tr("省内存"), tr("均衡"), tr("流畅优先"), tr("大缓冲")),
+                            selectedIndex = choice(PlayerTuning.KEY_BUF_PRESET),
+                            onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_BUF_PRESET, it) },
+                        )
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("缓冲大小上限"),
+                            summary = tr("缓冲占用内存的上限。自动 = 由 Media3 按视频估算（省内存档为 48 MB）；超过上限就暂停缓冲，哪怕还没缓冲够"),
+                            items = PlayerTuning.BUFFER_MB.map { if (it == 0) tr("自动") else "$it MB" },
+                            selectedIndex = choice(PlayerTuning.KEY_BUF_MB),
+                            onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_BUF_MB, it) },
+                        )
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("后向缓冲"),
+                            summary = tr("已播放的部分在内存里多留一会儿，往回拖不用重新下载；会多占内存"),
+                            items = PlayerTuning.BACK_BUFFER_SEC.map { if (it == 0) tr("不保留") else tr("{0} 秒", it) },
+                            selectedIndex = choice(PlayerTuning.KEY_BACK_BUF),
+                            onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_BACK_BUF, it) },
+                        )
+                    }
+
+                    SmallTitle(text = tr("Media3 高级选项 · 其他"))
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        insideMargin = PaddingValues(0.dp),
+                    ) {
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("拖动定位"),
+                            summary = tr("精确：落在你拖到的那一帧，要多解码一段；就近关键帧：落在最近的关键帧，快很多，但位置会有几秒偏差"),
+                            items = listOf(tr("精确"), tr("就近关键帧")),
+                            selectedIndex = choice(PlayerTuning.KEY_SEEK),
+                            onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_SEEK, it) },
+                        )
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("网络超时"),
+                            summary = tr("连接 / 读取超时：严格 8 秒 / 10 秒，默认 15 秒 / 20 秒，宽松 30 秒 / 40 秒。线路慢时用宽松，想快速失败后换源用严格"),
+                            items = listOf(tr("默认"), tr("严格"), tr("宽松")),
+                            selectedIndex = choice(PlayerTuning.KEY_NET),
+                            onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_NET, it) },
+                        )
+                        AppSwitchPreference(
+                            title = tr("管理音频焦点"),
+                            summary = tr("来电 / 其他应用播放声音时自动暂停。关闭后会和其他应用的声音混在一起播放"),
+                            checked = flag(PlayerTuning.KEY_AUDIO_FOCUS),
+                            onCheckedChange = { settings.updatePlayerAdvFlag(PlayerTuning.KEY_AUDIO_FOCUS, it) },
+                        )
+                        AppSwitchPreference(
+                            title = tr("拔出耳机时暂停"),
+                            summary = tr("耳机拔出 / 蓝牙断开时自动暂停，免得突然外放"),
+                            checked = flag(PlayerTuning.KEY_NOISY),
+                            onCheckedChange = { settings.updatePlayerAdvFlag(PlayerTuning.KEY_NOISY, it) },
+                        )
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("恢复默认"),
+                            summary = tr("把上面所有 Media3 高级选项恢复成默认值"),
+                            items = listOf(tr("保持当前"), tr("恢复默认")),
+                            selectedIndex = 0,
+                            onSelectedIndexChange = { if (it == 1) settings.resetPlayerAdvanced() },
+                        )
+                    }
+                    Text(
+                        text = tr("以上选项在下次打开播放器时生效。出现花屏、黑屏或无法播放时，先试试「恢复默认」。"),
+                        fontSize = 13.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 10.dp),
+                    )
                 }
             }
         }

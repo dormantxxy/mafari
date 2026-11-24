@@ -133,3 +133,29 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 - 截屏：`MafariPlayer.captureFrame` 从当前接着视频输出的 View 取帧——TextureView 用 `getBitmap(w, h)`，SurfaceView 用 `PixelCopy`；
   分辨率取视频原始大小（长边最多 3840）。保存走 MediaStore（图片/Mafari，minSdk 33 免存储权限）。
   受保护（DRM）内容拿到的是黑帧 / 失败，还没出画面时 `videoSize` 为 0，都按失败提示。
+
+## Media3 高级选项（`player/PlayerTuning.kt`）
+
+设置 → 媒体嗅探与播放 → 页面最下面「Media3 高级选项」。取值存在 `mafari_settings`（键 `player_adv_*`），播放器每次打开时读一次，改了下次打开生效；默认值与加选项前的行为一致（缓冲「均衡」档 = 15s / 60s / 1s / 2s）。
+
+| 分组 | 选项 | 落到哪 |
+|---|---|---|
+| HDR 与画质 | HDR 策略（自动 / 优先 SDR / 优先 HDR） | `MafariPlayer.applyHdrPreference`：流里 HDR / SDR 轨道并存时，给视频组加轨道子集覆盖（自适应仍有效）；用户手动选清晰度后不干预。清晰度列表里 HDR 轨道带「HDR」后缀 |
+| | 最高清晰度（不限 / 2160 / 1440 / 1080 / 720 / 480p） | `TrackSelectionParameters.setMaxVideoSize(长边, 长边)`，横竖屏都适用；手动选更高档不受限 |
+| 解码 | 解码器偏好（自动 / 硬件优先 / 软件优先） | 自定义 `MediaCodecSelector`：只重排候选，不删候选 |
+| | 解码器回退 | `DefaultRenderersFactory.setEnableDecoderFallback` |
+| | MediaCodec 异步队列（自动 / 强制开 / 强制关） | `forceEnable/DisableMediaCodecAsynchronousQueueing` |
+| | 隧道播放 | `setTunnelingEnabled`；只在打开时渲染方式为 SurfaceView 才开（TextureView 下画面出不来） |
+| 缓冲与内存 | 缓冲策略（省内存 / 均衡 / 流畅优先 / 大缓冲） | `DefaultLoadControl.setBufferDurationsMs`；省内存档在大小「自动」时附带 48 MB 上限 |
+| | 缓冲大小上限（自动 / 32 / 64 / 128 / 256 MB） | `setTargetBufferBytes` |
+| | 后向缓冲（不保留 / 15 / 30 / 60 秒） | `setBackBuffer(ms, true)` |
+| 其他 | 拖动定位（精确 / 就近关键帧） | `SeekParameters.EXACT / CLOSEST_SYNC` |
+| | 网络超时（默认 / 严格 / 宽松） | `DefaultHttpDataSource` 连接 / 读取超时 |
+| | 管理音频焦点、拔出耳机时暂停 | `setAudioAttributes(.., handleAudioFocus)`、`setHandleAudioBecomingNoisy` |
+
+### 取舍 / 待验证
+
+- 未编译、未真机验证（和前几个阶段一样）；纯逻辑（档位表、取值收敛）有单测 `PlayerTuningTest`。
+- HDR 策略只对多清晰度流起作用；单个 mp4 没得选。HDR 直出需要 SurfaceView，TextureView 下 HDR 片源可能发灰 —— 暂时没做「检测到 HDR 自动切 SurfaceView」。
+- 隧道播放在播放页里临时切回 TextureView 不会重建播放器，此时需要在设置里关掉它。
+- 快捷菜单 / 标题区底色不透明度见 `NativePlayerActivity.CARD_SURFACE_ALPHA`。

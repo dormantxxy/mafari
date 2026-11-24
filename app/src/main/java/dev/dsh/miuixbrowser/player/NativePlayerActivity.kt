@@ -99,6 +99,10 @@ import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
 
+
+/** 卡片下方快捷菜单 + 视频标题区的底色不透明度（高级材质开启时；关闭时不透明）。越大越不透 */
+private const val CARD_SURFACE_ALPHA = 0.95f
+
 /**
  * 原生播放页：ExoPlayer 内核（[MafariPlayer]）+ 和 float-player.js 一致的 miuix 界面（[PlayerSurface]）。
  *
@@ -244,7 +248,7 @@ class NativePlayerActivity : ComponentActivity() {
         val dark = isAppDarkTheme()
         val glass = LocalBlurMode.current != BLUR_OFF
         val videoTheme = remember { ThemeController(ColorSchemeMode.Dark) }
-        val surfaceColor = MiuixTheme.colorScheme.surfaceContainer.let { if (glass) it.copy(alpha = 0.88f) else it }
+        val surfaceColor = MiuixTheme.colorScheme.surfaceContainer.let { if (glass) it.copy(alpha = CARD_SURFACE_ALPHA) else it }
         val edgeColor = MiuixTheme.colorScheme.onSurface.copy(alpha = if (dark) 0.14f else 0.10f)
 
         // 只有一处 PlayerSurface 调用，卡片 <-> 全屏切换时界面状态（弹层、控件显隐）不会丢；

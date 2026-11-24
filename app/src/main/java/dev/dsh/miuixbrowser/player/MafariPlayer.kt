@@ -25,12 +25,15 @@ import androidx.media3.common.VideoSize
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import dev.dsh.miuixbrowser.i18n.tr
 
 /** 清晰度条目：[group] / [index] 对应 ExoPlayer 轨道，选中时用 TrackSelectionOverride。 */
-class Quality(val label: String, val height: Int, val bitrate: Int, internal val group: Tracks.Group, internal val index: Int)
+class Quality(val label: String, val height: Int, val bitrate: Int, internal val group: Tracks.Group, internal val index: Int, val hdr: Boolean = false)
 
 /**
  * 原生播放器核心：ExoPlayer + 带请求头的网络层 + 伪装图片头裁剪。
@@ -101,11 +104,14 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
                     val f = g.getTrackFormat(i)
                     val h = f.height.takeIf { it > 0 } ?: continue
                     val br = if (f.bitrate > 0) f.bitrate else 0
-                    list += Quality(label = "${h}p", height = h, bitrate = br, group = g, index = i)
+                    val hdr = isHdr(f)
+                    list += Quality(label = if (hdr) "${h}p HDR" else "${h}p", height = h, bitrate = br, group = g, index = i, hdr = hdr)
                 }
             }
-            // 同高度只留码率最高的一条，高到低排列
-            qualities = list.groupBy { it.height }.map { (_, v) -> v.maxBy { it.bitrate } }.sortedByDescending { it.height }
+            // 同高度同色域只留码率最高的一条，高到低排列（同高度 SDR 在前）
+            qualities = list.groupBy { it.height to it.hdr }.map { (_, v) -> v.maxBy { it.bitrate } }
+                .sortedWith(compareByDescending<Quality> { it.height }.thenBy { it.hdr })
+            applyHdrPreference(tracks)
         }
 
         override fun onPlayerError(e: PlaybackException) {
@@ -115,39 +121,111 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) = refresh()
     }
 
+    /** 本次播放用的高级选项（打开播放器时读一次；改设置后下次打开生效） */
+    private val tuning = PlayerTuning.read(context)
+
     init {
+        val (connectMs, readMs) = tuning.netTimeouts
         val http = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(20_000)
+            .setConnectTimeoutMs(connectMs)
+            .setReadTimeoutMs(readMs)
             .setDefaultRequestProperties(request.headers())
             .apply { if (request.ua.isNotBlank()) setUserAgent(request.ua) }
         // 只有 http(s) 走裁剪包装；file / content 等由 DefaultDataSource 处理
         val dataSource = DefaultDataSource.Factory(context, StripImageHeaderDataSource.Factory(http))
-        exo = ExoPlayer.Builder(context)
+
+        // 解码：硬 / 软件优先、解码器回退、MediaCodec 异步队列
+        val renderers = DefaultRenderersFactory(context)
+            .setMediaCodecSelector(codecSelector(tuning.decoder))
+            .setEnableDecoderFallback(tuning.decoderFallback)
+            .apply {
+                when (tuning.asyncCodec) {
+                    PlayerTuning.ASYNC_ON -> forceEnableMediaCodecAsynchronousQueueing()
+                    PlayerTuning.ASYNC_OFF -> forceDisableMediaCodecAsynchronousQueueing()
+                }
+            }
+
+        // 缓冲 / 内存：时长档位 + 字节上限 + 后向缓冲。默认「均衡」= 15s / 60s / 1s / 2s，和以前写死的一样；
+        // 网页视频更在意首帧速度，起播门槛都很低
+        val d = tuning.bufferDurations
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(d.minMs, d.maxMs, d.playbackMs, d.rebufferMs)
+            .apply {
+                if (tuning.bufferBytes > 0) setTargetBufferBytes(tuning.bufferBytes)
+                if (tuning.backBufferMs > 0) setBackBuffer(tuning.backBufferMs, true)
+            }
+            .build()
+
+        exo = ExoPlayer.Builder(context, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(dataSource))
-            // 比默认更早起播：网页视频场景更在意首帧速度，而不是缓冲余量
-            .setLoadControl(
-                DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(15_000, 60_000, 1_000, 2_000)
-                    .build(),
-            )
-            // 音频焦点：来电 / 别的播放器抢焦点时自动暂停（后台播放必须有，否则会和别的音频叠在一起）
+            .setLoadControl(loadControl)
+            // 音频焦点：来电 / 别的播放器抢焦点时自动暂停（后台播放必须有，否则会和别的音频叠在一起）；
+            // 高级选项里可以关掉，和别的应用混着放
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
-                true,
+                tuning.audioFocus,
             )
             // 拔耳机 / 蓝牙断开时暂停，免得外放
-            .setHandleAudioBecomingNoisy(true)
+            .setHandleAudioBecomingNoisy(tuning.pauseOnNoisy)
             // 后台播放（屏幕关闭）时保持 CPU 和 Wi-Fi 唤醒，否则几分钟后系统会掐掉网络
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+        exo.setSeekParameters(if (tuning.seekMode == PlayerTuning.SEEK_KEYFRAME) SeekParameters.CLOSEST_SYNC else SeekParameters.EXACT)
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().apply {
+            // 清晰度上限（长边）：自动选档时不超过它；手动选更高的档不受限
+            tuning.maxLongSide.takeIf { it > 0 }?.let { setMaxVideoSize(it, it) }
+            // 隧道播放：要 SurfaceView + 硬解 + 设备支持；TextureView 下画面出不来，所以只在渲染方式是 SurfaceView 时开
+            // （播放页里临时切回 TextureView 不会重建播放器，此时请关掉这个选项）
+            if (tuning.tunneling && PlayerPrefs.renderMode(context) == PlayerPrefs.RENDER_SURFACE) setTunnelingEnabled(true)
+        }.build()
         exo.addListener(listener)
         // 设置里的「默认倍速」：打开就按这个速度起播（播放页里仍可临时改）
         PlayerPrefs.defaultSpeed(context).takeIf { it != 1f }?.let { changeSpeed(it) }
         exo.setMediaItem(buildItem(currentRequest), request.startMs.coerceAtLeast(0))
         exo.prepare()
         exo.playWhenReady = true
+    }
+
+    /** 解码器顺序：在系统给的候选里把硬解 / 软解挪到前面（不会删掉任何候选，所以不会因此变得放不了）。 */
+    private fun codecSelector(pref: Int): MediaCodecSelector = when (pref) {
+        PlayerTuning.DEC_HW_FIRST -> MediaCodecSelector { mime, secure, tunneling ->
+            MediaCodecSelector.DEFAULT.getDecoderInfos(mime, secure, tunneling)
+                .sortedBy { if (it.hardwareAccelerated && !it.softwareOnly) 0 else 1 }
+        }
+        PlayerTuning.DEC_SW_FIRST -> MediaCodecSelector { mime, secure, tunneling ->
+            MediaCodecSelector.DEFAULT.getDecoderInfos(mime, secure, tunneling)
+                .sortedBy { if (it.softwareOnly) 0 else 1 }
+        }
+        else -> MediaCodecSelector.DEFAULT
+    }
+
+    /** 这一条视频轨是不是 HDR（PQ / HLG 传递函数，或杜比视界） */
+    private fun isHdr(f: androidx.media3.common.Format): Boolean {
+        val t = f.colorInfo?.colorTransfer
+        return t == C.COLOR_TRANSFER_ST2084 || t == C.COLOR_TRANSFER_HLG || f.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION
+    }
+
+    /**
+     * HDR 策略（高级选项）：流里同时有 HDR 和 SDR 的轨道时，自动选档只在偏好的那一类里挑。
+     * 做法是给视频组加一个「轨道子集」覆盖（自适应仍然有效）；用户手动选了清晰度、或已经有覆盖时不动，所以不会反复触发。
+     * 只有一类轨道（多数网页视频）时什么也不做。
+     */
+    private fun applyHdrPreference(tracks: Tracks) {
+        val pref = tuning.hdr
+        if (pref == PlayerTuning.HDR_AUTO || selectedQuality != null) return
+        if (exo.trackSelectionParameters.overrides.keys.any { it.type == C.TRACK_TYPE_VIDEO }) return
+        val wantHdr = pref == PlayerTuning.HDR_PREFER_HDR
+        for (g in tracks.groups) {
+            if (g.type != C.TRACK_TYPE_VIDEO) continue
+            val all = (0 until g.length).filter { g.isTrackSupported(it) }
+            val wanted = all.filter { isHdr(g.getTrackFormat(it)) == wantHdr }
+            if (wanted.isEmpty() || wanted.size == all.size) continue
+            exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, wanted))
+                .build()
+            return
+        }
     }
 
     private fun buildItem(r: PlayerRequest): MediaItem = MediaItem.Builder().setUri(r.url).apply {

@@ -2171,3 +2171,13 @@ Kyant 官方 catalog 的原味液态玻璃，各处保持原来的模糊、折�
 柔和	Soft
 折射很轻，无色散无景深，更稳更省眼，适合文字多的页面	Very light refraction, no dispersion or depth; calmer and easier on the eyes, good for text-heavy pages
 无法打开这个 HTML 文件	Can't open this HTML file
+不支持的加密方式：{0}	Unsupported encryption method: {0}
+不支持按字节范围切分的 m3u8	m3u8 playlists split by byte range aren't supported
+无法解析 m3u8 清单	Can't parse the m3u8 playlist
+不是有效的 m3u8 清单	Not a valid m3u8 playlist
+m3u8 清单里没有分片	The m3u8 playlist has no segments
+分片下载失败	Segment download failed
+{0} 个分片下载失败：{1}	{0} segment(s) failed to download: {1}
+HLS 转 MP4	HLS to MP4
+m3u8 下载完成后把 TS 转封装成 MP4（不重新编码；编码不支持时保留 TS）	Remux TS to MP4 after an m3u8 download (no re-encoding; keeps TS if the codecs aren't supported)
+转封装为 MP4… {0}%	Remuxing to MP4… {0}%

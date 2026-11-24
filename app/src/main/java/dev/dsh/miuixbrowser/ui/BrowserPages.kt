@@ -97,6 +97,8 @@ internal fun BrowserNav.SubPage(route: AppRoute) {
                 onMultiThreadMinMbChange = { settings.updateDownloadMultiThreadMinMb(it) },
                 externalDownloader = settings.externalDownloader,
                 onExternalDownloaderChange = { settings.updateExternalDownloader(it) },
+                hlsToMp4 = settings.hlsToMp4,
+                onHlsToMp4Change = { settings.updateHlsToMp4(it) },
             )
         }
         AppRoute.AdBlockPage -> {

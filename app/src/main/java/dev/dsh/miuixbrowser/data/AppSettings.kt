@@ -485,6 +485,16 @@ class AppSettings(context: Context) {
         prefs.edit().putInt(KEY_DL_MIN_MB, downloadMultiThreadMinMb).apply()
     }
 
+    /** m3u8 下载完成后把 TS 转封装成 MP4：默认开启 */
+    var hlsToMp4 by mutableStateOf(prefs.getBoolean(KEY_DL_HLS_MP4, true))
+        private set
+
+    fun updateHlsToMp4(enabled: Boolean) {
+        hlsToMp4 = enabled
+        Downloader.hlsToMp4 = enabled
+        prefs.edit().putBoolean(KEY_DL_HLS_MP4, enabled).apply()
+    }
+
     /** 外部下载器：空 = 内置；"chooser" = 每次询问；其余为包名 */
     var externalDownloader by mutableStateOf(prefs.getString(KEY_DL_EXTERNAL, "") ?: "")
         private set
@@ -500,6 +510,7 @@ class AppSettings(context: Context) {
         // 启动时把已保存的下载配置推给下载器
         Downloader.segments = downloadThreads
         Downloader.multiThreadEnabled = downloadMultiThread
+        Downloader.hlsToMp4 = hlsToMp4
         Downloader.segmentMinBytes = downloadMultiThreadMinMb * 1024L * 1024L
     }
 
@@ -1118,6 +1129,7 @@ class AppSettings(context: Context) {
         const val KEY_DL_MIN_MB = "download_multithread_min_mb"
         const val KEY_DL_MULTI = "download_multithread_enabled"
         const val KEY_DL_EXTERNAL = "download_external_app"
+        const val KEY_DL_HLS_MP4 = "download_hls_to_mp4"
         const val KEY_UA = "ua"
         const val KEY_THEME = "theme_mode"
         const val KEY_SEARCH = "search_index"

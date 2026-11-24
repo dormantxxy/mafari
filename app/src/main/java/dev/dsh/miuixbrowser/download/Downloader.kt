@@ -532,6 +532,10 @@ object Downloader {
                 setRequestProperty("Accept", "*/*")
                 setRequestProperty("Accept-Encoding", "identity")
                 task.referer?.let { setRequestProperty("Referer", it) }
+                // HLS 的清单 / 分片 / 密钥请求：浏览器里 hls.js 跨域取流会带 Origin，个别 CDN 会校验
+                if (HlsDownload.isHls(task)) {
+                    task.referer?.let { r -> runCatching { URL(r) }.getOrNull()?.let { u -> setRequestProperty("Origin", "${u.protocol}://${u.authority}") } }
+                }
                 if (cookie != null) setRequestProperty("Cookie", cookie)
                 if (range != null) {
                     setRequestProperty("Range", range)
@@ -1061,6 +1065,10 @@ object Downloader {
     /** 多线程下载总开关（设置里可关闭，关闭后一律单线程） */
     @Volatile
     var multiThreadEnabled = true
+
+    /** m3u8 下载完成后，把 TS 转封装成 MP4（设置里可关闭） */
+    @Volatile
+    var hlsToMp4 = true
 
     /** 文件超过该字节数才使用多线程分段下载 */
     @Volatile

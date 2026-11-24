@@ -24,7 +24,7 @@ import javax.crypto.spec.SecretKeySpec
  * 跑在内置下载器的任务里（前台服务），所以离开页面 / 切后台 / 关掉悬浮播放器都不影响。
  *
  * - 续传：分片按序号落盘（filesDir/downloads/<id>/hls/N.seg），失败 / 暂停后重进只补缺的分片；清单分片数变了就清空重来。
- * - 输出：TS 分片直接拼接成 .ts；fMP4（带 EXT-X-MAP）拼成 .mp4。不做转封装。
+ * - 输出：fMP4（带 EXT-X-MAP）直接拼成 .mp4；TS 分片拼成 .ts 后，按设置用系统 MediaMuxer 转封装成 .mp4（不重新编码，编码不支持时保留 .ts）。
  * - 不支持：SAMPLE-AES / 其它加密、EXT-X-BYTERANGE 分片（直接报错，不会下出坏文件）。
  */
 internal object HlsDownload {
@@ -33,6 +33,10 @@ internal object HlsDownload {
 
     private const val PARALLEL = 6
     private const val SEG_RETRY = 3
+    /** 一轮下完后，对仍缺的分片再补几轮（网络抖动 / CDN 偶发失败不用整个任务重来） */
+    private const val FINAL_ROUNDS = 2
+    /** 一轮里累计失败这么多片就不再派新活，直接收尾（防止 403 / 链接过期时把所有分片都耗一遍重试） */
+    private const val MAX_FAIL_PER_ROUND = 24
 
     fun isHls(task: DownloadTask): Boolean = task.mime.equals(MIME_MARK, ignoreCase = true)
 
@@ -126,7 +130,49 @@ internal object HlsDownload {
         }
     }
 
-    private suspend fun fetchSeg(task: DownloadTask, seg: Seg, dest: File, tmp: File, keys: ConcurrentHashMap<String, ByteArray>) {
+    private fun decrypt(data: ByteArray, key: ByteArray, iv: ByteArray): ByteArray {
+        fun go(padding: String): ByteArray {
+            val cipher = Cipher.getInstance("AES/CBC/$padding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+            return cipher.doFinal(data)
+        }
+        return try {
+            go("PKCS5Padding")
+        } catch (e: javax.crypto.BadPaddingException) {
+            // 个别源的分片末尾没按 PKCS7 补齐：按无填充解，播放器能容忍尾部多几个字节
+            if (data.size % 16 == 0) go("NoPadding") else throw e
+        }
+    }
+
+    /**
+     * 部分站点把 TS 分片伪装成图片（前面垫一段 PNG / JPEG / GIF / BMP 头），播放器识别不了。
+     * 只有开头是这几种图片魔数、且头部 16KB 内能找到连续三个 188 字节间隔的 0x47 同步字节时才裁掉前缀，不碰正常分片。
+     */
+    private fun stripFakeImageHeader(f: File) {
+        val n = minOf(f.length(), 16L * 1024).toInt()
+        if (n < 400) return
+        val head = ByteArray(n)
+        java.io.RandomAccessFile(f, "r").use { it.readFully(head) }
+        fun b(i: Int) = head[i].toInt() and 0xFF
+        val image = (b(0) == 0x89 && b(1) == 0x50 && b(2) == 0x4E && b(3) == 0x47) ||
+            (b(0) == 0xFF && b(1) == 0xD8 && b(2) == 0xFF) ||
+            (b(0) == 0x47 && b(1) == 0x49 && b(2) == 0x46 && b(3) == 0x38) ||
+            (b(0) == 0x42 && b(1) == 0x4D)
+        if (!image) return
+        var off = -1
+        for (i in 1 until n - 376) {
+            if (b(i) == 0x47 && b(i + 188) == 0x47 && b(i + 376) == 0x47) { off = i; break }
+        }
+        if (off <= 0) return
+        val out = File(f.path + ".strip")
+        f.inputStream().use { i ->
+            i.skip(off.toLong())
+            out.outputStream().use { o -> i.copyTo(o, 64 * 1024) }
+        }
+        if (!f.delete() || !out.renameTo(f)) { runCatching { out.delete() }; throw IllegalStateException(tr("无法写入文件")) }
+    }
+
+    private suspend fun fetchSeg(task: DownloadTask, seg: Seg, dest: File, tmp: File, keys: ConcurrentHashMap<String, ByteArray>, stripTs: Boolean) {
         var last: Exception? = null
         repeat(SEG_RETRY) { n ->
             try {
@@ -141,10 +187,9 @@ internal object HlsDownload {
                 }
                 if (seg.keyUrl != null && seg.iv != null) {
                     val key = keys[seg.keyUrl] ?: fetchBytes(task, seg.keyUrl).also { keys[seg.keyUrl] = it }
-                    val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-                    cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(seg.iv))
-                    tmp.writeBytes(cipher.doFinal(tmp.readBytes()))
+                    tmp.writeBytes(decrypt(tmp.readBytes(), key, seg.iv))
                 }
+                if (stripTs) stripFakeImageHeader(tmp)
                 if (!tmp.renameTo(dest)) throw IllegalStateException(tr("无法写入文件"))
                 return
             } catch (e: CancellationException) {
@@ -212,19 +257,43 @@ internal object HlsDownload {
         report(force = true)
 
         val sem = Semaphore(PARALLEL)
-        coroutineScope {
-            pl.segs.filter { !segFile(it.index).exists() }.map { seg ->
-                async {
-                    sem.withPermit {
-                        currentCoroutineContext().ensureActive()
-                        val dest = segFile(seg.index)
-                        fetchSeg(task, seg, dest, File(hdir, "${seg.index}.tmp"), keys)
-                        done.incrementAndGet()
-                        bytes.addAndGet(dest.length())
-                        report()
+        val stripTs = pl.mapUrl == null
+        var failedCount = 0
+        var lastErr: Exception? = null
+        for (round in 0..FINAL_ROUNDS) {
+            val todo = pl.segs.filter { !segFile(it.index).exists() }
+            if (todo.isEmpty()) break
+            if (round > 0) delay(1500L * round)
+            val errs = ConcurrentHashMap<Int, Exception>()
+            coroutineScope {
+                todo.map { seg ->
+                    async {
+                        sem.withPermit {
+                            currentCoroutineContext().ensureActive()
+                            if (errs.size >= MAX_FAIL_PER_ROUND) return@withPermit
+                            val dest = segFile(seg.index)
+                            try {
+                                fetchSeg(task, seg, dest, File(hdir, "${seg.index}.tmp"), keys, stripTs)
+                                done.incrementAndGet()
+                                bytes.addAndGet(dest.length())
+                                report()
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                errs[seg.index] = e
+                            }
+                        }
                     }
-                }
-            }.awaitAll()
+                }.awaitAll()
+            }
+            failedCount = pl.segs.count { !segFile(it.index).exists() }
+            lastErr = errs.values.firstOrNull() ?: lastErr
+            if (failedCount == 0 || errs.size >= MAX_FAIL_PER_ROUND) break
+        }
+        if (failedCount > 0) {
+            report(force = true)
+            Downloader.persist(id)
+            throw IllegalStateException(tr("{0} 个分片下载失败：{1}", failedCount, lastErr?.message ?: ""))
         }
         report(force = true)
         Downloader.persist(id)
@@ -249,11 +318,27 @@ internal object HlsDownload {
             out.flush()
             out.fd.sync()
         }
+        // TS → MP4：只换封装不重新编码；不支持的编码 / 出错时返回 false，原样保留 .ts
+        var remuxed = false
+        if (pl.mapUrl == null && Downloader.hlsToMp4) {
+            val mp4 = File(dir, "data.mp4tmp")
+            var lastNotify = 0L
+            val ok = HlsRemux.tsToMp4(part, mp4) { p ->
+                val now = System.currentTimeMillis()
+                if (now - lastNotify >= 500) {
+                    lastNotify = now
+                    val pct = (p * 100).toInt()
+                    DownloadService.instance?.update(task.name, p, tr("转封装为 MP4… {0}%", pct), id)
+                }
+            }
+            // renameTo 会原子覆盖目标：失败时 part 仍是完整的 TS，不会丢数据
+            if (ok && mp4.renameTo(part)) remuxed = true else runCatching { mp4.delete() }
+        }
         val len = part.length()
-        val fmp4 = pl.mapUrl != null
-        val ext = if (fmp4) "mp4" else "ts"
+        val isMp4 = pl.mapUrl != null || remuxed
+        val ext = if (isMp4) "mp4" else "ts"
         val base = task.name.replace(Regex("\\.[A-Za-z0-9]{1,5}$"), "").ifBlank { "video" }
-        Downloader.update(id) { it.copy(name = "$base.$ext", mime = if (fmp4) "video/mp4" else "video/mp2t", total = len, bytes = len) }
+        Downloader.update(id) { it.copy(name = "$base.$ext", mime = if (isMp4) "video/mp4" else "video/mp2t", total = len, bytes = len) }
         Downloader.markFetched(id)
         runCatching { hdir.deleteRecursively() }
         return part

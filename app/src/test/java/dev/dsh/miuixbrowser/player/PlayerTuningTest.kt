@@ -57,4 +57,33 @@ class PlayerTuningTest {
         assertEquals(PlayerTuning.BUF_BALANCED, PlayerTuning.choiceDefault(PlayerTuning.KEY_BUF_PRESET))
         assertEquals(0, PlayerTuning.choiceDefault(PlayerTuning.KEY_HDR))
     }
+
+    @Test fun media3Dot12OptionsDefaultToLibraryBehavior() {
+        val t = PlayerTuning()
+        assertEquals(false, t.scrubPreview)
+        assertEquals(true, t.loadOnlySelectedTracks)
+        assertEquals(true, t.canary)
+        assertEquals(false, t.fastStart)
+        assertEquals(false, t.fastSeek)
+        // 默认档不改库里的卡死超时
+        assertEquals(null, t.stuckTimeouts)
+        assertTrue(t.stuckDetectionEnabled)
+    }
+
+    @Test fun stuckPresetsAreSane() {
+        val relaxed = PlayerTuning(stuck = PlayerTuning.STUCK_RELAXED)
+        assertTrue(relaxed.stuckDetectionEnabled)
+        relaxed.stuckTimeouts!!.let {
+            assertTrue(it.playingMs > 10_000 && it.notEndingMs > 60_000 && it.bufferingMs > 600_000)
+        }
+        val off = PlayerTuning(stuck = PlayerTuning.STUCK_OFF)
+        assertEquals(false, off.stuckDetectionEnabled)
+        // Media3 的 Builder 要求超时 > 0
+        PlayerTuning.STUCK_PRESETS.filterNotNull().forEach {
+            assertTrue(it.playingMs > 0 && it.notEndingMs > 0 && it.bufferingMs > 0)
+        }
+        // 脏值回到默认档
+        assertEquals(null, PlayerTuning(stuck = 99).stuckTimeouts)
+        assertTrue(PlayerTuning(stuck = -1).stuckDetectionEnabled)
+    }
 }

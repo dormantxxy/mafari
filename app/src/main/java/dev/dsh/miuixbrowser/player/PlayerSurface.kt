@@ -307,7 +307,13 @@ internal fun PlayerSurface(
                             duration = player.durationMs,
                             buffered = player.bufferedMs,
                             enabled = !player.isLive && player.durationMs > 0,
-                            onScrub = { scrub = it; poke++ },
+                            // 拖动：开了「拖动进度时实时预览」就边拖边 seek（Scrubbing 模式）；松手 / 取消时 onScrub(null) 先退出该模式，
+                            // 随后 onSeek 再精确定位到松手位置（点按只走 onSeek）
+                            onScrub = { f ->
+                                scrub = f
+                                poke++
+                                if (f == null) player.endScrub() else player.scrubTo((f * player.durationMs).toLong())
+                            },
                             onSeek = { player.seekTo(it) },
                         )
                         TimeText(if (player.isLive) tr("直播") else fmt(player.durationMs))

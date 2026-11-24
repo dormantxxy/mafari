@@ -41,7 +41,7 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
  *  - 播放器：渲染方式（TextureView / SurfaceView）、默认倍速、长按倍速、后台播放；
  *  - 快捷菜单：悬浮播放器下方那排按钮的总开关和各按钮开关；
  *  - 下载：HLS 转 MP4（原来在下载页里）；
- *  - Media3 高级选项：HDR / 清晰度上限、解码、缓冲与内存、其他（见 [PlayerTuning]，下次打开播放器生效）。
+ *  - Media3 高级选项：HDR / 清晰度上限、解码、缓冲与内存、其他、稳定性与实验（见 [PlayerTuning]，下次打开播放器生效）。
  * 「网页增强」（WebView）关闭时本页功能同样不运行，详见 [dev.dsh.miuixbrowser.sniff.MediaFeatures]。
  *
  * [onMasterChange]：总开关变化后的联动（启停推荐的媒体脚本）；开关值本身已由本页写入 [AppSettings]。
@@ -228,7 +228,7 @@ fun MediaSniffScreen(
                         )
                     }
 
-                    // ---- Media3 高级选项：默认值 = 加这些选项之前的行为；改了下次打开播放器生效 ----
+                    // ---- Media3 高级选项：不动 = Media3 自己的默认行为；改了下次打开播放器生效 ----
                     val bk = if (glass) backdrop else null
                     val choices = settings.playerAdvChoices
                     val flags = settings.playerAdvFlags
@@ -243,7 +243,7 @@ fun MediaSniffScreen(
                         AppDropdownPreference(
                             backdrop = bk,
                             title = tr("HDR 策略"),
-                            summary = tr("流里同时有 HDR 和 SDR 清晰度（常见于 HLS）时，自动选档只在偏好的一类里挑；只有一类时不起作用。HDR 直出需要 SurfaceView 渲染，TextureView 下 HDR 画面可能发灰"),
+                            summary = tr("流里同时有 HDR 和 SDR 清晰度（常见于 HLS / DASH）时，自动选档只在偏好的一类里挑；只有一类时不起作用。Media3 1.12 起能读出 HLS 的 VIDEO-RANGE（PQ / HLG）和 DASH 的色彩描述，这类流的 HDR 档会正确识别并在清晰度里标 HDR。HDR 直出需要 SurfaceView 渲染，TextureView 下 HDR 画面可能发灰"),
                             items = listOf(tr("自动"), tr("优先 SDR"), tr("优先 HDR")),
                             selectedIndex = choice(PlayerTuning.KEY_HDR),
                             onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_HDR, it) },
@@ -322,6 +322,12 @@ fun MediaSniffScreen(
                             selectedIndex = choice(PlayerTuning.KEY_BACK_BUF),
                             onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_BACK_BUF, it) },
                         )
+                        AppSwitchPreference(
+                            title = tr("只加载选中的轨道"),
+                            summary = tr("MP4 等整个文件里有多条画面 / 图片轨道时，只加载选中的那条，省内存和流量；中途切换清晰度时可能要多缓冲一会儿。只有一条画面轨的普通视频没有区别"),
+                            checked = flag(PlayerTuning.KEY_LOAD_SELECTED),
+                            onCheckedChange = { settings.updatePlayerAdvFlag(PlayerTuning.KEY_LOAD_SELECTED, it) },
+                        )
                     }
 
                     SmallTitle(text = tr("Media3 高级选项 · 其他"))
@@ -336,6 +342,12 @@ fun MediaSniffScreen(
                             items = listOf(tr("精确"), tr("就近关键帧")),
                             selectedIndex = choice(PlayerTuning.KEY_SEEK),
                             onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_SEEK, it) },
+                        )
+                        AppSwitchPreference(
+                            title = tr("拖动进度时实时预览"),
+                            summary = tr("拖动进度条时画面跟着手指实时更新（Media3 的 Scrubbing 模式：拖动期间暂停声音，松手后按「拖动定位」精确跳转）。拖动时会比平时多做一些读取和解码；点按进度条不受影响"),
+                            checked = flag(PlayerTuning.KEY_SCRUB),
+                            onCheckedChange = { settings.updatePlayerAdvFlag(PlayerTuning.KEY_SCRUB, it) },
                         )
                         AppDropdownPreference(
                             backdrop = bk,
@@ -356,6 +368,39 @@ fun MediaSniffScreen(
                             summary = tr("耳机拔出 / 蓝牙断开时自动暂停，免得突然外放"),
                             checked = flag(PlayerTuning.KEY_NOISY),
                             onCheckedChange = { settings.updatePlayerAdvFlag(PlayerTuning.KEY_NOISY, it) },
+                        )
+                    }
+
+                    SmallTitle(text = tr("Media3 高级选项 · 稳定性与实验"))
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        insideMargin = PaddingValues(0.dp),
+                    ) {
+                        AppDropdownPreference(
+                            backdrop = bk,
+                            title = tr("卡死检测"),
+                            summary = tr("画面 / 进度停住、缓冲没进展时主动报错并给出重试，而不是一直转圈。默认：进度停住 10 秒就报错；宽松：30 秒（线路抖动大时用）；关闭：不检测，卡住了会一直转圈"),
+                            items = listOf(tr("默认"), tr("宽松"), tr("关闭检测")),
+                            selectedIndex = choice(PlayerTuning.KEY_STUCK),
+                            onSelectedIndexChange = { settings.updatePlayerAdvChoice(PlayerTuning.KEY_STUCK, it) },
+                        )
+                        AppSwitchPreference(
+                            title = tr("Media3 灰度特性"),
+                            summary = tr("Media3 会把一些新改动先在「灰度」里默认打开（例如更严格的数据解析检查）。关闭后这些改动不生效、行为更保守；个别站点的流突然解析失败或异常时可以试试关闭"),
+                            checked = flag(PlayerTuning.KEY_CANARY),
+                            onCheckedChange = { settings.updatePlayerAdvFlag(PlayerTuning.KEY_CANARY, it) },
+                        )
+                        AppSwitchPreference(
+                            title = tr("加快首次起播（实验）"),
+                            summary = tr("创建音频输出时提前初始化，缩短第一次起播的等待。Media3 的实验选项，默认关闭"),
+                            checked = flag(PlayerTuning.KEY_FAST_START),
+                            onCheckedChange = { settings.updatePlayerAdvFlag(PlayerTuning.KEY_FAST_START, it) },
+                        )
+                        AppSwitchPreference(
+                            title = tr("快速精确定位（实验）"),
+                            summary = tr("精确跳转时，目标位置之前的画面只解码、不渲染，跳得更快。Media3 的实验选项，Android 14 及以上才有效果"),
+                            checked = flag(PlayerTuning.KEY_FAST_SEEK),
+                            onCheckedChange = { settings.updatePlayerAdvFlag(PlayerTuning.KEY_FAST_SEEK, it) },
                         )
                         AppDropdownPreference(
                             backdrop = bk,

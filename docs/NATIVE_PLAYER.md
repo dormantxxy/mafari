@@ -136,7 +136,7 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 
 ## Media3 高级选项（`player/PlayerTuning.kt`）
 
-设置 → 媒体嗅探与播放 → 页面最下面「Media3 高级选项」。取值存在 `mafari_settings`（键 `player_adv_*`），播放器每次打开时读一次，改了下次打开生效；默认值与加选项前的行为一致（缓冲「均衡」档 = 15s / 60s / 1s / 2s）。
+设置 → 媒体嗅探与播放 → 页面最下面「Media3 高级选项」。取值存在 `mafari_settings`（键 `player_adv_*`），播放器每次打开时读一次，改了下次打开生效；不动设置 = Media3 自己的默认行为（缓冲「均衡」档 = 15s / 60s / 1s / 2s）。内核已升到 Media3 1.12.0-alpha01（minSdk 33 满足其 minSdk 24 要求）。
 
 | 分组 | 选项 | 落到哪 |
 |---|---|---|
@@ -152,10 +152,15 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 | 其他 | 拖动定位（精确 / 就近关键帧） | `SeekParameters.EXACT / CLOSEST_SYNC` |
 | | 网络超时（默认 / 严格 / 宽松） | `DefaultHttpDataSource` 连接 / 读取超时 |
 | | 管理音频焦点、拔出耳机时暂停 | `setAudioAttributes(.., handleAudioFocus)`、`setHandleAudioBecomingNoisy` |
+| | 拖动进度时实时预览（1.12 起） | `ExoPlayer.setScrubbingModeEnabled`：`SeekTrack` 拖动期间 `MafariPlayer.scrubTo`，松手 / 取消 `endScrub` 后再 `seekTo` 精确定位 |
+| 缓冲与内存 | 只加载选中的轨道 | `DefaultMediaSourceFactory.setLoadOnlySelectedTracks`（1.12 起库里默认 true） |
+| 稳定性与实验 | 卡死检测（默认 / 宽松 / 关闭检测） | `ExoPlayer.Builder.setStuckPlayingDetectionTimeoutMs / setStuckPlayingNotEndingTimeoutMs / setStuckBufferingDetectionTimeoutMs` + `Flags.FLAG_ENABLE_STUCK_PLAYING_DETECTION`；报错 cause 是 `StuckPlayerException`，`describeStuck` 翻成人话 |
+| | Media3 灰度特性 | `Flags.setCanaryModeEnabled`（库里默认开） |
+| | 加快首次起播 / 快速精确定位（实验，默认关） | `Flags.FLAG_PLAY_PAUSE_AUDIO_TRACK_ON_INIT` / `FLAG_ENABLE_MEDIACODEC_BUFFER_DECODE_ONLY`（API 34+） |
 
 ### 取舍 / 待验证
 
-- 未编译、未真机验证（和前几个阶段一样）；纯逻辑（档位表、取值收敛）有单测 `PlayerTuningTest`。
-- HDR 策略只对多清晰度流起作用；单个 mp4 没得选。HDR 直出需要 SurfaceView，TextureView 下 HDR 片源可能发灰 —— 暂时没做「检测到 HDR 自动切 SurfaceView」。
+- 未编译、未真机验证（和前几个阶段一样）；1.12 新增的 API 已对照 `androidx/media` 1.12.0-alpha01 源码核对过签名；`Flags` 是进程级静态状态，每次开播放器前由 `applyMedia3Flags` 显式重设；纯逻辑（档位表、取值收敛）有单测 `PlayerTuningTest`。
+- HDR 策略只对多清晰度流起作用；1.12 起 HLS `VIDEO-RANGE`（PQ / HLG）和 DASH CICP 描述会解析进 `Format.colorInfo`，`isHdr` 因此能识别这些流；单个 mp4 没得选。HDR 直出需要 SurfaceView，TextureView 下 HDR 片源可能发灰 —— 暂时没做「检测到 HDR 自动切 SurfaceView」。
 - 隧道播放在播放页里临时切回 TextureView 不会重建播放器，此时需要在设置里关掉它。
 - 快捷菜单 / 标题区底色不透明度见 `NativePlayerActivity.CARD_SURFACE_ALPHA`。

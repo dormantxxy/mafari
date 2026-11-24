@@ -6,7 +6,7 @@ import android.content.Context
  * Media3 高级选项（设置 → 媒体嗅探与播放 → Media3 高级选项）。
  *
  * 所有取值都是「下标 / 开关」，和 [PlayerPrefs] 共用 mafari_settings。播放器每次打开时读一次（[read]），
- * 改了设置后「下次打开播放器生效」。默认值 = 加这些选项之前的行为，不动设置就和以前完全一样。
+ * 改了设置后「下次打开播放器生效」。不动设置 = 用 Media3 当前版本自己的默认行为（Media3 1.12 起新增的几项见下面标注）。
  * 这里不碰任何 Media3 / Android 类型（除读 prefs 的 [read]），取值收敛和缓冲档位可以纯 JVM 单测。
  */
 data class PlayerTuning(
@@ -23,6 +23,19 @@ data class PlayerTuning(
     val audioFocus: Boolean = true,
     val pauseOnNoisy: Boolean = true,
     val netTimeout: Int = NET_DEFAULT,
+    // ---- Media3 1.12 起新增 ----
+    /** 拖动进度条时实时预览画面（ExoPlayer 的 Scrubbing 模式） */
+    val scrubPreview: Boolean = false,
+    /** 卡死检测档位：默认 / 宽松 / 关闭（[STUCK_DEFAULT] ...） */
+    val stuck: Int = STUCK_DEFAULT,
+    /** 渐进式文件（MP4 等）只加载选中的画面轨 / 图片轨，1.12 起库里默认开 */
+    val loadOnlySelectedTracks: Boolean = true,
+    /** Media3 的「灰度」总开关（Flags.setCanaryModeEnabled），库里默认开 */
+    val canary: Boolean = true,
+    /** 实验：创建 AudioTrack 后提前初始化，缩短第一次起播等待 */
+    val fastStart: Boolean = false,
+    /** 实验：精确定位时目标位置之前的帧只解码不渲染（API 34+ 才有效果） */
+    val fastSeek: Boolean = false,
 ) {
     /** 缓冲时长四元组（毫秒）：最小保持 / 最大缓冲 / 起播所需 / 卡顿后重新起播所需 */
     class BufferDurations(val minMs: Int, val maxMs: Int, val playbackMs: Int, val rebufferMs: Int)
@@ -44,6 +57,14 @@ data class PlayerTuning(
 
     /** 清晰度上限的长边像素；0 = 不限 */
     val maxLongSide: Int get() = MAX_RES_LONG_SIDE[clamp(maxRes, MAX_RES_LONG_SIDE.size)]
+
+    /** 卡死检测的三个超时（毫秒）；null = 不改，用库里的默认值（进度停住 10 秒 / 播完不结束 60 秒 / 缓冲无进展 10 分钟） */
+    class StuckTimeouts(val playingMs: Int, val notEndingMs: Int, val bufferingMs: Int)
+
+    val stuckTimeouts: StuckTimeouts? get() = STUCK_PRESETS[clamp(stuck, STUCK_PRESETS.size)]
+
+    /** 卡死检测是否开着（关闭档会同时关掉 Media3 的 FLAG_ENABLE_STUCK_PLAYING_DETECTION 和缓冲超时） */
+    val stuckDetectionEnabled: Boolean get() = clamp(stuck, STUCK_PRESETS.size) != STUCK_OFF
 
     /** (连接超时, 读取超时) 毫秒 */
     val netTimeouts: Pair<Int, Int> get() = NET_TIMEOUTS[clamp(netTimeout, NET_TIMEOUTS.size)]
@@ -74,7 +95,18 @@ data class PlayerTuning(
         const val NET_STRICT = 1
         const val NET_RELAXED = 2
 
+        const val STUCK_DEFAULT = 0
+        const val STUCK_RELAXED = 1
+        const val STUCK_OFF = 2
+
         const val LOW_MEMORY_BYTES = 48 * 1024 * 1024
+
+        /** 下标对应 STUCK_*：默认（null = 不改库里的值）/ 宽松 30s·3min·30min / 关闭（全部拉满） */
+        val STUCK_PRESETS: List<StuckTimeouts?> = listOf(
+            null,
+            StuckTimeouts(30_000, 180_000, 1_800_000),
+            StuckTimeouts(Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE),
+        )
 
         /** 与加选项前的写死值一致的「均衡」档放在下标 1 */
         val BUFFER_PRESETS = listOf(
@@ -112,23 +144,31 @@ data class PlayerTuning(
         const val KEY_AUDIO_FOCUS = "player_adv_audio_focus"
         const val KEY_NOISY = "player_adv_noisy"
         const val KEY_NET = "player_adv_net"
+        const val KEY_SCRUB = "player_adv_scrub_preview"
+        const val KEY_STUCK = "player_adv_stuck"
+        const val KEY_LOAD_SELECTED = "player_adv_load_selected"
+        const val KEY_CANARY = "player_adv_canary"
+        const val KEY_FAST_START = "player_adv_fast_start"
+        const val KEY_FAST_SEEK = "player_adv_fast_seek"
 
         /** 全部键（设置页「恢复默认」用） */
         val ALL_KEYS = listOf(
             KEY_HDR, KEY_MAX_RES, KEY_DECODER, KEY_DECODER_FALLBACK, KEY_ASYNC, KEY_TUNNELING,
             KEY_BUF_PRESET, KEY_BUF_MB, KEY_BACK_BUF, KEY_SEEK, KEY_AUDIO_FOCUS, KEY_NOISY, KEY_NET,
+            KEY_SCRUB, KEY_STUCK, KEY_LOAD_SELECTED, KEY_CANARY, KEY_FAST_START, KEY_FAST_SEEK,
         )
 
         /** 下拉类选项的选项数（键 → 个数），写入时按它收敛，手改 prefs 的脏值回到 0 */
         val CHOICE_SIZES = mapOf(
             KEY_HDR to 3, KEY_MAX_RES to MAX_RES_LONG_SIDE.size, KEY_DECODER to 3, KEY_ASYNC to 3,
             KEY_BUF_PRESET to BUFFER_PRESETS.size, KEY_BUF_MB to BUFFER_MB.size, KEY_BACK_BUF to BACK_BUFFER_SEC.size,
-            KEY_SEEK to 2, KEY_NET to NET_TIMEOUTS.size,
+            KEY_SEEK to 2, KEY_NET to NET_TIMEOUTS.size, KEY_STUCK to STUCK_PRESETS.size,
         )
 
         /** 开关类选项的默认值 */
         val SWITCH_DEFAULTS = mapOf(
             KEY_DECODER_FALLBACK to false, KEY_TUNNELING to false, KEY_AUDIO_FOCUS to true, KEY_NOISY to true,
+            KEY_SCRUB to false, KEY_LOAD_SELECTED to true, KEY_CANARY to true, KEY_FAST_START to false, KEY_FAST_SEEK to false,
         )
 
         /** 下拉类选项的默认下标（只有缓冲档不是 0） */
@@ -152,6 +192,12 @@ data class PlayerTuning(
                 audioFocus = flag(KEY_AUDIO_FOCUS),
                 pauseOnNoisy = flag(KEY_NOISY),
                 netTimeout = choice(KEY_NET),
+                scrubPreview = flag(KEY_SCRUB),
+                stuck = choice(KEY_STUCK),
+                loadOnlySelectedTracks = flag(KEY_LOAD_SELECTED),
+                canary = flag(KEY_CANARY),
+                fastStart = flag(KEY_FAST_START),
+                fastSeek = flag(KEY_FAST_SEEK),
             )
         }
     }

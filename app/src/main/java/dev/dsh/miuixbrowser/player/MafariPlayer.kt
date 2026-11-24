@@ -1,4 +1,4 @@
-@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+@file:OptIn(androidx.media3.common.util.UnstableApi::class, androidx.media3.common.util.ExperimentalApi::class)
 
 package dev.dsh.miuixbrowser.player
 
@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Flags
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -22,6 +23,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.util.StuckPlayerException
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -130,6 +132,10 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
     private val tuning = PlayerTuning.read(context)
 
     init {
+        // Media3 1.12 的实验特性开关（Flags 是进程级的静态状态，必须在创建 ExoPlayer 之前设；每次都显式设一遍，
+        // 这样设置页改回默认后，上一次留下的覆盖值不会残留）
+        applyMedia3Flags(tuning)
+
         val (connectMs, readMs) = tuning.netTimeouts
         val http = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
@@ -175,7 +181,12 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
 
         exo = ExoPlayer.Builder(context, renderers)
             .setTrackSelector(trackSelector)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(dataSource))
+            // 渐进式文件（MP4 等）只加载选中的画面轨 / 图片轨：Media3 1.12 起默认开，这里按设置显式给值
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(context)
+                    .setDataSourceFactory(dataSource)
+                    .setLoadOnlySelectedTracks(tuning.loadOnlySelectedTracks),
+            )
             .setLoadControl(loadControl)
             // 音频焦点：来电 / 别的播放器抢焦点时自动暂停（后台播放必须有，否则会和别的音频叠在一起）；
             // 高级选项里可以关掉，和别的应用混着放
@@ -187,6 +198,15 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
             .setHandleAudioBecomingNoisy(tuning.pauseOnNoisy)
             // 后台播放（屏幕关闭）时保持 CPU 和 Wi-Fi 唤醒，否则几分钟后系统会掐掉网络
             .setWakeMode(C.WAKE_MODE_NETWORK)
+            // 卡死检测（1.12 起默认开：进度停住 10 秒 / 播完不结束 60 秒 / 缓冲无进展 10 分钟就报 StuckPlayerException）。
+            // 「默认」不改库里的值；「宽松」放宽三个超时；「关闭」由 applyMedia3Flags 关掉开关并把三个超时拉满
+            .apply {
+                tuning.stuckTimeouts?.let {
+                    setStuckPlayingDetectionTimeoutMs(it.playingMs)
+                    setStuckPlayingNotEndingTimeoutMs(it.notEndingMs)
+                    setStuckBufferingDetectionTimeoutMs(it.bufferingMs)
+                }
+            }
             .build()
         exo.setSeekParameters(if (tuning.seekMode == PlayerTuning.SEEK_KEYFRAME) SeekParameters.CLOSEST_SYNC else SeekParameters.EXACT)
         exo.addListener(listener)
@@ -204,6 +224,43 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
         exo.setMediaItem(buildItem(currentRequest), request.startMs.coerceAtLeast(0))
         exo.prepare()
         exo.playWhenReady = true
+    }
+
+    /**
+     * Media3 1.12 的 [Flags] 注册表：灰度总开关 + 单项覆盖。必须在创建任何 Media3 组件前调用，且在应用线程。
+     * 单项覆盖优先于灰度开关；对「库里静态默认值就是这个值」的开关，enable/disable 会顺手清掉旧覆盖，所以每次都调用即可。
+     */
+    private fun applyMedia3Flags(t: PlayerTuning) {
+        Flags.setCanaryModeEnabled(t.canary)
+        fun set(flag: Int, on: Boolean) = if (on) Flags.enableFlag(flag) else Flags.disableFlag(flag)
+        set(Flags.FLAG_ENABLE_STUCK_PLAYING_DETECTION, t.stuckDetectionEnabled)
+        set(Flags.FLAG_PLAY_PAUSE_AUDIO_TRACK_ON_INIT, t.fastStart)
+        set(Flags.FLAG_ENABLE_MEDIACODEC_BUFFER_DECODE_ONLY, t.fastSeek)
+    }
+
+    /** 设置里是否开了「拖动进度时实时预览」：进度条据此决定拖动过程中要不要调 [scrubTo] */
+    val scrubPreview: Boolean get() = tuning.scrubPreview
+
+    private var scrubbing = false
+
+    /**
+     * 拖动进度条时实时预览：进入 ExoPlayer 的 Scrubbing 模式（拖动期间暂停声音、放宽解码器 flush 等，专为连续 seek 优化），
+     * 并跳到 [ms]。必须配合 [endScrub]（松手 / 取消）使用，Scrubbing 模式会多占资源，不能一直开着。没开这个选项时什么也不做。
+     */
+    fun scrubTo(ms: Long) {
+        if (!tuning.scrubPreview) return
+        if (!scrubbing) {
+            scrubbing = true
+            exo.setScrubbingModeEnabled(true)
+        }
+        exo.seekTo(ms.coerceIn(0, durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE))
+    }
+
+    /** 退出 Scrubbing 模式（没进过就什么也不做）；之后由调用方再 [seekTo] 到松手的位置 */
+    fun endScrub() {
+        if (!scrubbing) return
+        scrubbing = false
+        exo.setScrubbingModeEnabled(false)
     }
 
     /** 解码器顺序：在系统给的候选里把硬解 / 软解挪到前面（不会删掉任何候选，所以不会因此变得放不了）。 */
@@ -378,11 +435,29 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
     }
 
     fun release() {
+        endScrub()
         exo.removeListener(listener)
         exo.release()
     }
 
-    private fun describe(e: PlaybackException): String = when (e.errorCode) {
+    private fun describe(e: PlaybackException): String {
+        // 卡死检测（Media3 1.12 起默认开）报的错，cause 是 StuckPlayerException，错误码是 ERROR_CODE_TIMEOUT
+        // （引擎内部「缓冲不加载」那一条是 ERROR_CODE_FAILED_RUNTIME_CHECK）。单独翻译成人话，不然界面只会显示「播放失败：ERROR_CODE_TIMEOUT」
+        (e.cause as? StuckPlayerException)?.let { return describeStuck(it) }
+        return describeCode(e)
+    }
+
+    private fun describeStuck(e: StuckPlayerException): String {
+        val sec = (e.timeoutMs / 1000).coerceAtLeast(1)
+        return when (e.stuckType) {
+            StuckPlayerException.STUCK_PLAYING_NOT_ENDING -> tr("视频已经播到结尾却没有结束（{0} 秒），可以点击重试", sec)
+            StuckPlayerException.STUCK_BUFFERING_NOT_LOADING,
+            StuckPlayerException.STUCK_BUFFERING_NO_PROGRESS -> tr("缓冲卡住了（{0} 秒没有进展），网络不好或源已失效，可以点击重试或换个源", sec)
+            else -> tr("画面卡住了（{0} 秒没有进展），可以点击重试；经常出现的话可以在设置里把「卡死检测」调成宽松", sec)
+        }
+    }
+
+    private fun describeCode(e: PlaybackException): String = when (e.errorCode) {
         PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> {
             val code = (e.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
             when (code) {

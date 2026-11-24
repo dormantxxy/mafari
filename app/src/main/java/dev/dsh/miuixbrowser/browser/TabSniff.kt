@@ -11,6 +11,7 @@ import androidx.webkit.WebViewFeature
 import dev.dsh.miuixbrowser.engine.gecko.GeckoGm
 import dev.dsh.miuixbrowser.engine.webview.IncognitoProfile
 import dev.dsh.miuixbrowser.engine.webview.OneWayBridge
+import dev.dsh.miuixbrowser.player.NativePlayerActivity
 import dev.dsh.miuixbrowser.player.PlayerRequest
 import dev.dsh.miuixbrowser.player.PlayerSource
 import dev.dsh.miuixbrowser.sniff.MediaSniff
@@ -75,6 +76,8 @@ internal fun BrowserTab.playSniffed(context: Context, selected: SniffedMedia, al
             gecko = gecko,
         )
         val intent = req.toIntent(context).apply { if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        // 已有播放页开着（卡片悬浮在网页上时从地址栏切换媒体）：先关掉旧的，换成新选的这一条
+        if (NativePlayerActivity.showing) NativePlayerActivity.closeCurrent()
         runCatching { context.startActivity(intent) }.onFailure { Diag.log("sniff play failed: ${it.message}") }
     }
     if (gecko) {

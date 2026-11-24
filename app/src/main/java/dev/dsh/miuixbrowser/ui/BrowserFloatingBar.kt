@@ -180,13 +180,16 @@ internal fun BoxScope.BrowserFloatingBar(
         val readerSurface = MiuixTheme.colorScheme.surface
         val readerDark = (0.299f * readerSurface.red + 0.587f * readerSurface.green + 0.114f * readerSurface.blue) < 0.5f
         // 脚本图标与阅读图标共用这一个位置（宽度相同）：阅读优先，没有阅读图标时才可能显示脚本图标
-        // 优先级：下载 > 阅读 > 脚本，三者共用同一个位置（宽度相同）
-        // 优先级：翻译 > 下载 > 阅读 > 脚本
+        // 优先级：下载 > 媒体 > 翻译 > 阅读 > 脚本，共用同一个位置（宽度相同）
         val translateVisible = tab.translate.iconVisible
-        val translateShown = shouldShowAddressTranslate(translateVisible, editing)
-        val downloadShown = shouldShowAddressDownload(addressDownload.visible, editing, translateVisible)
-        val scriptsShown = shouldShowAddressScripts(readerShown, addressScriptCount > 0, editing, addressDownload.visible, translateVisible)
-        val readerWidth = if (translateShown || downloadShown || shouldShowAddressReader(readerShown, editing, addressDownload.visible, translateVisible) || scriptsShown) AddressReaderWidth else 0.dp
+        // 媒体图标：媒体嗅探开着且本页嗅探到媒体才显示（关了就不显示）
+        val mediaCount = if (settings.mediaSniffActive && tab.url.isNotEmpty()) tab.sniffs.items.size else 0
+        val mediaVisible = mediaCount > 0
+        val downloadShown = shouldShowAddressDownload(addressDownload.visible, editing)
+        val mediaShown = shouldShowAddressMedia(mediaVisible, editing, addressDownload.visible)
+        val translateShown = shouldShowAddressTranslate(translateVisible, editing, addressDownload.visible, mediaVisible)
+        val scriptsShown = shouldShowAddressScripts(readerShown, addressScriptCount > 0, editing, addressDownload.visible, translateVisible, mediaVisible)
+        val readerWidth = if (translateShown || downloadShown || mediaShown || shouldShowAddressReader(readerShown, editing, addressDownload.visible, translateVisible, mediaVisible) || scriptsShown) AddressReaderWidth else 0.dp
         val requestedBarWidth = fixedToolbarWidth + measuredAddressWidth + loadingIndicatorWidth + refreshWidth + readerWidth
         // 显式比较 Dp，避免当前 Kotlin/Compose 版本对 coerceAtMost 的错误重载推断。
         val targetBarWidth = if (requestedBarWidth < maxWidth) requestedBarWidth else maxWidth
@@ -446,6 +449,8 @@ internal fun BoxScope.BrowserFloatingBar(
                 translateVisible = tab.translate.iconVisible,
                 translateOriginal = tab.translate.showingOriginal,
                 onTranslateToggle = { tab.translate.toggleOriginal() },
+                mediaCount = mediaCount,
+                onMedia = { ui.sniffDialogShow = true },
                 searchEngine = settings.allSearchEngines.getOrNull(settings.searchIndex),
                 onEngineClick = { ui.engineMenuAnchor = it; ui.engineMenuShow = !ui.engineMenuShow },
                 onBack = { tab.goBack() },
@@ -526,6 +531,8 @@ internal fun BoxScope.BrowserFloatingBar(
             translateVisible = tab.translate.iconVisible,
             translateOriginal = tab.translate.showingOriginal,
             onTranslateToggle = { tab.translate.toggleOriginal() },
+            mediaCount = mediaCount,
+            onMedia = { ui.sniffDialogShow = true },
             searchEngine = settings.allSearchEngines.getOrNull(settings.searchIndex),
             onEngineClick = { ui.engineMenuAnchor = it; ui.engineMenuShow = !ui.engineMenuShow },
             onShare = {

@@ -187,6 +187,7 @@ class NativePlayerActivity : ComponentActivity() {
             return
         }
         showing = true
+        instance = this
         bgPlay = PlayerPrefs.bgPlay(this)
         quickItems = PlayerPrefs.quickItems(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -651,12 +652,19 @@ class NativePlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        showing = false
+        // 切换媒体时新播放页可能先于旧页销毁：只有自己仍是当前实例才清全局状态，别把新页的状态抹掉
+        val owner = instance === this
+        if (owner) {
+            instance = null
+            showing = false
+        }
         cast?.release()
         cast = null
-        PlayerService.stop(this)
-        PlayerService.closeCallback = null
-        PlayerService.current = null
+        if (owner) {
+            PlayerService.stop(this)
+            PlayerService.closeCallback = null
+            PlayerService.current = null
+        }
         pipReceiver?.let { runCatching { unregisterReceiver(it) } }
         pipReceiver = null
         player?.exo?.removeListener(pipSync)
@@ -669,6 +677,13 @@ class NativePlayerActivity : ComponentActivity() {
         /** 播放页正开着：嗅探「自动悬浮播放」据此不重复拉起第二个播放器 */
         @Volatile var showing = false
             private set
+
+        private var instance: NativePlayerActivity? = null
+
+        /** 关掉正开着的播放页（地址栏媒体弹窗里切换到另一条媒体前调用，避免叠出两个播放器）。 */
+        fun closeCurrent() {
+            instance?.let { if (!it.isFinishing) it.finish() }
+        }
 
         private const val ACTION_PIP = "dev.dsh.miuixbrowser.player.PIP_ACT"
         private const val EXTRA_ACT = "a"

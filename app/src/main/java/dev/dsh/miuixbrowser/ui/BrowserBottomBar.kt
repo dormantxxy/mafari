@@ -394,6 +394,9 @@ internal fun BottomBar(
     /** 正显示原文：图标变灰；译文时是主题色 */
     translateOriginal: Boolean = false,
     onTranslateToggle: () -> Unit = {},
+    /** 本页嗅探到的媒体个数（媒体嗅探关闭时外层传 0）：>0 时地址栏最左侧显示媒体图标，点击弹出嗅探弹窗 */
+    mediaCount: Int = 0,
+    onMedia: () -> Unit = {},
     /** 当前搜索引擎：输入网址时地址栏最左侧显示它的图标，点击回报图标位置，由外层弹出引擎快捷切换菜单（null 则不显示） */
     searchEngine: dev.dsh.miuixbrowser.data.SearchEngine? = null,
     onEngineClick: (androidx.compose.ui.geometry.Rect) -> Unit = {},
@@ -406,13 +409,16 @@ internal fun BottomBar(
     val shape = RoundedCornerShape(29.dp)
     val showRefresh = shouldShowAddressRefresh(address = address, loading = loading, editing = editing)
     val downloadVisible = download?.visible == true
-    val showTranslate = shouldShowAddressTranslate(translateVisible = translateVisible, editing = editing)
-    val showDownload = shouldShowAddressDownload(downloadVisible = downloadVisible, editing = editing, translateVisible = translateVisible)
+    val mediaVisible = mediaCount > 0
+    val showDownload = shouldShowAddressDownload(downloadVisible = downloadVisible, editing = editing)
+    val showMedia = shouldShowAddressMedia(mediaVisible = mediaVisible, editing = editing, downloadVisible = downloadVisible)
+    val showTranslate = shouldShowAddressTranslate(translateVisible = translateVisible, editing = editing, downloadVisible = downloadVisible, mediaVisible = mediaVisible)
     val showReader = shouldShowAddressReader(
         readerVisible = readerVisible,
         editing = editing,
         downloadVisible = downloadVisible,
         translateVisible = translateVisible,
+        mediaVisible = mediaVisible,
     )
     val showScripts = shouldShowAddressScripts(
         readerVisible = readerVisible,
@@ -420,6 +426,7 @@ internal fun BottomBar(
         editing = editing,
         downloadVisible = downloadVisible,
         translateVisible = translateVisible,
+        mediaVisible = mediaVisible,
     )
     Box(
         modifier = Modifier
@@ -498,13 +505,16 @@ internal fun BottomBar(
                     Spacer(Modifier.width(6.dp))
                 }
                 // 阅读模式图标：地址栏最左侧（比加载小圆点还靠左）
-                if (showTranslate) {
-                    // 翻译图标优先级最高（翻译 > 下载 > 阅读 > 脚本）：与它们同一位置、同一尺寸
-                    AddressTranslateButton(original = translateOriginal, onClick = onTranslateToggle)
-                    Spacer(Modifier.width(6.dp))
-                } else if (showDownload && download != null) {
-                    // 下载图标优先于阅读 / 脚本图标：与它们同一位置、同一尺寸
+                if (showDownload && download != null) {
+                    // 下载图标优先级最高（下载 > 媒体 > 翻译 > 阅读 > 脚本）：与它们同一位置、同一尺寸
                     AddressDownloadButton(state = download, onClick = onDownload)
+                    Spacer(Modifier.width(6.dp))
+                } else if (showMedia) {
+                    // 嗅探到媒体：媒体图标，点击弹出嗅探弹窗
+                    AddressMediaButton(count = mediaCount, onClick = onMedia)
+                    Spacer(Modifier.width(6.dp))
+                } else if (showTranslate) {
+                    AddressTranslateButton(original = translateOriginal, onClick = onTranslateToggle)
                     Spacer(Modifier.width(6.dp))
                 } else if (showReader) {
                     AddressReaderButton(active = readerActive, onClick = onReader)
@@ -748,15 +758,30 @@ internal fun shouldShowAddressReader(
     editing: Boolean,
     downloadVisible: Boolean = false,
     translateVisible: Boolean = false,
-): Boolean = readerVisible && !editing && !downloadVisible && !translateVisible
+    mediaVisible: Boolean = false,
+): Boolean = readerVisible && !editing && !downloadVisible && !translateVisible && !mediaVisible
 
-/** 下载图标显示条件：有下载在进行 / 有已完成未查看的下载，且不在输入状态。优先级最高（下载 > 阅读 > 脚本）。 */
-internal fun shouldShowAddressDownload(downloadVisible: Boolean, editing: Boolean, translateVisible: Boolean = false): Boolean =
-    downloadVisible && !editing && !translateVisible
+/**
+ * 媒体图标显示条件：本页嗅探到了媒体（媒体嗅探关闭时外层不会给出 mediaVisible = true），且不在输入状态。
+ * 优先级 下载 > 媒体 > 翻译 > 阅读 > 脚本，与它们共用地址栏最左侧同一个位置。
+ */
+internal fun shouldShowAddressMedia(
+    mediaVisible: Boolean,
+    editing: Boolean,
+    downloadVisible: Boolean = false,
+): Boolean = mediaVisible && !editing && !downloadVisible
 
-/** 翻译图标显示条件：当前页正在 / 已经翻译，且不在输入状态。优先级最高（翻译 > 下载 > 阅读 > 脚本），与它们共用同一个位置。 */
-internal fun shouldShowAddressTranslate(translateVisible: Boolean, editing: Boolean): Boolean =
-    translateVisible && !editing
+/** 下载图标显示条件：有下载在进行 / 有已完成未查看的下载，且不在输入状态。优先级最高（下载 > 媒体 > 翻译 > 阅读 > 脚本）。 */
+internal fun shouldShowAddressDownload(downloadVisible: Boolean, editing: Boolean): Boolean =
+    downloadVisible && !editing
+
+/** 翻译图标显示条件：当前页正在 / 已经翻译，且不在输入状态。优先级 下载 > 媒体 > 翻译 > 阅读 > 脚本，与它们共用同一个位置。 */
+internal fun shouldShowAddressTranslate(
+    translateVisible: Boolean,
+    editing: Boolean,
+    downloadVisible: Boolean = false,
+    mediaVisible: Boolean = false,
+): Boolean = translateVisible && !editing && !downloadVisible && !mediaVisible
 
 /** 地址栏内阅读图标占用的宽度（按钮 24dp + 右侧间距 2dp），用于底栏宽度计算。 */
 internal val AddressReaderWidth = 26.dp
@@ -771,7 +796,8 @@ internal fun shouldShowAddressScripts(
     editing: Boolean,
     downloadVisible: Boolean = false,
     translateVisible: Boolean = false,
-): Boolean = scriptsRunning && !readerVisible && !downloadVisible && !translateVisible && !editing
+    mediaVisible: Boolean = false,
+): Boolean = scriptsRunning && !readerVisible && !downloadVisible && !translateVisible && !mediaVisible && !editing
 
 /**
  * 进程级单例：Activity 重建（旋转 / 切换主题）后界面拿到的仍是同一份状态，
@@ -1015,6 +1041,39 @@ internal fun AddressReaderButton(active: Boolean, onClick: () -> Unit) {
             imageVector = AppIcons.Reader,
             contentDescription = if (active) tr("退出阅读模式") else tr("阅读模式"),
             tint = tint,
+            modifier = Modifier.size(iconSize),
+        )
+    }
+}
+
+/**
+ * 地址栏最左侧的媒体按钮：位置和大小与 [AddressReaderButton] 一致；本页嗅探到了媒体，图标用主题色 + 淡色底。
+ * 点击弹出嗅探弹窗（列出本页的媒体，点一条用原生播放器打开 / 切换）。
+ */
+@Composable
+internal fun AddressMediaButton(count: Int, onClick: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    val primary = MiuixTheme.colorScheme.primary
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .clip(CircleShape)
+            .background(primary.copy(alpha = 0.16f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        val iconSize = with(LocalDensity.current) { 15.sp.toDp() }
+        Icon(
+            imageVector = AppIcons.Tv,
+            contentDescription = tr("嗅探到的媒体") + " " + count,
+            tint = primary,
             modifier = Modifier.size(iconSize),
         )
     }

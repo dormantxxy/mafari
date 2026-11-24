@@ -106,6 +106,8 @@ internal fun SafariSplitBar(
     translateVisible: Boolean,
     translateOriginal: Boolean,
     onTranslateToggle: () -> Unit,
+    mediaCount: Int = 0,
+    onMedia: () -> Unit = {},
     searchEngine: dev.dsh.miuixbrowser.data.SearchEngine? = null,
     onEngineClick: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onBack: () -> Unit,
@@ -231,6 +233,8 @@ internal fun SafariSplitBar(
                 translateVisible = translateVisible,
                 translateOriginal = translateOriginal,
                 onTranslateToggle = onTranslateToggle,
+                mediaCount = mediaCount,
+                onMedia = onMedia,
                 searchEngine = searchEngine,
                 onEngineClick = onEngineClick,
                 onRefresh = onRefresh,
@@ -456,6 +460,8 @@ private fun SafariAddressPill(
     translateVisible: Boolean,
     translateOriginal: Boolean,
     onTranslateToggle: () -> Unit,
+    mediaCount: Int = 0,
+    onMedia: () -> Unit = {},
     searchEngine: dev.dsh.miuixbrowser.data.SearchEngine? = null,
     onEngineClick: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onRefresh: () -> Unit,
@@ -465,15 +471,18 @@ private fun SafariAddressPill(
     gesturesEnabled: Boolean = true,
 ) {
     val haptic = LocalHapticFeedback.current
-    // 图标显示条件与原样式一致：翻译 > 下载 > 阅读 > 脚本，同占地址栏最左侧
+    // 图标显示条件与原样式一致：下载 > 媒体 > 翻译 > 阅读 > 脚本，同占地址栏最左侧
     val downloadVisible = download?.visible == true
-    val showTranslate = shouldShowAddressTranslate(translateVisible = translateVisible, editing = editing)
-    val showDownload = shouldShowAddressDownload(downloadVisible = downloadVisible, editing = editing, translateVisible = translateVisible)
+    val mediaVisible = mediaCount > 0
+    val showDownload = shouldShowAddressDownload(downloadVisible = downloadVisible, editing = editing)
+    val showMedia = shouldShowAddressMedia(mediaVisible = mediaVisible, editing = editing, downloadVisible = downloadVisible)
+    val showTranslate = shouldShowAddressTranslate(translateVisible = translateVisible, editing = editing, downloadVisible = downloadVisible, mediaVisible = mediaVisible)
     val showReader = shouldShowAddressReader(
         readerVisible = readerVisible,
         editing = editing,
         downloadVisible = downloadVisible,
         translateVisible = translateVisible,
+        mediaVisible = mediaVisible,
     )
     val showScripts = shouldShowAddressScripts(
         readerVisible = readerVisible,
@@ -481,6 +490,7 @@ private fun SafariAddressPill(
         editing = editing,
         downloadVisible = downloadVisible,
         translateVisible = translateVisible,
+        mediaVisible = mediaVisible,
     )
     val showRefresh = shouldShowAddressRefresh(address = address, loading = loading, editing = editing)
 
@@ -611,8 +621,9 @@ private fun SafariAddressPill(
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
-                        showTranslate -> AddressTranslateButton(original = translateOriginal, onClick = onTranslateToggle)
                         showDownload && download != null -> AddressDownloadButton(state = download, onClick = onDownload)
+                        showMedia -> AddressMediaButton(count = mediaCount, onClick = onMedia)
+                        showTranslate -> AddressTranslateButton(original = translateOriginal, onClick = onTranslateToggle)
                         showReader -> AddressReaderButton(active = readerActive, onClick = onReader)
                         showScripts -> AddressScriptButton(onClick = onScripts)
                     }

@@ -68,7 +68,9 @@ import dev.dsh.miuixbrowser.i18n.tr
 import top.yukonga.miuix.kmp.icon.glass.Link
 import top.yukonga.miuix.kmp.icon.glass.Download
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import dev.dsh.miuixbrowser.ui.CastPickerInline
+import dev.dsh.miuixbrowser.ui.AppBottomSheet
+import dev.dsh.miuixbrowser.ui.CastPickerBody
+import top.yukonga.miuix.kmp.basic.Scaffold
 import dev.dsh.miuixbrowser.ui.AppIcons
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.ColorFilter
@@ -113,6 +115,15 @@ class NativePlayerActivity : ComponentActivity() {
     private var pipAt = 0L // 最近一次进入画中画的时间，用来分辨「刚进小窗的过渡性 onStop」和「用户点 ✕ 关了小窗」
     private var pipReceiver: BroadcastReceiver? = null
     private var cast: NativeCast? = null
+
+    /**
+     * 「投屏到」底部弹窗的宿主是否在场。抽象层的弹窗（AppBottomSheet）要挂在 miuix Scaffold 的弹窗层上，
+     * 播放页平时是只有卡片那么高的窗口，所以弹窗出现时才挂上宿主并把窗口撑满；弹窗收起动画结束后再还原。
+     */
+    private var castSheetHost by androidx.compose.runtime.mutableStateOf(false)
+
+    /** 快捷菜单要显示的按钮（来自设置，空 = 整排不显示）；播放页打开期间设置不会变，开页时读一次 */
+    private var quickItems: List<String> = emptyList()
     private var pipSuppressUntil = 0L // 拉起外部播放器 / 系统投屏前后一小段时间内不自动进画中画
 
     /** 局域网访问权限（Android 17 / targetSdk 37 起必需）：投屏搜索前调用，结果回调在主线程 */
@@ -156,7 +167,7 @@ class NativePlayerActivity : ComponentActivity() {
     private fun applyWindowMode() {
         val card = !fullscreen && !inPip
         // 「投屏到」面板打开时窗口临时铺满（背景仍透明），面板才不会被卡片那么高的窗口裁掉
-        val wrap = card && cast?.pickerUi?.show != true
+        val wrap = card && !castSheetHost
         window.setBackgroundDrawable(ColorDrawable(if (card) AColor.TRANSPARENT else AColor.BLACK))
         if (wrap) {
             window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -177,6 +188,7 @@ class NativePlayerActivity : ComponentActivity() {
         }
         showing = true
         bgPlay = PlayerPrefs.bgPlay(this)
+        quickItems = PlayerPrefs.quickItems(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         applyFullscreen(false) // 里面会 applyWindowMode()
@@ -202,8 +214,9 @@ class NativePlayerActivity : ComponentActivity() {
     private fun PlayerPage(p: MafariPlayer, title: String) {
         val cast = cast
         val pickerOpen = cast?.pickerUi?.show == true
-        // 面板开 / 关时切窗口大小（卡片态才有区别）
-        LaunchedEffect(pickerOpen) { applyWindowMode() }
+        // 弹窗出现：先挂宿主并撑满窗口；收起动画结束（onDismissFinished）再还原
+        LaunchedEffect(pickerOpen) { if (pickerOpen) castSheetHost = true }
+        LaunchedEffect(castSheetHost) { applyWindowMode() }
 
         // 只有一处 PlayerSurface 调用，卡片 <-> 全屏切换时界面状态（弹层、控件显隐）不会丢；
         // 两种形态的外层结构相同（Column 套 Column），只换 Modifier
@@ -213,7 +226,7 @@ class NativePlayerActivity : ComponentActivity() {
             Modifier.fillMaxSize().background(Color.Black)
         } else {
             // 不 fillMaxHeight：窗口是 WRAP_CONTENT，铺满会把整屏变成透明的挡触摸层（投屏面板打开时窗口已铺满，卡片仍贴顶）
-            Modifier.fillMaxWidth().then(if (pickerOpen) Modifier.fillMaxHeight() else Modifier)
+            Modifier.fillMaxWidth().then(if (castSheetHost) Modifier.fillMaxHeight() else Modifier)
                 .windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)
         }
         val panel = if (full) {
@@ -260,42 +273,82 @@ class NativePlayerActivity : ComponentActivity() {
                 }
             }
         }
-        // 「投屏到」面板：直接画在播放页里（miuix 弹窗要 Scaffold 的弹窗宿主，这里没有，用它点了投屏什么都不显示）
-        if (cast != null) CastPickerInline(cast.pickerUi, Modifier.matchParentSize())
+        // 「投屏到」：抽象层的底部弹窗（和浏览器里其它 sheet 同一套材质）。弹窗层要 Scaffold 当宿主，只在需要时挂
+        if (cast != null && castSheetHost) {
+            Scaffold(
+                modifier = Modifier.matchParentSize(),
+                containerColor = Color.Transparent,
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            ) { _ ->
+                AppBottomSheet(
+                    show = cast.pickerUi.show,
+                    title = tr("投屏到"),
+                    backdrop = null,
+                    onDismissRequest = { cast.pickerUi.cancel() },
+                    onDismissFinished = { castSheetHost = false },
+                ) {
+                    CastPickerBody(cast.pickerUi)
+                }
+            }
+        }
         }
     }
 
-    /** 卡片下方、标题上方的快捷菜单：投屏 / 下载 / 截屏 / 倍速 / 复制链接（图标 + 文字）；点「倍速」这一排换成倍速选项 */
+    /**
+     * 卡片下方、标题上方的快捷菜单（图标 + 文字）：投屏 / 下载 / 截屏 / 倍速 / 清晰度，
+     * 设置 → 媒体嗅探与播放 → 快捷菜单 里可整排关掉或逐个关。
+     * 点「倍速」/「清晰度」这一排换成对应的选项，选完（或点返回）恢复。
+     */
     @androidx.compose.runtime.Composable
     private fun QuickActions(p: MafariPlayer, cast: NativeCast?) {
-        var speeds by remember { mutableStateOf(false) }
+        if (quickItems.isEmpty()) return
+        // 0 = 按钮排；1 = 倍速选项；2 = 清晰度选项
+        var page by remember { mutableStateOf(0) }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x1FFFFFFF)))
-        if (speeds) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CastButton(tr("返回")) { speeds = false }
+        when (page) {
+            1 -> OptionRow(onBack = { page = 0 }) {
                 PlayerPrefs.SPEEDS.forEach { v ->
-                    val on = Math.abs(p.speed - v) < 0.01f
-                    CastButton(speedLabel(v), strong = on) { p.changeSpeed(v); speeds = false }
+                    CastButton(speedLabel(v), strong = Math.abs(p.speed - v) < 0.01f, compact = true) { p.changeSpeed(v); page = 0 }
                 }
             }
-        } else {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp)) {
-                QuickAction(AppIcons.ScreenMirror, tr("投屏"), Modifier.weight(1f), enabled = cast != null) { cast?.openPicker() }
-                QuickAction(MiuixIcons.Glass.Download, tr("下载"), Modifier.weight(1f)) {
-                    download(p)
-                    Toast.makeText(this@NativePlayerActivity, tr("已加入下载"), Toast.LENGTH_SHORT).show()
-                }
-                QuickAction(AppIcons.Screenshot, tr("截屏"), Modifier.weight(1f)) { screenshot(p) }
-                QuickAction(AppIcons.Speed, if (p.speed == 1f) tr("倍速") else speedLabel(p.speed), Modifier.weight(1f)) { speeds = true }
-                QuickAction(MiuixIcons.Glass.Link, tr("复制链接"), Modifier.weight(1f)) {
-                    copyLink(p)
-                    Toast.makeText(this@NativePlayerActivity, tr("已复制链接"), Toast.LENGTH_SHORT).show()
+            2 -> OptionRow(onBack = { page = 0 }) {
+                CastButton(tr("自动"), strong = p.selectedQuality == null, compact = true) { p.selectQuality(null); page = 0 }
+                p.qualities.forEach { q ->
+                    CastButton(q.label, strong = p.selectedQuality == q, compact = true) { p.selectQuality(q); page = 0 }
                 }
             }
+            else -> Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp)) {
+                quickItems.forEach { id ->
+                    when (id) {
+                        "cast" -> QuickAction(AppIcons.ScreenMirror, tr("投屏"), Modifier.weight(1f), enabled = cast != null) { cast?.openPicker() }
+                        "download" -> QuickAction(MiuixIcons.Glass.Download, tr("下载"), Modifier.weight(1f)) {
+                            download(p)
+                            Toast.makeText(this@NativePlayerActivity, tr("已加入下载"), Toast.LENGTH_SHORT).show()
+                        }
+                        "shot" -> QuickAction(AppIcons.Screenshot, tr("截屏"), Modifier.weight(1f)) { screenshot(p) }
+                        "speed" -> QuickAction(AppIcons.Speed, if (p.speed == 1f) tr("倍速") else speedLabel(p.speed), Modifier.weight(1f)) { page = 1 }
+                        "quality" -> QuickAction(
+                            AppIcons.Quality,
+                            p.selectedQuality?.label ?: tr("清晰度"),
+                            Modifier.weight(1f),
+                            enabled = p.qualities.size > 1, // 只有一档（或还没解析出来）就灰掉
+                        ) { page = 2 }
+                    }
+                }
+            }
+        }
+    }
+
+    /** 选项排：最左一个「返回」，后面是横向滚动的选项 */
+    @androidx.compose.runtime.Composable
+    private fun OptionRow(onBack: () -> Unit, content: @androidx.compose.runtime.Composable () -> Unit) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CastButton(tr("返回"), compact = true) { onBack() }
+            content()
         }
     }
 
@@ -303,22 +356,22 @@ class NativePlayerActivity : ComponentActivity() {
     private fun QuickAction(icon: ImageVector, label: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
         Column(
             modifier
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .clickable(enabled = enabled, onClick = onClick)
-                .padding(vertical = 8.dp),
+                .padding(vertical = 5.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Image(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(19.dp),
                 colorFilter = ColorFilter.tint(if (enabled) Color.White else Color(0x59FFFFFF)),
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 text = label,
                 color = if (enabled) Color(0xCCFFFFFF) else Color(0x59FFFFFF),
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -404,15 +457,16 @@ class NativePlayerActivity : ComponentActivity() {
         modifier: Modifier = Modifier,
         enabled: Boolean = true,
         strong: Boolean = false,
+        compact: Boolean = false,
         onClick: () -> Unit,
     ) {
-        val shape = RoundedCornerShape(14.dp)
+        val shape = RoundedCornerShape(if (compact) 12.dp else 14.dp)
         Box(
             modifier
                 .clip(shape)
                 .background(if (strong) Color(0xFF3B7DFF) else Color(0x26FFFFFF))
                 .clickable(enabled = enabled, onClick = onClick)
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 5.dp else 8.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(

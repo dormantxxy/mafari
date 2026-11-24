@@ -14,6 +14,11 @@ object PlayerPrefs {
     const val KEY_SPEED = "player_default_speed"
     const val KEY_LONG_PRESS = "player_long_press_speed"
     const val KEY_BG_PLAY = "player_bg_play"
+    const val KEY_QUICK_MENU = "player_quick_menu"
+
+    /** 悬浮播放器下方快捷菜单里的按钮（顺序即显示顺序）；每个按钮可在设置里单独关 */
+    val QUICK_IDS = listOf("cast", "download", "shot", "speed", "quality")
+    fun quickKey(id: String) = "player_quick_$id"
 
     /** 老版本把后台播放存在播放页自己的 prefs 里（mafari_player / bg_play），第一次读时沿用 */
     private const val LEGACY_PREFS = "mafari_player"
@@ -53,6 +58,16 @@ object PlayerPrefs {
 
     fun setLongPressSpeed(context: Context, v: Float) {
         prefs(context).edit().putFloat(KEY_LONG_PRESS, snap(v, LONG_PRESS_SPEEDS, 2f)).apply()
+    }
+
+    /** 快捷菜单总开关（默认开） */
+    fun quickMenu(context: Context): Boolean = prefs(context).getBoolean(KEY_QUICK_MENU, true)
+
+    /** 快捷菜单里实际要显示的按钮（总开关关了就是空），保持 [QUICK_IDS] 的顺序 */
+    fun quickItems(context: Context): List<String> {
+        val p = prefs(context)
+        if (!p.getBoolean(KEY_QUICK_MENU, true)) return emptyList()
+        return QUICK_IDS.filter { p.getBoolean(quickKey(it), true) }
     }
 
     fun bgPlay(context: Context): Boolean {

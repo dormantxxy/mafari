@@ -107,9 +107,10 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 
 ## 投屏（`player/NativeCast.kt`）
 
-入口：悬浮卡片下方的快捷菜单「投屏」（全屏 / 画中画里用 ⋯ 菜单）。面板是 `ui/CastPickerInline`，直接画在播放页窗口里；
-内容 `CastPickerBody` 和脚本悬浮播放器用的 `CastPickerDialog` 共用，状态在 `NativeCast.pickerUi`。
-**不能用 `CastPickerDialog`**：miuix 的玻璃弹窗要挂在 Scaffold 的弹窗宿主里，播放页没有，点了什么都不显示。
+入口：悬浮卡片下方的快捷菜单「投屏」（全屏 / 画中画里用 ⋯ 菜单）。面板是抽象层底部弹窗 `AppBottomSheet`，内容 `CastPickerBody` 和脚本悬浮播放器用的 `CastPickerDialog` 共用，状态在 `NativeCast.pickerUi`。
+抽象层的弹窗要挂在 miuix `Scaffold` 的弹窗层上，而播放页平时是只有卡片高的窗口、没有 Scaffold：
+点投屏时 `castSheetHost = true` → 窗口撑满（背景透明）并挂上透明 Scaffold 当宿主 → 弹窗滑出；
+收起动画结束（`onDismissFinished`）再还原成卡片窗口。直接用 `CastPickerDialog` 在播放页里点了什么都不显示。
 选项：
 
 - **DLNA 设备**：`MediaHost.discoverDevices`（SSDP，绑 Wi-Fi 网络直连）搜索 → 选中后本地暂停，电视从当前进度 `setUriAndPlay`；
@@ -125,7 +126,9 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 
 ## 快捷菜单与截屏
 
-悬浮卡片（非全屏 / 非画中画）下方、标题上方有一排快捷菜单（`NativePlayerActivity.QuickActions`）：投屏 / 下载 / 截屏 / 倍速 / 复制链接。
+悬浮卡片（非全屏 / 非画中画）下方、标题上方有一排快捷菜单（`NativePlayerActivity.QuickActions`）：投屏 / 下载 / 截屏 / 倍速 / 清晰度。
+设置 → 媒体嗅探与播放 → 快捷菜单 里总开关和各按钮开关（`PlayerPrefs.quickItems`，开页时读一次）。
+- 清晰度：点开后换成「自动 + `MafariPlayer.qualities`」，只有一档时灰掉。
 - 倍速：点开后这一排换成倍速选项（`PlayerPrefs.SPEEDS`），选完恢复；按钮上显示当前倍速。
 - 截屏：`MafariPlayer.captureFrame` 从当前接着视频输出的 View 取帧——TextureView 用 `getBitmap(w, h)`，SurfaceView 用 `PixelCopy`；
   分辨率取视频原始大小（长边最多 3840）。保存走 MediaStore（图片/Mafari，minSdk 33 免存储权限）。

@@ -50,8 +50,8 @@ import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 「投屏到」面板：脚本悬浮播放器的「投屏」按钮（状态在 [dev.dsh.miuixbrowser.script.MediaHost.pickerUi]）和
- * 原生播放页菜单里的「投屏」（状态在 NativeCast.pickerUi）共用。
+ * 「投屏到」面板：脚本悬浮播放器的「投屏」按钮（状态在 [dev.dsh.miuixbrowser.script.MediaHost.pickerUi]）用这个弹窗；
+ * 原生播放页（状态在 NativeCast.pickerUi）用抽象层底部弹窗 AppBottomSheet 装同一份 [CastPickerBody]。
  * 状态由 [CastPickerUi] 提供；对话框与按钮走材质抽象层（AppGlassDialog / AppDialogButton），
  * 随「高级材质」三选一变化，和其它应用内弹窗一致。
  */
@@ -154,54 +154,6 @@ internal fun CastPickerBody(ui: CastPickerUi) {
                 )
             }
         }
-}
-
-/**
- * 播放页用的内嵌版「投屏到」面板：直接画在播放页窗口里（压暗背景 + 居中圆角面板），不依赖 miuix 弹窗层。
- * miuix 的玻璃弹窗要挂在 Scaffold 的弹窗宿主里，播放页没有这一层，用 [CastPickerDialog] 点了投屏会什么都不显示。
- */
-@Composable
-internal fun CastPickerInline(ui: CastPickerUi, modifier: Modifier = Modifier) {
-    if (!ui.show) return
-    val noRipple = remember { MutableInteractionSource() }
-    Box(
-        modifier = modifier
-            .background(Color(0x99000000))
-            .clickable(interactionSource = noRipple, indication = null) { ui.cancel() },
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(24.dp)
-                .widthIn(max = 420.dp)
-                .fillMaxWidth()
-                .squircleClip(28.dp)
-                .background(MiuixTheme.colorScheme.surface)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { /* 挡住点击，不让它落到背景的取消 */ }
-                .padding(20.dp),
-        ) {
-            Text(
-                text = tr("投屏到"),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MiuixTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(start = 8.dp, bottom = 10.dp),
-            )
-            CastPickerBody(ui)
-            Box(
-                modifier = Modifier
-                    .padding(top = 12.dp)
-                    .fillMaxWidth()
-                    .squircleClip(16.dp)
-                    .background(MiuixTheme.colorScheme.surfaceContainerHigh)
-                    .clickable { ui.cancel() }
-                    .padding(vertical = 13.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(text = tr("取消"), fontSize = 16.sp, fontWeight = FontWeight.Medium, color = MiuixTheme.colorScheme.onSurface)
-            }
-        }
-    }
 }
 
 @Composable

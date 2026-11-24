@@ -202,6 +202,18 @@ object AppIcons {
         )
     }
 
+    /** 清晰度：圆角矩形里一个 HD。 */
+    val Quality: ImageVector by lazy {
+        stroked(
+            "Quality",
+            "M4,6H20A1,1 0 0 1 21,7V17A1,1 0 0 1 20,18H4A1,1 0 0 1 3,17V7A1,1 0 0 1 4,6Z",
+            "M7,10V14",
+            "M7,12H10",
+            "M10,10V14",
+            "M13,10H14.5A1.5,1.5 0 0 1 16,11.5V12.5A1.5,1.5 0 0 1 14.5,14H13Z",
+        )
+    }
+
     /** 倍速：仪表盘半圆 + 指针。 */
     val Speed: ImageVector by lazy {
         stroked(

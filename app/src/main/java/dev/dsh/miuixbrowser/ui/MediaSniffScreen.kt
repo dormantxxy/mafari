@@ -38,6 +38,7 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
  *  - 总开关：一键停用嗅探、原生悬浮播放、自动画中画、脚本宿主能力和 M3U8 媒体下载器脚本；
  *  - 嗅探媒体播放 / 退出自动画中画 / 自动悬浮播放（嗅探到视频直接用原生悬浮播放器打开）；
  *  - 播放器：渲染方式（TextureView / SurfaceView）、默认倍速、长按倍速、后台播放；
+ *  - 快捷菜单：悬浮播放器下方那排按钮的总开关和各按钮开关；
  *  - 下载：HLS 转 MP4（原来在下载页里）。
  * 「网页增强」（WebView）关闭时本页功能同样不运行，详见 [dev.dsh.miuixbrowser.sniff.MediaFeatures]。
  *
@@ -182,6 +183,33 @@ fun MediaSniffScreen(
                             checked = settings.playerBgPlay,
                             onCheckedChange = { settings.updatePlayerBgPlay(it) },
                         )
+                    }
+
+                    SmallTitle(text = tr("快捷菜单"))
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        insideMargin = PaddingValues(0.dp),
+                    ) {
+                        AppSwitchPreference(
+                            title = tr("快捷菜单"),
+                            summary = tr("悬浮播放器卡片下方的一排快捷按钮（全屏 / 画中画里不显示）"),
+                            checked = settings.playerQuickMenu,
+                            onCheckedChange = { settings.updatePlayerQuickMenu(it) },
+                        )
+                        listOf(
+                            "cast" to tr("投屏"),
+                            "download" to tr("下载"),
+                            "shot" to tr("截屏"),
+                            "speed" to tr("倍速"),
+                            "quality" to tr("清晰度"),
+                        ).forEach { (id, label) ->
+                            AppSwitchPreference(
+                                title = label,
+                                checked = settings.playerQuickItems[id] != false,
+                                onCheckedChange = { settings.updatePlayerQuickItem(id, it) },
+                                enabled = settings.playerQuickMenu,
+                            )
+                        }
                     }
 
                     SmallTitle(text = tr("下载"))

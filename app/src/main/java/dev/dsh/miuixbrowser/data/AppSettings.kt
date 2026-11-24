@@ -1001,6 +1001,25 @@ class AppSettings(context: Context) {
         prefs.edit().putFloat(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_LONG_PRESS, playerLongPressSpeed).apply()
     }
 
+    /** 快捷菜单：悬浮播放器卡片下方的一排按钮（投屏 / 下载 / 截屏 / 倍速 / 清晰度）总开关 */
+    var playerQuickMenu by mutableStateOf(prefs.getBoolean(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_QUICK_MENU, true))
+        private set
+
+    fun updatePlayerQuickMenu(on: Boolean) {
+        playerQuickMenu = on
+        prefs.edit().putBoolean(dev.dsh.miuixbrowser.player.PlayerPrefs.KEY_QUICK_MENU, on).apply()
+    }
+
+    /** 快捷菜单里每个按钮各自的开关（id 见 PlayerPrefs.QUICK_IDS） */
+    val playerQuickItems = androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply {
+        dev.dsh.miuixbrowser.player.PlayerPrefs.QUICK_IDS.forEach { put(it, prefs.getBoolean(dev.dsh.miuixbrowser.player.PlayerPrefs.quickKey(it), true)) }
+    }
+
+    fun updatePlayerQuickItem(id: String, on: Boolean) {
+        playerQuickItems[id] = on
+        prefs.edit().putBoolean(dev.dsh.miuixbrowser.player.PlayerPrefs.quickKey(id), on).apply()
+    }
+
     /** 后台播放：切到后台 / 锁屏继续播放（前台服务 + 媒体通知）；关闭后离开界面就暂停 */
     var playerBgPlay by mutableStateOf(dev.dsh.miuixbrowser.player.PlayerPrefs.bgPlay(context))
         private set

@@ -2247,3 +2247,4 @@ TextureView 支持玻璃模糊；SurfaceView 更省电、延迟更低，但没�
 截屏失败：当前没有可截取的画面（还没出画面，或是受保护的内容）	Screenshot failed: there is no frame to capture (no picture yet, or the content is protected)
 截图已保存到相册（Mafari）	Screenshot saved to your gallery (Mafari)
 截图保存失败	Couldn't save the screenshot
+悬浮播放器卡片下方的一排快捷按钮（全屏 / 画中画里不显示）	The row of quick buttons under the floating player card (not shown in full screen or picture-in-picture)

@@ -59,6 +59,8 @@ internal class BrowserUiState {
     var geckoExtSheetShow by mutableStateOf(false)
     var webViewExtSheetShow by mutableStateOf(false)
     var requestSheetShow by mutableStateOf(false)
+    // 嗅探到网页视频时的提示（见 SniffDialog）
+    var sniffDialogShow by mutableStateOf(false)
     var scriptMenuItems by mutableStateOf<List<ScriptMenuCommand>>(emptyList())
     var runningScripts by mutableStateOf<List<RunningScript>>(emptyList())
     // 脚本菜单副标题里的运行环境（隔离世界 / 页面内）

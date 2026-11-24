@@ -1,0 +1,895 @@
+diff -ruN a/CHANGELOG.md b/CHANGELOG.md
+--- a/CHANGELOG.md	2026-11-24 03:15:10.471834292 +0000
++++ b/CHANGELOG.md	2026-11-24 03:15:10.482518149 +0000
+@@ -1,5 +1,6 @@
+ # Changelog
+ ## [2.1.84-canary]
++- 新增：原生播放器阶段四「嗅探网页视频」——网页里出现 m3u8 / mp4 等视频时弹出「发现视频」提示，点一条用原生播放器打开（带当前页的 Referer / UA / Cookie，其余地址可作为视频源切换）。WebView：`shouldInterceptRequest` 按地址判定 + 精简页面脚本补响应头 / `<video>` 地址；Gecko：内置扩展 `webRequest.onHeadersReceived` 上报。设置 → 高级 →「嗅探网页视频」可关。详见 docs/NATIVE_PLAYER.md。
+ - 新增：原生悬浮播放器补齐阶段三功能：
+   - 画中画：播放页右下角 PiP 按钮进入；播放中按 Home / 手势返回桌面自动进入；小窗操作栏 后退 10 秒 / 播放·暂停 / 快进 10 秒；点小窗 ✕ 结束播放。
+   - 后台播放：切到后台 / 锁屏继续播放（前台服务 + 媒体通知，通知栏 / 锁屏可暂停、快进退、关闭）；菜单「后台播放」可关（关闭后离开界面就暂停）。
+diff -ruN a/app/src/gecko/assets/mafari-gm-ext/background.js b/app/src/gecko/assets/mafari-gm-ext/background.js
+--- a/app/src/gecko/assets/mafari-gm-ext/background.js	2026-11-24 03:15:10.460775652 +0000
++++ b/app/src/gecko/assets/mafari-gm-ext/background.js	2026-11-24 03:15:10.473869716 +0000
+@@ -47,6 +47,8 @@
+     broadcastVal(m);
+   } else if (m.t === 'netRules') {
+     netSetRules(m);
++  } else if (m.t === 'sniffRules') {
++    sniffSetRules(m);
+   }
+ }
+ 
+@@ -641,3 +643,62 @@
+ }
+ 
+ connect();
++
++// ------------------------------------------------------------------ 视频嗅探
++// 看响应头：地址带视频后缀，或 Content-Type 是 HLS / video/*，就把 {top, url, ct, len} 批量上报（300ms 一批）。
++// 只读不改（非阻塞监听），关闭「嗅探网页视频」时整个监听卸掉，对页面加载零开销。
++// 分片（video/mp2t、.ts / .m4s）这里先过滤一遍，真正的判定在原生 MediaSniff.classify。
++const sniff = { on: false, pending: new Map(), timer: null };
++const SNIFF_EXT = /\.(m3u8?|mp4|m4v|mov|webm|mkv|flv)$/i;
++const SNIFF_CT = /mpegurl|^video\//i;
++const SNIFF_SEG = /^video\/(mp2t|mpeg2t|iso\.segment|x-mpegts)/i;
++const SNIFF_FILTER = { urls: ['http://*/*', 'https://*/*'], types: ['media', 'xmlhttprequest', 'other', 'object'] };
++const SNIFF_MAX_PENDING = 60;
++
++function sniffHeader(d, name) {
++  const hs = d.responseHeaders || [];
++  for (let i = 0; i < hs.length; i++) if (String(hs[i].name).toLowerCase() === name) return String(hs[i].value || '');
++  return '';
++}
++
++function sniffFlush() {
++  sniff.timer = null;
++  const items = Array.from(sniff.pending.values());
++  sniff.pending.clear();
++  if (items.length) post({ t: 'sniff', items });
++}
++
++function sniffOnHeaders(d) {
++  if (d.tabId < 0 || d.type === 'main_frame') return undefined;
++  if (d.statusCode && d.statusCode >= 400) return undefined;
++  let path;
++  try { path = new URL(d.url).pathname; } catch (e) { return undefined; }
++  const ct = sniffHeader(d, 'content-type').split(';')[0].trim().toLowerCase();
++  if (SNIFF_SEG.test(ct)) return undefined;
++  if (!SNIFF_EXT.test(path) && !SNIFF_CT.test(ct)) return undefined;
++  let top = netTopOf(d);
++  if (!/^https?:/i.test(top)) return undefined;
++  let len = parseInt(sniffHeader(d, 'content-length'), 10);
++  const total = /\/(\d+)\s*$/.exec(sniffHeader(d, 'content-range'));
++  if (total) len = parseInt(total[1], 10); // 206 分段响应：以总长度为准
++  if (!(len >= 0)) len = -1;
++  if (sniff.pending.size >= SNIFF_MAX_PENDING && !sniff.pending.has(d.url)) return undefined;
++  sniff.pending.set(d.url, { top, url: d.url, ct, len });
++  if (!sniff.timer) sniff.timer = setTimeout(sniffFlush, 300);
++  return undefined;
++}
++
++function sniffSetRules(m) {
++  const on = !!m.on;
++  try { browser.webRequest.onHeadersReceived.removeListener(sniffOnHeaders); } catch (e) {}
++  sniff.on = false;
++  if (!on) {
++    sniff.pending.clear();
++    if (sniff.timer) { clearTimeout(sniff.timer); sniff.timer = null; }
++    return;
++  }
++  try {
++    browser.webRequest.onHeadersReceived.addListener(sniffOnHeaders, SNIFF_FILTER, ['responseHeaders']);
++    sniff.on = true;
++  } catch (e) { post({ t: 'error', where: 'sniffApply', msg: String(e) }); }
++}
+diff -ruN a/app/src/gecko/assets/mafari-gm-ext/manifest.json b/app/src/gecko/assets/mafari-gm-ext/manifest.json
+--- a/app/src/gecko/assets/mafari-gm-ext/manifest.json	2026-11-24 03:15:10.460758251 +0000
++++ b/app/src/gecko/assets/mafari-gm-ext/manifest.json	2026-11-24 03:15:10.473851260 +0000
+@@ -1,7 +1,7 @@
+ {
+   "manifest_version": 2,
+   "name": "Mafari GM",
+-  "version": "0.4.3",
++  "version": "0.4.4",
+   "description": "Mafari 油猴运行时的 Gecko 适配层（与 WebView 共用同一份 mafari_gm_runtime.js）",
+   "browser_specific_settings": { "gecko": { "id": "gm@mafari.dev" } },
+   "permissions": [
+diff -ruN a/app/src/main/assets/i18n/en.tsv b/app/src/main/assets/i18n/en.tsv
+--- a/app/src/main/assets/i18n/en.tsv	2026-11-24 03:15:10.468168070 +0000
++++ b/app/src/main/assets/i18n/en.tsv	2026-11-24 03:15:10.481098642 +0000
+@@ -2212,3 +2212,8 @@
+ 后台播放：已关闭（切到后台会暂停）	Background playback: off (pauses when you leave)
+ 视频	Video
+ 正在播放	Playing
++嗅探网页视频	Detect web videos
++网页里出现视频（m3u8 / mp4 等）时弹出提示，可用原生播放器打开；刷新页面后生效	Show a prompt when a page plays a video (m3u8 / mp4, etc.) so you can open it in the native player; takes effect after a page refresh
++发现视频	Video found
++用原生播放器打开，支持画中画和后台播放	Open in the native player, with picture-in-picture and background playback
++忽略	Dismiss
+diff -ruN a/app/src/main/assets/mafari_sniff.js b/app/src/main/assets/mafari_sniff.js
+--- a/app/src/main/assets/mafari_sniff.js	1970-01-01 00:00:00.000000000 +0000
++++ b/app/src/main/assets/mafari_sniff.js	2026-11-24 03:15:10.481153148 +0000
+@@ -0,0 +1,68 @@
++/*
++ * 视频嗅探的页面侧补充（只在顶层框架运行；WebView 的 shouldInterceptRequest 已经能按地址后缀抓到大多数视频，
++ * 这里补三种它看不到的：没有后缀的地址（靠响应头 Content-Type 判断）、<video> 实际在播的地址、fetch / XHR 拿到的 HLS）。
++ * 只读不改：不改请求、不改响应，不读响应内容；报告走单向消息桥 MafariSniff（原生只受理主框架 http(s) 来源）。
++ */
++(function () {
++  'use strict';
++  try {
++    if (window.top !== window || !window.MafariSniff || typeof window.MafariSniff.postMessage !== 'function') return;
++    var bridge = window.MafariSniff;
++    var seen = Object.create(null);
++    var count = 0;
++    var CT = /mpegurl|^video\//i;
++    var SEG = /^video\/(mp2t|mpeg2t|iso\.segment|x-mpegts)/i;
++
++    function report(u, ct, len, el) {
++      try {
++        if (typeof u !== 'string' || u.length > 3500 || !/^https?:/i.test(u) || seen[u] || count >= 40) return;
++        seen[u] = 1;
++        count++;
++        bridge.postMessage(JSON.stringify({ u: u, ct: ct || '', len: len >= 0 ? len : -1, el: !!el }));
++      } catch (e) {}
++    }
++
++    function check(u, ctRaw, lenRaw) {
++      var ct = String(ctRaw || '').split(';')[0].trim().toLowerCase();
++      if (!ct || SEG.test(ct) || !CT.test(ct)) return;
++      var len = parseInt(lenRaw, 10);
++      report(u, ct, isNaN(len) ? -1 : len, false);
++    }
++
++    // <video> 实际在播的地址（blob: 是 MSE，没有可直接播的地址，靠请求拦截抓它背后的 m3u8 / 分片清单）
++    function onMedia(e) {
++      try {
++        var t = e.target;
++        if (!t || t.tagName !== 'VIDEO') return;
++        var u = t.currentSrc || t.src;
++        if (u && !/^(blob|data):/i.test(u)) report(u, '', -1, true);
++      } catch (err) {}
++    }
++    document.addEventListener('loadstart', onMedia, true);
++    document.addEventListener('play', onMedia, true);
++
++    var xo = XMLHttpRequest.prototype.open;
++    XMLHttpRequest.prototype.open = function () {
++      try {
++        var x = this;
++        x.addEventListener('readystatechange', function () {
++          if (x.readyState === 2) check(x.responseURL, x.getResponseHeader('content-type'), x.getResponseHeader('content-length'));
++        });
++      } catch (e) {}
++      return xo.apply(this, arguments);
++    };
++
++    var of = window.fetch;
++    if (typeof of === 'function') {
++      window.fetch = function () {
++        var p = of.apply(this, arguments);
++        try {
++          p.then(function (r) {
++            try { check(r.url, r.headers.get('content-type'), r.headers.get('content-length')); } catch (e) {}
++          }, function () {});
++        } catch (e) {}
++        return p;
++      };
++    }
++  } catch (e) {}
++})();
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/browser/BrowserTab.kt b/app/src/main/java/dev/dsh/miuixbrowser/browser/BrowserTab.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/browser/BrowserTab.kt	2026-11-24 03:15:10.465587388 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/browser/BrowserTab.kt	2026-11-24 03:15:10.476510082 +0000
+@@ -326,6 +326,13 @@
+     /** 本页被去广告拦掉的请求数（WebView 内核）：换页清零；只在菜单打开时读一次，不轮询 */
+     val pageAdBlocked = java.util.concurrent.atomic.AtomicInteger(0)
+ 
++    /** WebView 标签自己的嗅探结果；Gecko 标签的在 [dev.dsh.miuixbrowser.engine.gecko.GeckoSniff]（按页面地址） */
++    internal val webSniffs = dev.dsh.miuixbrowser.sniff.SniffList()
++
++    /** 当前页嗅探到的视频（界面读它：Compose 状态，有新的会重组） */
++    val sniffs: dev.dsh.miuixbrowser.sniff.SniffList
++        get() = if (isGecko) dev.dsh.miuixbrowser.engine.gecko.GeckoSniff.listFor(url) else webSniffs
++
+     /** 只有 WebView 内核的标签才有 WebView；Gecko 标签不创建（省内存） */
+     internal val webViewOrNull: WebView? = if (engineKind == EngineKind.WEBVIEW) {
+         dev.dsh.miuixbrowser.engine.EngineSupport.markWebViewUsed(appContext)
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/browser/TabSniff.kt b/app/src/main/java/dev/dsh/miuixbrowser/browser/TabSniff.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/browser/TabSniff.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/browser/TabSniff.kt	2026-11-24 03:15:10.476564086 +0000
+@@ -0,0 +1,97 @@
++package dev.dsh.miuixbrowser.browser
++
++import android.app.Activity
++import android.content.Context
++import android.content.Intent
++import android.os.Handler
++import android.os.Looper
++import android.webkit.WebResourceRequest
++import androidx.webkit.WebViewCompat
++import androidx.webkit.WebViewFeature
++import dev.dsh.miuixbrowser.engine.gecko.GeckoGm
++import dev.dsh.miuixbrowser.engine.webview.IncognitoProfile
++import dev.dsh.miuixbrowser.engine.webview.OneWayBridge
++import dev.dsh.miuixbrowser.player.PlayerRequest
++import dev.dsh.miuixbrowser.player.PlayerSource
++import dev.dsh.miuixbrowser.sniff.MediaSniff
++import dev.dsh.miuixbrowser.sniff.SniffedMedia
++import dev.dsh.miuixbrowser.util.Diag
++import org.json.JSONObject
++
++/*
++ * 视频嗅探（NATIVE_PLAYER.md 阶段四）：
++ *  - WebView：shouldInterceptRequest 按地址判定（热路径，只做字符串判断）+ 页面脚本 mafari_sniff.js 补响应头 / <video> 地址；
++ *  - Gecko：内置扩展的 webRequest.onHeadersReceived 上报，见 engine/gecko/GeckoSniff；
++ *  - 结果都落在 [BrowserTab.sniffs]，界面弹提示、点「播放」走 [playSniffed]。
++ */
++
++/** shouldInterceptRequest（IO 线程）里调用：地址像视频就记下来。主框架请求不看（页面本身不是视频文件）。 */
++internal fun BrowserTab.sniffRequest(request: WebResourceRequest) {
++    val u = request.url.toString()
++    val type = MediaSniff.classify(u) ?: return
++    webSniffs.offer(SniffedMedia(u, type, MediaSniff.hostOf(u)))
++}
++
++/** 安装页面脚本的消息桥并注册文档开始脚本。不支持 WebMessageListener / 文档开始脚本时只剩请求拦截这条路，不影响基本嗅探。 */
++internal fun BrowserTab.installMediaSniff() {
++    runCatching {
++        if (!OneWayBridge.install(webView, "MafariSniff", 4200) { onSniffMessage(it) }) return
++        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
++        val js = InjectAssets.read(appContext, "mafari_sniff.js") ?: error("mafari_sniff.js missing")
++        WebViewCompat.addDocumentStartJavaScript(webView, js, setOf("*"))
++    }.onFailure { Diag.log("media sniff install failed: ${it.message}") }
++}
++
++/** 页面脚本的报告（主线程；来源 / 主框架 / 长度已在 [OneWayBridge] 校验）：{u, ct, len, el} */
++internal fun BrowserTab.onSniffMessage(json: String) {
++    if (!MediaSniff.enabled) return
++    val o = runCatching { JSONObject(json) }.getOrNull() ?: return
++    val u = o.optString("u")
++    val len = o.optLong("len", -1)
++    val type = MediaSniff.classify(u, o.optString("ct").ifEmpty { null }, len, o.optBoolean("el")) ?: return
++    webSniffs.offer(SniffedMedia(u, type, MediaSniff.hostOf(u), len))
++}
++
++/**
++ * 用原生播放器打开嗅探到的视频：请求头带上当前页的 Referer / UA / Cookie（防盗链源要靠它），
++ * 其余嗅探到的地址作为可切换的源一起交给播放页。Gecko 取 Cookie 要一来一回，放到后台线程。
++ */
++internal fun BrowserTab.playSniffed(context: Context, selected: SniffedMedia, all: List<SniffedMedia>) {
++    val pageUrl = url
++    val pageTitle = title
++    val gecko = isGecko
++    val others = all.filter { it.url != selected.url }.map {
++        PlayerSource(it.url, label = "${it.type.uppercase()} · ${MediaSniff.displayName(it)}", type = hintOf(it))
++    }
++    fun launch(ua: String, cookie: String) {
++        val req = PlayerRequest(
++            url = selected.url,
++            title = pageTitle,
++            referer = pageUrl,
++            ua = ua,
++            cookie = cookie,
++            type = hintOf(selected),
++            sources = others,
++            gecko = gecko,
++        )
++        val intent = req.toIntent(context).apply { if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
++        runCatching { context.startActivity(intent) }.onFailure { Diag.log("sniff play failed: ${it.message}") }
++    }
++    if (gecko) {
++        val main = Handler(Looper.getMainLooper())
++        Thread({
++            val cookie = runCatching { GeckoGm.cookieHeader(selected.url) }.getOrNull().orEmpty()
++            val ua = GeckoGm.userAgent.orEmpty()
++            main.post { launch(ua, cookie) }
++        }, "sniff-play").start()
++    } else {
++        val cookie = runCatching {
++            IncognitoProfile.cookieManagerFor(webView).getCookie(selected.url)
++        }.getOrNull().orEmpty()
++        val ua = runCatching { webView.settings.userAgentString }.getOrNull().orEmpty()
++        launch(ua, cookie)
++    }
++}
++
++/** 播放器的类型提示：只有 HLS 明确声明，其余让播放器按地址 / 响应判断 */
++private fun hintOf(m: SniffedMedia): String = if (m.type == "hls") "hls" else ""
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/browser/TabWebViewSetup.kt b/app/src/main/java/dev/dsh/miuixbrowser/browser/TabWebViewSetup.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/browser/TabWebViewSetup.kt	2026-11-24 03:15:10.465396744 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/browser/TabWebViewSetup.kt	2026-11-24 03:15:10.476335048 +0000
+@@ -98,6 +98,7 @@
+     if (!dev.dsh.miuixbrowser.engine.webview.OneWayBridge.install(webView, "MafariTr", TabTranslate.MAX_WEB_MESSAGE_CHARS) { translate.onWebMessage(it) }) {
+         runCatching { webView.addJavascriptInterface(translate.webBridge(), "MafariTr") }
+     }
++    installMediaSniff()
+     // 仅降级路径：WebView 不支持 DOCUMENT_START_SCRIPT 时才安装无参的指纹桥；主路径不向页面暴露任何指纹接口
+     val fp = fpInjector ?: return
+     if (!fp.docStartSupported) {
+@@ -253,6 +254,7 @@
+                 lastVisitedHistoryUrl = pageUrl
+             }
+             requestLog.clear() // 换页：本页请求重新统计
++            webSniffs.clear() // 换页：本页嗅探到的视频重新统计
+             pageAdBlocked.set(0)
+             if (!parked) pageUrl?.let { url = it }
+             pageHost = runCatching { Uri.parse(pageUrl).host }.getOrNull().orEmpty()
+@@ -356,6 +358,7 @@
+             if (request.url.scheme.equals("file", ignoreCase = true) && !LocalHtml.isOpenedFile(appContext, request.url)) {
+                 return WebResourceResponse("text/plain", "utf-8", 403, "Forbidden", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+             }
++            if (dev.dsh.miuixbrowser.sniff.MediaSniff.enabled && !request.isForMainFrame) sniffRequest(request)
+             val extensionBlocking = if (!incognito) appContext.appContainer.webExtensionsOrNull?.onWebRequestBefore(id, request) else null
+             return extensionBlocking ?: webExtensionResource(request) ?:
+             if (incognito && !adblockInIncognito) null
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/data/AppSettings.kt b/app/src/main/java/dev/dsh/miuixbrowser/data/AppSettings.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/data/AppSettings.kt	2026-11-24 03:15:10.466457038 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/data/AppSettings.kt	2026-11-24 03:15:10.477378070 +0000
+@@ -920,6 +920,18 @@
+         prefs.edit().putBoolean(KEY_DNT, enabled).apply()
+     }
+ 
++    /** 嗅探网页视频：发现 m3u8 / mp4 等地址时弹出提示，用原生播放器打开（见 sniff/MediaSniff） */
++    var mediaSniff by mutableStateOf(prefs.getBoolean(KEY_SNIFF, true).also { dev.dsh.miuixbrowser.sniff.MediaSniff.enabled = it })
++        private set
++
++    fun updateMediaSniff(enabled: Boolean) {
++        mediaSniff = enabled
++        dev.dsh.miuixbrowser.sniff.MediaSniff.enabled = enabled
++        prefs.edit().putBoolean(KEY_SNIFF, enabled).apply()
++        // Gecko：后台页按开关装 / 卸 onHeadersReceived 监听
++        runCatching { dev.dsh.miuixbrowser.engine.gecko.GeckoGm.sendSniffRules() }
++    }
++
+     /** 禁用 WebRTC（防 IP 泄露） */
+     var webrtcDisabled by mutableStateOf(prefs.getBoolean(KEY_WEBRTC, false))
+         private set
+@@ -1152,6 +1164,7 @@
+         const val KEY_ADBLOCK_INCOGNITO = "adblock_in_incognito"
+         const val KEY_ADBLOCK_WEBAPP = "adblock_in_webapp"
+         const val KEY_DNT = "send_dnt"
++        const val KEY_SNIFF = "media_sniff"
+         const val KEY_WEBRTC = "webrtc_disabled"
+         const val KEY_3P_COOKIE = "third_party_cookie"
+         const val KEY_COOKIE_MODE = "cookie_mode"
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoEngine.kt b/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoEngine.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoEngine.kt	2026-11-24 03:15:10.465889491 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoEngine.kt	2026-11-24 03:15:10.476811964 +0000
+@@ -632,6 +632,7 @@
+         session.progressDelegate = object : GeckoSession.ProgressDelegate {
+             override fun onPageStart(session: GeckoSession, url: String) {
+                 GeckoNetLog.reset(url) // 本页请求重新统计
++                GeckoSniff.reset(url) // 本页嗅探到的视频重新统计
+                 tab.geckoPageStart(url)
+             }
+ 
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoGm.kt b/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoGm.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoGm.kt	2026-11-24 03:15:10.465815414 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoGm.kt	2026-11-24 03:15:10.476753988 +0000
+@@ -337,8 +337,9 @@
+                 override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                     val o = message as? JSONObject ?: return
+                     when (o.optString("t")) {
+-                        "hello" -> { resetSent(); push(); importPendingCookies(); sendNetRules() }
++                        "hello" -> { resetSent(); push(); importPendingCookies(); sendNetRules(); sendSniffRules() }
+                         "net" -> GeckoNetLog.ingest(o)
++                        "sniff" -> GeckoSniff.ingest(o)
+                         "synced" -> {
+                             val r = o.optInt("rev", -1)
+                             // 后台确认注册成功的 sig 集合：之后源码没变的脚本不再重复发送 code
+@@ -521,6 +522,16 @@
+         }
+     }
+ 
++    /** 「嗅探网页视频」开关推给后台页（hello 时、开关变化时）：关闭时后台页卸掉 onHeadersReceived 监听 */
++    fun sendSniffRules() {
++        val p = bgPort ?: return
++        main.post {
++            runCatching {
++                p.postMessage(JSONObject().put("t", "sniffRules").put("on", dev.dsh.miuixbrowser.sniff.MediaSniff.enabled))
++            }.onFailure { Diag.log("gm: sniffRules push failed $it") }
++        }
++    }
++
+     private fun broadcast(id: String, k: String, raw: String?, src: String) {
+         val p = bgPort ?: return
+         main.post {
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoSniff.kt b/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoSniff.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoSniff.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/engine/gecko/GeckoSniff.kt	2026-11-24 03:15:10.476872253 +0000
+@@ -0,0 +1,46 @@
++package dev.dsh.miuixbrowser.engine.gecko
++
++import dev.dsh.miuixbrowser.sniff.MediaSniff
++import dev.dsh.miuixbrowser.sniff.SniffList
++import dev.dsh.miuixbrowser.sniff.SniffedMedia
++import org.json.JSONObject
++
++/**
++ * Gecko 内核的视频嗅探数据。内置扩展（mafari-gm-ext 后台页）用 webRequest.onHeadersReceived 看响应头，
++ * 把疑似视频的请求批量上报：`{t:"sniff", items:[{top, url, ct, len}]}`，这里按页面顶层 URL（去 #片段）存成 [SniffList]。
++ *
++ * 和 [GeckoNetLog] 一样按页面地址而不是标签对应（扩展的 tabId 与应用里的标签没有现成映射）；
++ * 代价是两个标签打开同一个地址时共用一份。只放内存，最近 [MAX_PAGES] 个页面。
++ */
++internal object GeckoSniff {
++
++    private const val MAX_PAGES = 24
++
++    private val pages = object : LinkedHashMap<String, SniffList>(32, 0.75f, true) {
++        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SniffList>?): Boolean = size > MAX_PAGES
++    }
++
++    private fun norm(url: String): String = url.substringBefore('#')
++
++    @Synchronized
++    fun listFor(url: String): SniffList = pages.getOrPut(norm(url)) { SniffList() }
++
++    /** 页面开始加载：本页嗅探结果重新统计 */
++    @Synchronized
++    fun reset(url: String) {
++        pages[norm(url)]?.clear()
++    }
++
++    fun ingest(o: JSONObject) {
++        if (!MediaSniff.enabled) return
++        val arr = o.optJSONArray("items") ?: return
++        for (i in 0 until arr.length()) {
++            val e = arr.optJSONObject(i) ?: continue
++            val top = e.optString("top")
++            val url = e.optString("url")
++            if (!top.startsWith("http", true)) continue
++            val type = MediaSniff.classify(url, e.optString("ct").ifEmpty { null }, e.optLong("len", -1)) ?: continue
++            listFor(top).offer(SniffedMedia(url, type, MediaSniff.hostOf(url), e.optLong("len", -1)))
++        }
++    }
++}
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/sniff/MediaSniff.kt b/app/src/main/java/dev/dsh/miuixbrowser/sniff/MediaSniff.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/sniff/MediaSniff.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/sniff/MediaSniff.kt	2026-11-24 03:15:10.480925395 +0000
+@@ -0,0 +1,83 @@
++package dev.dsh.miuixbrowser.sniff
++
++/** 嗅探到的一个视频地址。[type]：hls / mp4 / webm / mkv / flv。 */
++data class SniffedMedia(
++    val url: String,
++    val type: String,
++    val host: String,
++    /** 字节数，未知为 -1（Gecko 从响应头来，WebView 的请求拦截拿不到） */
++    val size: Long = -1,
++)
++
++/**
++ * 视频地址判定（纯函数，无 Android 依赖，有单测）。
++ *
++ * 只认「播放器能直接放的」：HLS 清单（.m3u8 / mpegurl）和整段文件（mp4 / webm / mkv / flv）。
++ * 分片（.ts / .m4s / video/mp2t）、DASH（原生内核没带 dash 模块）、音频、图片一律不要。
++ * 响应头可用时（Gecko 的 webRequest、页面脚本的 fetch / XHR）再用 Content-Type 补判没有后缀的地址。
++ */
++object MediaSniff {
++
++    /** 总开关（设置里「嗅探网页视频」）；WebView 的请求拦截在热路径上，直接读这个静态值 */
++    @Volatile var enabled: Boolean = true
++
++    const val MAX_ITEMS = 12
++    const val MAX_URL_CHARS = 4096
++
++    /** 已知长度小于它的整段文件多半是广告 / 预览 / 动图，不弹（HLS 清单本来就小，不受限） */
++    const val MIN_FILE_BYTES = 256L * 1024
++
++    private val HLS_CT = setOf(
++        "application/vnd.apple.mpegurl", "application/x-mpegurl", "application/mpegurl",
++        "audio/mpegurl", "audio/x-mpegurl",
++    )
++
++    /** video 类型里属于分片而不是整段视频的 */
++    private val SEGMENT_CT = setOf("video/mp2t", "video/mpeg2t", "video/iso.segment", "video/x-mpegts", "video/vnd.dlna.mpeg-tts")
++
++    private val FILE_EXTS = mapOf(
++        "mp4" to "mp4", "m4v" to "mp4", "mov" to "mp4",
++        "webm" to "webm", "mkv" to "mkv", "flv" to "flv",
++    )
++
++    private val CT_TYPES = mapOf(
++        "video/mp4" to "mp4", "video/x-m4v" to "mp4", "video/quicktime" to "mp4",
++        "video/webm" to "webm", "video/x-matroska" to "mkv", "video/x-flv" to "flv",
++    )
++
++    fun isHttp(url: String): Boolean =
++        url.length <= MAX_URL_CHARS && (url.startsWith("http://", true) || url.startsWith("https://", true))
++
++    /**
++     * 返回类型，不是视频返回 null。
++     * [contentType] 可带参数（`; charset=`）；[length] 未知传 -1；
++     * [fromMediaElement]：地址来自页面里 `<video>` 的 currentSrc，没有后缀也没有响应头时按 mp4 处理。
++     */
++    fun classify(url: String, contentType: String? = null, length: Long = -1, fromMediaElement: Boolean = false): String? {
++        if (!isHttp(url)) return null
++        val path = url.substringBefore('#').substringBefore('?').lowercase()
++        val ct = contentType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
++        if (ct in SEGMENT_CT) return null
++        val ext = path.substringAfterLast('/').substringAfterLast('.', "")
++        if (ext == "ts" || ext == "m4s") return null
++
++        if (ext == "m3u8" || ext == "m3u" || ct in HLS_CT) return "hls"
++
++        val type = FILE_EXTS[ext] ?: CT_TYPES[ct]
++            ?: if (ct.startsWith("video/") || (fromMediaElement && (ct.isEmpty() || ct == "application/octet-stream"))) "mp4" else null
++        if (type == null) return null
++        if (length in 0 until MIN_FILE_BYTES) return null
++        return type
++    }
++
++    fun hostOf(url: String): String {
++        val rest = url.substringAfter("://", "")
++        return rest.substringBefore('/').substringBefore('?').substringBefore('#').substringAfterLast('@').substringBefore(':').lowercase()
++    }
++
++    /** 列表里显示的名字：文件名（没有就用域名） */
++    fun displayName(m: SniffedMedia): String {
++        val name = m.url.substringBefore('#').substringBefore('?').substringAfterLast('/')
++        return name.takeIf { it.isNotBlank() && it.length <= 48 } ?: m.host
++    }
++}
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/sniff/SniffList.kt b/app/src/main/java/dev/dsh/miuixbrowser/sniff/SniffList.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/sniff/SniffList.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/sniff/SniffList.kt	2026-11-24 03:15:10.480915542 +0000
+@@ -0,0 +1,34 @@
++package dev.dsh.miuixbrowser.sniff
++
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.setValue
++
++/**
++ * 一个页面嗅探到的视频：去重、有上限，线程安全（WebView 在 IO 线程、Gecko 在主线程写，界面在主线程读）。
++ * [items] 是 Compose 状态，界面直接读；[promptedCount] 记录已经提示过的个数：只有出现新地址才再弹，
++ * 同一批地址不会重复打扰（关掉之后同页再发现新的源才会再弹）。
++ */
++class SniffList {
++    var items by mutableStateOf<List<SniffedMedia>>(emptyList())
++        private set
++
++    var promptedCount by mutableStateOf(0)
++
++    /** 新增返回 true；重复（同一地址，不含 #片段）或超过上限返回 false */
++    @Synchronized
++    fun offer(m: SniffedMedia): Boolean {
++        val key = m.url.substringBefore('#')
++        val cur = items
++        if (cur.size >= MediaSniff.MAX_ITEMS) return false
++        if (cur.any { it.url.substringBefore('#') == key }) return false
++        items = cur + m
++        return true
++    }
++
++    @Synchronized
++    fun clear() {
++        items = emptyList()
++        promptedCount = 0
++    }
++}
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/ui/BrowserDialogHost.kt b/app/src/main/java/dev/dsh/miuixbrowser/ui/BrowserDialogHost.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/ui/BrowserDialogHost.kt	2026-11-24 03:15:10.464014805 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/ui/BrowserDialogHost.kt	2026-11-24 03:15:10.474929546 +0000
+@@ -9,6 +9,7 @@
+ import dev.dsh.miuixbrowser.browser.AppRoute
+ import dev.dsh.miuixbrowser.browser.BrowserState
+ import dev.dsh.miuixbrowser.browser.BrowserTab
++import dev.dsh.miuixbrowser.browser.playSniffed
+ import dev.dsh.miuixbrowser.browser.DefaultBrowser
+ import dev.dsh.miuixbrowser.download.Downloader
+ import dev.dsh.miuixbrowser.data.AppSettings
+@@ -429,6 +430,31 @@
+             onDismiss = { requestSheetShow = false },
+         )
+ 
++        // 嗅探到网页视频（NATIVE_PLAYER.md 阶段四）：出现新地址弹一次提示，同批地址不重复打扰；点一条用原生播放器打开
++        val sniffList = tab.sniffs
++        val sniffItems = sniffList.items
++        androidx.compose.runtime.LaunchedEffect(sniffList, sniffItems.size, settings.mediaSniff) {
++            if (!settings.mediaSniff || sniffItems.size <= sniffList.promptedCount) return@LaunchedEffect
++            kotlinx.coroutines.delay(900) // 同一时刻到的其他源（多清晰度 / 多线路）一起列出来
++            val n = sniffList.items.size
++            if (n > sniffList.promptedCount) {
++                sniffList.promptedCount = n
++                sniffDialogShow = true
++            }
++        }
++        // 换标签 / 换页：旧提示收起
++        androidx.compose.runtime.LaunchedEffect(tab.id, tab.url) { sniffDialogShow = false }
++        SniffDialog(
++            show = sniffDialogShow,
++            items = sniffItems,
++            backdrop = if (glassAvailable) glassBackdrop else null,
++            onPlay = { m ->
++                sniffDialogShow = false
++                tab.playSniffed(context, m, sniffItems)
++            },
++            onDismiss = { sniffDialogShow = false },
++        )
++
+         val permPrompt = webPermPrompt
+         // 「记住此网站的选择」：只有 Gecko 的网站权限带 permKey，选了之后写进例外网站
+         var rememberChoice by remember(permPrompt) { mutableStateOf(false) }
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/ui/BrowserUiState.kt b/app/src/main/java/dev/dsh/miuixbrowser/ui/BrowserUiState.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/ui/BrowserUiState.kt	2026-11-24 03:15:10.464815141 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/ui/BrowserUiState.kt	2026-11-24 03:15:10.475752380 +0000
+@@ -59,6 +59,8 @@
+     var geckoExtSheetShow by mutableStateOf(false)
+     var webViewExtSheetShow by mutableStateOf(false)
+     var requestSheetShow by mutableStateOf(false)
++    // 嗅探到网页视频时的提示（见 SniffDialog）
++    var sniffDialogShow by mutableStateOf(false)
+     var scriptMenuItems by mutableStateOf<List<ScriptMenuCommand>>(emptyList())
+     var runningScripts by mutableStateOf<List<RunningScript>>(emptyList())
+     // 脚本菜单副标题里的运行环境（隔离世界 / 页面内）
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/ui/SettingsScreen.kt b/app/src/main/java/dev/dsh/miuixbrowser/ui/SettingsScreen.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/ui/SettingsScreen.kt	2026-11-24 03:15:10.464824451 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/ui/SettingsScreen.kt	2026-11-24 03:15:10.475762121 +0000
+@@ -477,6 +477,12 @@
+                             },
+                         )
+                     }
++                    AppSwitchPreference(
++                        title = tr("嗅探网页视频"),
++                        summary = tr("网页里出现视频（m3u8 / mp4 等）时弹出提示，可用原生播放器打开；刷新页面后生效"),
++                        checked = settings.mediaSniff,
++                        onCheckedChange = { settings.updateMediaSniff(it) },
++                    )
+                     // 内核切换只在带 Gecko 的版本里出现；无内核版只有系统 WebView
+                     if (EngineSupport.GECKO_BUNDLED) {
+                         AppDropdownPreference(
+diff -ruN a/app/src/main/java/dev/dsh/miuixbrowser/ui/SniffDialog.kt b/app/src/main/java/dev/dsh/miuixbrowser/ui/SniffDialog.kt
+--- a/app/src/main/java/dev/dsh/miuixbrowser/ui/SniffDialog.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/app/src/main/java/dev/dsh/miuixbrowser/ui/SniffDialog.kt	2026-11-24 03:15:10.476117220 +0000
+@@ -0,0 +1,120 @@
++package dev.dsh.miuixbrowser.ui
++
++import android.text.format.Formatter
++import androidx.compose.foundation.Image
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.heightIn
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.remember
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.ColorFilter
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.text.style.TextOverflow
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++import dev.dsh.miuixbrowser.i18n.tr
++import dev.dsh.miuixbrowser.sniff.MediaSniff
++import dev.dsh.miuixbrowser.sniff.SniffedMedia
++import top.yukonga.miuix.kmp.basic.Text
++import top.yukonga.miuix.kmp.blur.Backdrop
++import top.yukonga.miuix.kmp.squircle.squircleClip
++import top.yukonga.miuix.kmp.theme.MiuixTheme
++
++/**
++ * 嗅探到网页视频时的提示（NATIVE_PLAYER.md 阶段四）：列出本页发现的视频地址，点一条就用原生播放器打开，
++ * 其余地址作为可切换的源一起交给播放页。对话框走材质抽象层，和其它应用内弹窗一致。
++ *
++ * [items] 为空时（页面已换）自动收起；收起动画期间保留最后一次的内容，避免列表先消失。
++ */
++@Composable
++internal fun SniffDialog(
++    show: Boolean,
++    items: List<SniffedMedia>,
++    backdrop: Backdrop?,
++    onPlay: (SniffedMedia) -> Unit,
++    onDismiss: () -> Unit,
++) {
++    val keep = remember { arrayOf<List<SniffedMedia>>(emptyList()) }
++    if (items.isNotEmpty()) keep[0] = items
++    val shown = keep[0]
++    AppGlassDialog(
++        show = show && items.isNotEmpty(),
++        title = tr("发现视频"),
++        summary = tr("用原生播放器打开，支持画中画和后台播放"),
++        backdrop = backdrop,
++        onDismissRequest = onDismiss,
++    ) {
++        Column(modifier = Modifier.fillMaxWidth()) {
++            Column(
++                modifier = Modifier
++                    .fillMaxWidth()
++                    .heightIn(max = 300.dp)
++                    .verticalScroll(rememberScrollState()),
++            ) {
++                shown.forEach { m -> SniffRow(m, onClick = { onPlay(m) }) }
++            }
++            Row(
++                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
++                horizontalArrangement = Arrangement.spacedBy(12.dp),
++            ) {
++                AppDialogButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
++                    Text(text = tr("忽略"), style = MiuixTheme.textStyles.button)
++                }
++            }
++        }
++    }
++}
++
++@Composable
++private fun SniffRow(m: SniffedMedia, onClick: () -> Unit) {
++    val context = LocalContext.current
++    val detail = buildString {
++        append(m.type.uppercase())
++        append(" · ")
++        append(m.host)
++        if (m.size > 0) append(" · ").append(Formatter.formatFileSize(context, m.size))
++    }
++    Row(
++        modifier = Modifier
++            .fillMaxWidth()
++            .squircleClip(12.dp)
++            .clickable(onClick = onClick)
++            .padding(horizontal = 8.dp, vertical = 12.dp),
++        verticalAlignment = Alignment.CenterVertically,
++    ) {
++        Image(
++            imageVector = AppIcons.Tv,
++            contentDescription = null,
++            modifier = Modifier.size(22.dp),
++            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
++        )
++        Spacer(Modifier.width(12.dp))
++        Column(modifier = Modifier.weight(1f)) {
++            Text(
++                text = MediaSniff.displayName(m),
++                fontSize = 15.sp,
++                color = MiuixTheme.colorScheme.onSurface,
++                maxLines = 1,
++                overflow = TextOverflow.Ellipsis,
++            )
++            Text(
++                text = detail,
++                fontSize = 12.sp,
++                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
++                maxLines = 1,
++                overflow = TextOverflow.Ellipsis,
++            )
++        }
++    }
++}
+diff -ruN a/app/src/test/java/dev/dsh/miuixbrowser/sniff/MediaSniffTest.kt b/app/src/test/java/dev/dsh/miuixbrowser/sniff/MediaSniffTest.kt
+--- a/app/src/test/java/dev/dsh/miuixbrowser/sniff/MediaSniffTest.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/app/src/test/java/dev/dsh/miuixbrowser/sniff/MediaSniffTest.kt	2026-11-24 03:15:10.474563562 +0000
+@@ -0,0 +1,66 @@
++package dev.dsh.miuixbrowser.sniff
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Test
++
++/** 纯 JVM：嗅探的地址 / 响应头判定。 */
++class MediaSniffTest {
++
++    @Test fun hlsByExtension() {
++        assertEquals("hls", MediaSniff.classify("https://cdn.example.com/a/index.m3u8"))
++        assertEquals("hls", MediaSniff.classify("https://cdn.example.com/a/index.M3U8?token=abc&x=1.mp4"))
++    }
++
++    @Test fun hlsByContentTypeWithoutExtension() {
++        assertEquals("hls", MediaSniff.classify("https://x.com/api/play?id=1", "application/vnd.apple.mpegurl; charset=utf-8"))
++        assertEquals("hls", MediaSniff.classify("https://x.com/api/play?id=1", "application/x-mpegURL"))
++    }
++
++    @Test fun progressiveFiles() {
++        assertEquals("mp4", MediaSniff.classify("https://x.com/v/1.mp4"))
++        assertEquals("mp4", MediaSniff.classify("https://x.com/v/1.m4v?e=1"))
++        assertEquals("webm", MediaSniff.classify("https://x.com/v/1.webm"))
++        assertEquals("flv", MediaSniff.classify("https://x.com/v/1.flv"))
++        assertEquals("mkv", MediaSniff.classify("https://x.com/v/1", "video/x-matroska"))
++        assertEquals("mp4", MediaSniff.classify("https://x.com/v/1", "video/mp4"))
++    }
++
++    @Test fun segmentsAreRejected() {
++        assertNull(MediaSniff.classify("https://x.com/seg/1.ts"))
++        assertNull(MediaSniff.classify("https://x.com/seg/1.m4s"))
++        assertNull(MediaSniff.classify("https://x.com/seg/1", "video/mp2t"))
++        assertNull(MediaSniff.classify("https://x.com/seg/1.mp4", "video/iso.segment"))
++    }
++
++    @Test fun nonVideoIsRejected() {
++        assertNull(MediaSniff.classify("https://x.com/a.js"))
++        assertNull(MediaSniff.classify("https://x.com/a.jpg", "image/jpeg"))
++        assertNull(MediaSniff.classify("https://x.com/a.mpd", "application/dash+xml"))
++        assertNull(MediaSniff.classify("https://x.com/a", "text/html"))
++        assertNull(MediaSniff.classify("blob:https://x.com/1234", "video/mp4"))
++        assertNull(MediaSniff.classify("data:video/mp4;base64,AAAA"))
++        assertNull(MediaSniff.classify("https://x.com/" + "a".repeat(5000) + ".mp4"))
++    }
++
++    @Test fun tinyFilesAreRejectedButSmallPlaylistsAreNot() {
++        assertNull(MediaSniff.classify("https://x.com/ad.mp4", null, 50_000))
++        assertEquals("mp4", MediaSniff.classify("https://x.com/v.mp4", null, 5_000_000))
++        assertEquals("mp4", MediaSniff.classify("https://x.com/v.mp4", null, -1))
++        assertEquals("hls", MediaSniff.classify("https://x.com/i.m3u8", null, 300))
++    }
++
++    @Test fun mediaElementWithoutAnyHint() {
++        assertEquals("mp4", MediaSniff.classify("https://x.com/stream/42", null, -1, fromMediaElement = true))
++        assertNull(MediaSniff.classify("https://x.com/stream/42", null, -1, fromMediaElement = false))
++        assertEquals("hls", MediaSniff.classify("https://x.com/stream/42.m3u8", null, -1, fromMediaElement = true))
++    }
++
++    @Test fun hostAndDisplayName() {
++        assertEquals("cdn.example.com", MediaSniff.hostOf("https://user@CDN.Example.com:8443/a/b.mp4?x=1"))
++        val m = SniffedMedia("https://cdn.example.com/a/movie.mp4?x=1", "mp4", "cdn.example.com")
++        assertEquals("movie.mp4", MediaSniff.displayName(m))
++        val bare = SniffedMedia("https://cdn.example.com/?x=1", "mp4", "cdn.example.com")
++        assertEquals("cdn.example.com", MediaSniff.displayName(bare))
++    }
++}
+diff -ruN a/docs/NATIVE_PLAYER.md b/docs/NATIVE_PLAYER.md
+--- a/docs/NATIVE_PLAYER.md	2026-11-24 03:15:10.472316327 +0000
++++ b/docs/NATIVE_PLAYER.md	2026-11-24 03:15:10.483032307 +0000
+@@ -6,8 +6,8 @@
+ |---|---|---|
+ | 一 | 播放内核 + 最简播放页，宿主 `play` 操作可拉起 | 已完成（未在真机验证） |
+ | 二 | 与脚本一致的 miuix 播放界面（只做界面：卡片 / 全屏、控件、手势、倍速 / 清晰度弹层） | 已完成（未编译、未在真机验证） |
+-| 三 | 原生画中画 / 后台播放 | 待做 |
+-| 四 | 嗅探（WebView `shouldInterceptRequest`、Gecko webRequest 上报、精简注入脚本） | 待做 |
++| 三 | 原生画中画 / 后台播放 | 已完成（未在真机验证） |
++| 四 | 嗅探（WebView `shouldInterceptRequest`、Gecko webRequest 上报、精简注入脚本） | 已完成（未编译、未在真机验证） |
+ | 五 | 开关迁到 AppSettings，下载 / 投屏 / 外部播放器直连，删除脚本 | 待做 |
+ 
+ ## 阶段一的结构（`player/`）
+@@ -65,3 +65,42 @@
+ 
+ - 圆角：Compose 的 `clip` 对 `TextureView` 是有效的（SurfaceView 不行），卡片圆角应该能正常显示，需真机确认。
+ - 方向：脚本没有方向逻辑；原生页改成按钮驱动（卡片锁竖屏，全屏转横屏），不再跟随传感器。
++
++## 阶段四：嗅探（`sniff/`、`browser/TabSniff.kt`、`engine/gecko/GeckoSniff.kt`）
++
++打开网页后，页面里出现视频就弹「发现视频」提示，点一条用原生播放器打开。不再依赖脚本侧的 `GM_mafariHost('play')`。
++
++### 判定（`MediaSniff.classify`，纯函数，有单测）
++
++- 认：HLS 清单（`.m3u8` / `.m3u`，或 Content-Type 是 `mpegurl` 一类）和整段文件（mp4 / m4v / mov / webm / mkv / flv，或 `video/*` 的 Content-Type）。
++- 不认：分片（`.ts` / `.m4s` / `video/mp2t` / `video/iso.segment`）、DASH（原生内核只带了 exoplayer + hls）、音频、图片、`blob:` / `data:`。
++- 已知长度小于 256KB 的整段文件不弹（多半是广告 / 预览 / 动图）；HLS 清单不受限。
++- 地址有长度上限（4096）；同页去重（不含 `#片段`），最多记 12 条（`SniffList`）。
++
++### 两条通道
++
++- **WebView**：`shouldInterceptRequest` 里对非主框架请求按地址判定（热路径只做字符串判断，不拷贝、不读响应）。
++  补充脚本 `assets/mafari_sniff.js`（文档开始注入，只在顶层框架跑）补三种拦截看不到的：没有后缀、靠响应头判断的地址（hook `fetch` / XHR 只读 `content-type`）、`<video>` 实际在播的地址（`loadstart` / `play` 捕获）。
++  报告走单向消息桥 `MafariSniff`（`OneWayBridge`，只受理主框架 http(s) 来源，长度有上限）；系统 WebView 不支持 WebMessageListener / 文档开始脚本时只剩请求拦截这一路。
++  iframe 里的播放器：请求拦截覆盖（不分框架），页面脚本报告不覆盖（桥只收主框架）。
++- **Gecko**：内置扩展 `mafari-gm-ext`（0.4.4）后台页用 `webRequest.onHeadersReceived`（非阻塞，只读响应头）筛出疑似视频，
++  300ms 一批上报 `{t:"sniff", items:[{top,url,ct,len}]}`；206 分段响应以 `Content-Range` 的总长度为准。
++  原生 `GeckoSniff` 按页面顶层 URL 存（和 `GeckoNetLog` 同样的取舍：两个标签打开同一个地址时共用一份）。
++  开关关闭时后台页把监听整个卸掉（`sniffRules`，hello 时和开关变化时推送）。
++
++### 界面
++
++- 页面里出现**新的**视频地址 → 等 0.9 秒（让同时到的其他清晰度 / 线路一起列出）→ 弹「发现视频」对话框（`SniffDialog`，走材质抽象层）。
++  同一批地址不重复打扰；关掉之后同页又发现新的才会再弹。换页 / 换标签自动收起并清空。
++- 点一条 → `BrowserTab.playSniffed`：Referer = 当前页地址，UA = 当前标签的 UA，Cookie = 该标签 Profile 的 Cookie（无痕用无痕 Profile；Gecko 经后台页取，放后台线程）；
++  列表里其余地址作为「视频源」一起交给播放页，可切换。
++- 设置 → 高级 →「嗅探网页视频」（`AppSettings.mediaSniff`，默认开；`MediaSniff.enabled` 是热路径读的静态镜像）。关闭后 WebView 不再判定，Gecko 卸掉监听；页面脚本仍会注入，但原生丢弃它的消息。
++
++### 已知取舍 / 待验证
++
++- 弹窗是自动弹出的模态对话框。关掉后没有常驻入口（没有地址栏 / 菜单按钮）重新打开，只能等同页出现新的源；需要的话再加一个入口。
++- 请求拦截拿不到响应头，所以 WebView 下没有后缀又没走 fetch / XHR 的地址（比如直接作 `<video src>` 的 `/stream/42`）只能靠页面脚本的 `<video>` 监听；iframe 里的这类地址抓不到。
++- `<video>` 用 MSE（`blob:`）播放的站点，靠抓它背后的 m3u8 / mp4 请求；纯 MSE 分片流（没有清单）抓不到。
++- 页面脚本 hook 了 `fetch` / `XHR.open`，函数的 `toString()` 不再是 `[native code]`；指纹保护 / 反检测要求高的站点可以关掉「嗅探网页视频」。
++- 脚本侧的悬浮播放器（`float-player.js`）没有动，两边可能同时出现提示；阶段五删脚本时一并处理。
++- 未编译、未真机验证：Kotlin 里只编译检查了 `MediaSniff`（纯逻辑），其余按现有 API 对照写；`tools/gm-ext-test` 通过，扩展里的嗅探监听用 Node 模拟过。

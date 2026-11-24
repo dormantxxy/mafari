@@ -98,6 +98,7 @@ internal fun BrowserTab.setupWebView() {
     if (!dev.dsh.miuixbrowser.engine.webview.OneWayBridge.install(webView, "MafariTr", TabTranslate.MAX_WEB_MESSAGE_CHARS) { translate.onWebMessage(it) }) {
         runCatching { webView.addJavascriptInterface(translate.webBridge(), "MafariTr") }
     }
+    installMediaSniff()
     // 仅降级路径：WebView 不支持 DOCUMENT_START_SCRIPT 时才安装无参的指纹桥；主路径不向页面暴露任何指纹接口
     val fp = fpInjector ?: return
     if (!fp.docStartSupported) {
@@ -253,6 +254,7 @@ internal fun BrowserTab.setupWebView() {
                 lastVisitedHistoryUrl = pageUrl
             }
             requestLog.clear() // 换页：本页请求重新统计
+            webSniffs.clear() // 换页：本页嗅探到的视频重新统计
             pageAdBlocked.set(0)
             if (!parked) pageUrl?.let { url = it }
             pageHost = runCatching { Uri.parse(pageUrl).host }.getOrNull().orEmpty()
@@ -356,6 +358,7 @@ internal fun BrowserTab.setupWebView() {
             if (request.url.scheme.equals("file", ignoreCase = true) && !LocalHtml.isOpenedFile(appContext, request.url)) {
                 return WebResourceResponse("text/plain", "utf-8", 403, "Forbidden", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
             }
+            if (dev.dsh.miuixbrowser.sniff.MediaSniff.enabled && !request.isForMainFrame) sniffRequest(request)
             val extensionBlocking = if (!incognito) appContext.appContainer.webExtensionsOrNull?.onWebRequestBefore(id, request) else null
             return extensionBlocking ?: webExtensionResource(request) ?:
             if (incognito && !adblockInIncognito) null

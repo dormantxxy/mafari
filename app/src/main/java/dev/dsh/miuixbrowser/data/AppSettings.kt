@@ -920,6 +920,18 @@ class AppSettings(context: Context) {
         prefs.edit().putBoolean(KEY_DNT, enabled).apply()
     }
 
+    /** 嗅探网页视频：发现 m3u8 / mp4 等地址时弹出提示，用原生播放器打开（见 sniff/MediaSniff） */
+    var mediaSniff by mutableStateOf(prefs.getBoolean(KEY_SNIFF, true).also { dev.dsh.miuixbrowser.sniff.MediaSniff.enabled = it })
+        private set
+
+    fun updateMediaSniff(enabled: Boolean) {
+        mediaSniff = enabled
+        dev.dsh.miuixbrowser.sniff.MediaSniff.enabled = enabled
+        prefs.edit().putBoolean(KEY_SNIFF, enabled).apply()
+        // Gecko：后台页按开关装 / 卸 onHeadersReceived 监听
+        runCatching { dev.dsh.miuixbrowser.engine.gecko.GeckoGm.sendSniffRules() }
+    }
+
     /** 禁用 WebRTC（防 IP 泄露） */
     var webrtcDisabled by mutableStateOf(prefs.getBoolean(KEY_WEBRTC, false))
         private set
@@ -1152,6 +1164,7 @@ class AppSettings(context: Context) {
         const val KEY_ADBLOCK_INCOGNITO = "adblock_in_incognito"
         const val KEY_ADBLOCK_WEBAPP = "adblock_in_webapp"
         const val KEY_DNT = "send_dnt"
+        const val KEY_SNIFF = "media_sniff"
         const val KEY_WEBRTC = "webrtc_disabled"
         const val KEY_3P_COOKIE = "third_party_cookie"
         const val KEY_COOKIE_MODE = "cookie_mode"

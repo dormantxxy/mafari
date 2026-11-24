@@ -632,6 +632,7 @@ class GeckoTabEngine(
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
                 GeckoNetLog.reset(url) // 本页请求重新统计
+                GeckoSniff.reset(url) // 本页嗅探到的视频重新统计
                 tab.geckoPageStart(url)
             }
 

@@ -9,6 +9,7 @@ import dev.dsh.miuixbrowser.browser.quickMenuCandidates
 import dev.dsh.miuixbrowser.browser.AppRoute
 import dev.dsh.miuixbrowser.browser.BrowserState
 import dev.dsh.miuixbrowser.browser.BrowserTab
+import dev.dsh.miuixbrowser.browser.playSniffed
 import dev.dsh.miuixbrowser.browser.DefaultBrowser
 import dev.dsh.miuixbrowser.download.Downloader
 import dev.dsh.miuixbrowser.data.AppSettings
@@ -427,6 +428,31 @@ BrowserChunk {
             log = if (reqTab.isGecko) remember(reqTab, reqTab.url) { GeckoNetLog.logFor(reqTab.url) } else reqTab.requestLog,
             isGecko = reqTab.isGecko,
             onDismiss = { requestSheetShow = false },
+        )
+
+        // 嗅探到网页视频（NATIVE_PLAYER.md 阶段四）：出现新地址弹一次提示，同批地址不重复打扰；点一条用原生播放器打开
+        val sniffList = tab.sniffs
+        val sniffItems = sniffList.items
+        androidx.compose.runtime.LaunchedEffect(sniffList, sniffItems.size, settings.mediaSniff) {
+            if (!settings.mediaSniff || sniffItems.size <= sniffList.promptedCount) return@LaunchedEffect
+            kotlinx.coroutines.delay(900) // 同一时刻到的其他源（多清晰度 / 多线路）一起列出来
+            val n = sniffList.items.size
+            if (n > sniffList.promptedCount) {
+                sniffList.promptedCount = n
+                sniffDialogShow = true
+            }
+        }
+        // 换标签 / 换页：旧提示收起
+        androidx.compose.runtime.LaunchedEffect(tab.id, tab.url) { sniffDialogShow = false }
+        SniffDialog(
+            show = sniffDialogShow,
+            items = sniffItems,
+            backdrop = if (glassAvailable) glassBackdrop else null,
+            onPlay = { m ->
+                sniffDialogShow = false
+                tab.playSniffed(context, m, sniffItems)
+            },
+            onDismiss = { sniffDialogShow = false },
         )
 
         val permPrompt = webPermPrompt

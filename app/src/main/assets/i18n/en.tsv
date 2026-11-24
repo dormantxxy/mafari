@@ -2212,3 +2212,8 @@ m3u8 下载完成后把 TS 转封装成 MP4（不重新编码；编码不支持�
 后台播放：已关闭（切到后台会暂停）	Background playback: off (pauses when you leave)
 视频	Video
 正在播放	Playing
+嗅探网页视频	Detect web videos
+网页里出现视频（m3u8 / mp4 等）时弹出提示，可用原生播放器打开；刷新页面后生效	Show a prompt when a page plays a video (m3u8 / mp4, etc.) so you can open it in the native player; takes effect after a page refresh
+发现视频	Video found
+用原生播放器打开，支持画中画和后台播放	Open in the native player, with picture-in-picture and background playback
+忽略	Dismiss

@@ -337,8 +337,9 @@ internal object GeckoGm {
                 override fun onPortMessage(message: Any, port: WebExtension.Port) {
                     val o = message as? JSONObject ?: return
                     when (o.optString("t")) {
-                        "hello" -> { resetSent(); push(); importPendingCookies(); sendNetRules() }
+                        "hello" -> { resetSent(); push(); importPendingCookies(); sendNetRules(); sendSniffRules() }
                         "net" -> GeckoNetLog.ingest(o)
+                        "sniff" -> GeckoSniff.ingest(o)
                         "synced" -> {
                             val r = o.optInt("rev", -1)
                             // 后台确认注册成功的 sig 集合：之后源码没变的脚本不再重复发送 code
@@ -518,6 +519,16 @@ internal object GeckoGm {
             runCatching {
                 p.postMessage(JSONObject().put("t", "netRules").put("block", JSONArray(AdBlock.userBlocked.toList())).put("record", AdBlock.requestLogOn))
             }.onFailure { Diag.log("gm: netRules push failed $it") }
+        }
+    }
+
+    /** 「嗅探网页视频」开关推给后台页（hello 时、开关变化时）：关闭时后台页卸掉 onHeadersReceived 监听 */
+    fun sendSniffRules() {
+        val p = bgPort ?: return
+        main.post {
+            runCatching {
+                p.postMessage(JSONObject().put("t", "sniffRules").put("on", dev.dsh.miuixbrowser.sniff.MediaSniff.enabled))
+            }.onFailure { Diag.log("gm: sniffRules push failed $it") }
         }
     }
 

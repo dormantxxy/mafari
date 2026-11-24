@@ -477,6 +477,12 @@ fun SettingsScreen(
                             },
                         )
                     }
+                    AppSwitchPreference(
+                        title = tr("嗅探网页视频"),
+                        summary = tr("网页里出现视频（m3u8 / mp4 等）时弹出提示，可用原生播放器打开；刷新页面后生效"),
+                        checked = settings.mediaSniff,
+                        onCheckedChange = { settings.updateMediaSniff(it) },
+                    )
                     // 内核切换只在带 Gecko 的版本里出现；无内核版只有系统 WebView
                     if (EngineSupport.GECKO_BUNDLED) {
                         AppDropdownPreference(

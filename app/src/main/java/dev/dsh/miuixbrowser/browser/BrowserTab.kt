@@ -326,6 +326,13 @@ class BrowserTab(
     /** 本页被去广告拦掉的请求数（WebView 内核）：换页清零；只在菜单打开时读一次，不轮询 */
     val pageAdBlocked = java.util.concurrent.atomic.AtomicInteger(0)
 
+    /** WebView 标签自己的嗅探结果；Gecko 标签的在 [dev.dsh.miuixbrowser.engine.gecko.GeckoSniff]（按页面地址） */
+    internal val webSniffs = dev.dsh.miuixbrowser.sniff.SniffList()
+
+    /** 当前页嗅探到的视频（界面读它：Compose 状态，有新的会重组） */
+    val sniffs: dev.dsh.miuixbrowser.sniff.SniffList
+        get() = if (isGecko) dev.dsh.miuixbrowser.engine.gecko.GeckoSniff.listFor(url) else webSniffs
+
     /** 只有 WebView 内核的标签才有 WebView；Gecko 标签不创建（省内存） */
     internal val webViewOrNull: WebView? = if (engineKind == EngineKind.WEBVIEW) {
         dev.dsh.miuixbrowser.engine.EngineSupport.markWebViewUsed(appContext)

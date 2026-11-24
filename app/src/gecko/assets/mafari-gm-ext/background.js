@@ -47,6 +47,8 @@ function onNative(m) {
     broadcastVal(m);
   } else if (m.t === 'netRules') {
     netSetRules(m);
+  } else if (m.t === 'sniffRules') {
+    sniffSetRules(m);
   }
 }
 
@@ -641,3 +643,62 @@ function netOnError(d) {
 }
 
 connect();
+
+// ------------------------------------------------------------------ 视频嗅探
+// 看响应头：地址带视频后缀，或 Content-Type 是 HLS / video/*，就把 {top, url, ct, len} 批量上报（300ms 一批）。
+// 只读不改（非阻塞监听），关闭「嗅探网页视频」时整个监听卸掉，对页面加载零开销。
+// 分片（video/mp2t、.ts / .m4s）这里先过滤一遍，真正的判定在原生 MediaSniff.classify。
+const sniff = { on: false, pending: new Map(), timer: null };
+const SNIFF_EXT = /\.(m3u8?|mp4|m4v|mov|webm|mkv|flv)$/i;
+const SNIFF_CT = /mpegurl|^video\//i;
+const SNIFF_SEG = /^video\/(mp2t|mpeg2t|iso\.segment|x-mpegts)/i;
+const SNIFF_FILTER = { urls: ['http://*/*', 'https://*/*'], types: ['media', 'xmlhttprequest', 'other', 'object'] };
+const SNIFF_MAX_PENDING = 60;
+
+function sniffHeader(d, name) {
+  const hs = d.responseHeaders || [];
+  for (let i = 0; i < hs.length; i++) if (String(hs[i].name).toLowerCase() === name) return String(hs[i].value || '');
+  return '';
+}
+
+function sniffFlush() {
+  sniff.timer = null;
+  const items = Array.from(sniff.pending.values());
+  sniff.pending.clear();
+  if (items.length) post({ t: 'sniff', items });
+}
+
+function sniffOnHeaders(d) {
+  if (d.tabId < 0 || d.type === 'main_frame') return undefined;
+  if (d.statusCode && d.statusCode >= 400) return undefined;
+  let path;
+  try { path = new URL(d.url).pathname; } catch (e) { return undefined; }
+  const ct = sniffHeader(d, 'content-type').split(';')[0].trim().toLowerCase();
+  if (SNIFF_SEG.test(ct)) return undefined;
+  if (!SNIFF_EXT.test(path) && !SNIFF_CT.test(ct)) return undefined;
+  let top = netTopOf(d);
+  if (!/^https?:/i.test(top)) return undefined;
+  let len = parseInt(sniffHeader(d, 'content-length'), 10);
+  const total = /\/(\d+)\s*$/.exec(sniffHeader(d, 'content-range'));
+  if (total) len = parseInt(total[1], 10); // 206 分段响应：以总长度为准
+  if (!(len >= 0)) len = -1;
+  if (sniff.pending.size >= SNIFF_MAX_PENDING && !sniff.pending.has(d.url)) return undefined;
+  sniff.pending.set(d.url, { top, url: d.url, ct, len });
+  if (!sniff.timer) sniff.timer = setTimeout(sniffFlush, 300);
+  return undefined;
+}
+
+function sniffSetRules(m) {
+  const on = !!m.on;
+  try { browser.webRequest.onHeadersReceived.removeListener(sniffOnHeaders); } catch (e) {}
+  sniff.on = false;
+  if (!on) {
+    sniff.pending.clear();
+    if (sniff.timer) { clearTimeout(sniff.timer); sniff.timer = null; }
+    return;
+  }
+  try {
+    browser.webRequest.onHeadersReceived.addListener(sniffOnHeaders, SNIFF_FILTER, ['responseHeaders']);
+    sniff.on = true;
+  } catch (e) { post({ t: 'error', where: 'sniffApply', msg: String(e) }); }
+}

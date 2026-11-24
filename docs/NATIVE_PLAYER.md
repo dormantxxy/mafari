@@ -6,8 +6,8 @@
 |---|---|---|
 | 一 | 播放内核 + 最简播放页，宿主 `play` 操作可拉起 | 已完成（未在真机验证） |
 | 二 | 与脚本一致的 miuix 播放界面（只做界面：卡片 / 全屏、控件、手势、倍速 / 清晰度弹层） | 已完成（未编译、未在真机验证） |
-| 三 | 原生画中画 / 后台播放 | 待做 |
-| 四 | 嗅探（WebView `shouldInterceptRequest`、Gecko webRequest 上报、精简注入脚本） | 待做 |
+| 三 | 原生画中画 / 后台播放 | 已完成（未在真机验证） |
+| 四 | 嗅探（WebView `shouldInterceptRequest`、Gecko webRequest 上报、精简注入脚本） | 已完成（未编译、未在真机验证） |
 | 五 | 开关迁到 AppSettings，下载 / 投屏 / 外部播放器直连，删除脚本 | 待做 |
 
 ## 阶段一的结构（`player/`）
@@ -65,3 +65,42 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 
 - 圆角：Compose 的 `clip` 对 `TextureView` 是有效的（SurfaceView 不行），卡片圆角应该能正常显示，需真机确认。
 - 方向：脚本没有方向逻辑；原生页改成按钮驱动（卡片锁竖屏，全屏转横屏），不再跟随传感器。
+
+## 阶段四：嗅探（`sniff/`、`browser/TabSniff.kt`、`engine/gecko/GeckoSniff.kt`）
+
+打开网页后，页面里出现视频就弹「发现视频」提示，点一条用原生播放器打开。不再依赖脚本侧的 `GM_mafariHost('play')`。
+
+### 判定（`MediaSniff.classify`，纯函数，有单测）
+
+- 认：HLS 清单（`.m3u8` / `.m3u`，或 Content-Type 是 `mpegurl` 一类）和整段文件（mp4 / m4v / mov / webm / mkv / flv，或 `video/*` 的 Content-Type）。
+- 不认：分片（`.ts` / `.m4s` / `video/mp2t` / `video/iso.segment`）、DASH（原生内核只带了 exoplayer + hls）、音频、图片、`blob:` / `data:`。
+- 已知长度小于 256KB 的整段文件不弹（多半是广告 / 预览 / 动图）；HLS 清单不受限。
+- 地址有长度上限（4096）；同页去重（不含 `#片段`），最多记 12 条（`SniffList`）。
+
+### 两条通道
+
+- **WebView**：`shouldInterceptRequest` 里对非主框架请求按地址判定（热路径只做字符串判断，不拷贝、不读响应）。
+  补充脚本 `assets/mafari_sniff.js`（文档开始注入，只在顶层框架跑）补三种拦截看不到的：没有后缀、靠响应头判断的地址（hook `fetch` / XHR 只读 `content-type`）、`<video>` 实际在播的地址（`loadstart` / `play` 捕获）。
+  报告走单向消息桥 `MafariSniff`（`OneWayBridge`，只受理主框架 http(s) 来源，长度有上限）；系统 WebView 不支持 WebMessageListener / 文档开始脚本时只剩请求拦截这一路。
+  iframe 里的播放器：请求拦截覆盖（不分框架），页面脚本报告不覆盖（桥只收主框架）。
+- **Gecko**：内置扩展 `mafari-gm-ext`（0.4.4）后台页用 `webRequest.onHeadersReceived`（非阻塞，只读响应头）筛出疑似视频，
+  300ms 一批上报 `{t:"sniff", items:[{top,url,ct,len}]}`；206 分段响应以 `Content-Range` 的总长度为准。
+  原生 `GeckoSniff` 按页面顶层 URL 存（和 `GeckoNetLog` 同样的取舍：两个标签打开同一个地址时共用一份）。
+  开关关闭时后台页把监听整个卸掉（`sniffRules`，hello 时和开关变化时推送）。
+
+### 界面
+
+- 页面里出现**新的**视频地址 → 等 0.9 秒（让同时到的其他清晰度 / 线路一起列出）→ 弹「发现视频」对话框（`SniffDialog`，走材质抽象层）。
+  同一批地址不重复打扰；关掉之后同页又发现新的才会再弹。换页 / 换标签自动收起并清空。
+- 点一条 → `BrowserTab.playSniffed`：Referer = 当前页地址，UA = 当前标签的 UA，Cookie = 该标签 Profile 的 Cookie（无痕用无痕 Profile；Gecko 经后台页取，放后台线程）；
+  列表里其余地址作为「视频源」一起交给播放页，可切换。
+- 设置 → 高级 →「嗅探网页视频」（`AppSettings.mediaSniff`，默认开；`MediaSniff.enabled` 是热路径读的静态镜像）。关闭后 WebView 不再判定，Gecko 卸掉监听；页面脚本仍会注入，但原生丢弃它的消息。
+
+### 已知取舍 / 待验证
+
+- 弹窗是自动弹出的模态对话框。关掉后没有常驻入口（没有地址栏 / 菜单按钮）重新打开，只能等同页出现新的源；需要的话再加一个入口。
+- 请求拦截拿不到响应头，所以 WebView 下没有后缀又没走 fetch / XHR 的地址（比如直接作 `<video src>` 的 `/stream/42`）只能靠页面脚本的 `<video>` 监听；iframe 里的这类地址抓不到。
+- `<video>` 用 MSE（`blob:`）播放的站点，靠抓它背后的 m3u8 / mp4 请求；纯 MSE 分片流（没有清单）抓不到。
+- 页面脚本 hook 了 `fetch` / `XHR.open`，函数的 `toString()` 不再是 `[native code]`；指纹保护 / 反检测要求高的站点可以关掉「嗅探网页视频」。
+- 脚本侧的悬浮播放器（`float-player.js`）没有动，两边可能同时出现提示；阶段五删脚本时一并处理。
+- 未编译、未真机验证：Kotlin 里只编译检查了 `MediaSniff`（纯逻辑），其余按现有 API 对照写；`tools/gm-ext-test` 通过，扩展里的嗅探监听用 Node 模拟过。

@@ -162,6 +162,7 @@ class GeckoTabEngine(
 
     fun updateScrollRemaining(px: Int) {
         scrollRemaining = px
+        updateBottomFull()
     }
 
     var pageTitle = ""
@@ -210,7 +211,28 @@ class GeckoTabEngine(
     private var immersiveMax = 0
     private var immersiveClip = 0
 
+    // 界面层要求的值；实际下发给 Gecko 的最大高度在「快到底部」时会临时压成 0（见 BottomFullViewport）
+    private var requestedMax = 0
+    private var requestedClip = 0
+    private var bottomFull = false
+
     fun applyImmersive(maxPx: Int, clipPx: Int) {
+        requestedMax = maxPx
+        requestedClip = clipPx
+        bottomFull = BottomFullViewport.next(bottomFull, requestedMax, requestedClip, scrollRemaining)
+        pushImmersive()
+    }
+
+    private fun updateBottomFull() {
+        val want = BottomFullViewport.next(bottomFull, requestedMax, requestedClip, scrollRemaining)
+        if (want == bottomFull) return
+        bottomFull = want
+        pushImmersive()
+    }
+
+    private fun pushImmersive() {
+        val maxPx = if (bottomFull) 0 else requestedMax
+        val clipPx = requestedClip
         runCatching {
             if (maxPx != immersiveMax) {
                 immersiveMax = maxPx
@@ -231,7 +253,7 @@ class GeckoTabEngine(
      */
     fun logViewport(pageJson: String) {
         Diag.log(
-            "gecko vp: page=$pageJson native{immersiveSetting=${GeckoDebug.nativeImmersive} max=$immersiveMax clip=$immersiveClip " +
+            "gecko vp: page=$pageJson native{immersiveSetting=${GeckoDebug.nativeImmersive} max=$immersiveMax clip=$immersiveClip bottomFull=$bottomFull " +
                 "viewW=${view.width} viewH=${view.height} viewTransY=${view.translationY} viewTop=${view.top}}",
         )
     }

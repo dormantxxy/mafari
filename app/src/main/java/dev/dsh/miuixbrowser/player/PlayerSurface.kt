@@ -135,7 +135,7 @@ private class Toast(val text: String)
 /**
  * @param fullscreen 是否全屏：全屏时左上角是「‹ 退出全屏」，控件整体内缩（避开刘海 / 圆角）。
  * @param pip 系统画中画小窗里：只剩画面，不画控件 / 手势 / 提示（操作走系统小窗的操作栏）。
- * @param onPip / [onDownload] / [onCopyLink] 传 null 时按钮照常显示，但灰掉、点了没反应（和脚本里 disabled 的样式一致）。
+ * @param onPip / [onDownload] / [onCopyLink] / [onCast] 传 null 时按钮照常显示，但灰掉、点了没反应（和脚本里 disabled 的样式一致）。
  * @param bgPlay 「后台播放」开关当前值；null = 不提供这个选项（菜单里不显示）。
  */
 @Composable
@@ -148,6 +148,8 @@ internal fun PlayerSurface(
     onPip: (() -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
     onCopyLink: (() -> Unit)? = null,
+    /** 「投屏」菜单项：弹「投屏到」面板（见 [NativeCast]）；null 时灰掉 */
+    onCast: (() -> Unit)? = null,
     pip: Boolean = false,
     bgPlay: Boolean? = null,
     onBgPlayChange: (Boolean) -> Unit = {},
@@ -426,6 +428,10 @@ internal fun PlayerSurface(
                             MenuItem(MiuixIcons.Glass.Link, tr("复制视频链接"), enabled = onCopyLink != null, scale = scale) {
                                 onCopyLink?.invoke(); popup = POP_NONE
                                 toast = Toast(tr("已复制链接"))
+                            }
+                            Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+                            MenuItem(dev.dsh.miuixbrowser.ui.AppIcons.ScreenMirror, tr("投屏"), enabled = onCast != null, scale = scale) {
+                                onCast?.invoke(); popup = POP_NONE
                             }
                             if (player.qualities.size > 1) {
                                 Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))

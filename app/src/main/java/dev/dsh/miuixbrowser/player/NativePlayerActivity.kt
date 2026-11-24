@@ -30,6 +30,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -57,6 +65,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.Player
 import dev.dsh.miuixbrowser.download.Downloader
 import dev.dsh.miuixbrowser.i18n.tr
+import dev.dsh.miuixbrowser.ui.CastPickerDialog
 import dev.dsh.miuixbrowser.util.Diag
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
@@ -86,6 +95,33 @@ class NativePlayerActivity : ComponentActivity() {
     private var bgPlay by mutableStateOf(true)
     private var pipAt = 0L // 最近一次进入画中画的时间，用来分辨「刚进小窗的过渡性 onStop」和「用户点 ✕ 关了小窗」
     private var pipReceiver: BroadcastReceiver? = null
+    private var cast: NativeCast? = null
+    private var pipSuppressUntil = 0L // 拉起外部播放器 / 系统投屏前后一小段时间内不自动进画中画
+
+    /** 局域网访问权限（Android 17 / targetSdk 37 起必需）：投屏搜索前调用，结果回调在主线程 */
+    private var localNetCallback: ((Boolean) -> Unit)? = null
+    private val localNetLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        val cb = localNetCallback
+        localNetCallback = null
+        cb?.invoke(ok)
+    }
+
+    private fun withLocalNetworkPermission(onResult: (Boolean) -> Unit) {
+        val perm = "android.permission.ACCESS_LOCAL_NETWORK"
+        if (android.os.Build.VERSION.SDK_INT < 37 || checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED) {
+            onResult(true)
+            return
+        }
+        localNetCallback = onResult
+        localNetLauncher.launch(perm)
+    }
+
+    /** 即将拉起别的 Activity（外部播放器 / 系统投屏）：3 秒内不要因为 onUserLeaveHint 自动进画中画 */
+    private fun suppressPip() {
+        pipSuppressUntil = SystemClock.uptimeMillis() + 3000
+        updatePip()
+        window.decorView.postDelayed({ updatePip() }, 3100)
+    }
 
     private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 没授权服务照样跑，只是看不到通知 */ }
 
@@ -102,8 +138,10 @@ class NativePlayerActivity : ComponentActivity() {
      */
     private fun applyWindowMode() {
         val card = !fullscreen && !inPip
+        // 「投屏到」面板打开时窗口临时铺满（背景仍透明），面板才不会被卡片那么高的窗口裁掉
+        val wrap = card && cast?.pickerUi?.show != true
         window.setBackgroundDrawable(ColorDrawable(if (card) AColor.TRANSPARENT else AColor.BLACK))
-        if (card) {
+        if (wrap) {
             window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             window.setGravity(Gravity.TOP)
             window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
@@ -129,6 +167,7 @@ class NativePlayerActivity : ComponentActivity() {
         val p = MafariPlayer(this, req)
         player = p
         p.exo.addListener(pipSync)
+        cast = NativeCast(this, { player }, ::withLocalNetworkPermission, ::suppressPip)
         PlayerService.closeCallback = { finish() }
         registerPipReceiver()
         updatePip()
@@ -144,6 +183,11 @@ class NativePlayerActivity : ComponentActivity() {
 
     @androidx.compose.runtime.Composable
     private fun PlayerPage(p: MafariPlayer, title: String) {
+        val cast = cast
+        val pickerOpen = cast?.pickerUi?.show == true
+        // 面板开 / 关时切窗口大小（卡片态才有区别）
+        LaunchedEffect(pickerOpen) { applyWindowMode() }
+
         // 只有一处 PlayerSurface 调用，卡片 <-> 全屏切换时界面状态（弹层、控件显隐）不会丢；
         // 两种形态的外层结构相同（Column 套 Column），只换 Modifier
         val full = fullscreen || inPip
@@ -151,8 +195,9 @@ class NativePlayerActivity : ComponentActivity() {
         val outer = if (full) {
             Modifier.fillMaxSize().background(Color.Black)
         } else {
-            // 不 fillMaxHeight：窗口是 WRAP_CONTENT，铺满会把整屏变成透明的挡触摸层
-            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)
+            // 不 fillMaxHeight：窗口是 WRAP_CONTENT，铺满会把整屏变成透明的挡触摸层（投屏面板打开时窗口已铺满，卡片仍贴顶）
+            Modifier.fillMaxWidth().then(if (pickerOpen) Modifier.fillMaxHeight() else Modifier)
+                .windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)
         }
         val panel = if (full) {
             Modifier.fillMaxSize()
@@ -166,19 +211,24 @@ class NativePlayerActivity : ComponentActivity() {
         val surface = if (full) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)
         Column(outer) {
             Column(panel) {
-                PlayerSurface(
-                    player = p,
-                    fullscreen = fullscreen,
-                    onClose = { finish() },
-                    onToggleFullscreen = { applyFullscreen(!fullscreen) },
-                    modifier = surface,
-                    onPip = if (pipSupported()) ({ enterPip() }) else null,
-                    onDownload = { download(p) },
-                    onCopyLink = { copyLink(p) },
-                    pip = inPip,
-                    bgPlay = bgPlay,
-                    onBgPlayChange = { changeBgPlay(it) },
-                )
+                Box(surface) {
+                    PlayerSurface(
+                        player = p,
+                        fullscreen = fullscreen,
+                        onClose = { finish() },
+                        onToggleFullscreen = { applyFullscreen(!fullscreen) },
+                        modifier = Modifier.fillMaxSize(),
+                        onPip = if (pipSupported()) ({ enterPip() }) else null,
+                        onDownload = { download(p) },
+                        onCopyLink = { copyLink(p) },
+                        onCast = if (cast != null) ({ cast.openPicker() }) else null,
+                        pip = inPip,
+                        bgPlay = bgPlay,
+                        onBgPlayChange = { changeBgPlay(it) },
+                    )
+                    // 投屏中：盖一层遥控（视频此时在电视上播，本地已暂停）
+                    if (cast != null && cast.active && !inPip) CastOverlay(cast)
+                }
                 if (!full) {
                     Text(
                         text = title,
@@ -191,6 +241,78 @@ class NativePlayerActivity : ComponentActivity() {
                 }
             }
         }
+        if (cast != null) CastPickerDialog(ui = cast.pickerUi, backdrop = null)
+    }
+
+    /** 投屏遥控：设备名 / 状态 / 进度 + 后退 · 播放暂停 · 快进 · 结束投屏 */
+    @androidx.compose.runtime.Composable
+    private fun CastOverlay(cast: NativeCast) {
+        val name = cast.deviceName.orEmpty()
+        Box(
+            Modifier.fillMaxSize().background(Color(0xEB000000)).clickable(enabled = true, onClick = {}),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = if (cast.connecting) tr("正在连接「{0}」…", name) else tr("正在投屏到 {0}", name),
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
+                Text(
+                    text = if (cast.connecting) tr("等待电视开始播放…") else castClock(cast.posSec, cast.durSec),
+                    color = Color(0x99FFFFFF),
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CastButton(tr("后退 10 秒"), enabled = !cast.connecting) { cast.seekBy(-10) }
+                    CastButton(if (cast.playing) tr("暂停") else tr("播放"), enabled = !cast.connecting) { cast.togglePlay() }
+                    CastButton(tr("快进 10 秒"), enabled = !cast.connecting) { cast.seekBy(10) }
+                }
+                CastButton(tr("结束投屏"), strong = true, modifier = Modifier.padding(top = 10.dp)) { cast.stop() }
+            }
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun CastButton(
+        label: String,
+        modifier: Modifier = Modifier,
+        enabled: Boolean = true,
+        strong: Boolean = false,
+        onClick: () -> Unit,
+    ) {
+        val shape = RoundedCornerShape(14.dp)
+        Box(
+            modifier
+                .clip(shape)
+                .background(if (strong) Color(0xFF3B7DFF) else Color(0x26FFFFFF))
+                .clickable(enabled = enabled, onClick = onClick)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = label,
+                color = if (enabled) Color.White else Color(0x59FFFFFF),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+    }
+
+    private fun castClock(pos: Int, dur: Int): String {
+        fun f(sec: Int): String {
+            val h = sec / 3600
+            val m = sec % 3600 / 60
+            val s = sec % 60
+            return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+        }
+        return if (dur > 0) "${f(pos)} / ${f(dur)}" else f(pos)
     }
 
     /**
@@ -270,7 +392,7 @@ class NativePlayerActivity : ComponentActivity() {
                 ),
             )
             // 播放中按 Home / 手势返回桌面，系统直接进画中画（比 onUserLeaveHint 更稳，没有切换闪烁）
-            .setAutoEnterEnabled(playing && pipSupported())
+            .setAutoEnterEnabled(playing && pipSupported() && SystemClock.uptimeMillis() >= pipSuppressUntil)
             .setSeamlessResizeEnabled(false)
             .build()
     }
@@ -306,7 +428,7 @@ class NativePlayerActivity : ComponentActivity() {
     /** 按 Home / 切任务：系统没替我们自动进画中画时的兜底（部分 ROM 不认 autoEnter） */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (player?.isPlaying == true && !isInPictureInPictureMode) enterPip()
+        if (player?.isPlaying == true && !isInPictureInPictureMode && SystemClock.uptimeMillis() >= pipSuppressUntil) enterPip()
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
@@ -357,6 +479,8 @@ class NativePlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         showing = false
+        cast?.release()
+        cast = null
         PlayerService.stop(this)
         PlayerService.closeCallback = null
         PlayerService.current = null

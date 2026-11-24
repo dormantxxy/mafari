@@ -104,3 +104,18 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 - 页面脚本 hook 了 `fetch` / `XHR.open`，函数的 `toString()` 不再是 `[native code]`；指纹保护 / 反检测要求高的站点可以关掉「嗅探网页视频」。
 - 脚本侧的悬浮播放器（`float-player.js`）没有动，两边可能同时出现提示；阶段五删脚本时一并处理。
 - 未编译、未真机验证：Kotlin 里只编译检查了 `MediaSniff`（纯逻辑），其余按现有 API 对照写；`tools/gm-ext-test` 通过，扩展里的嗅探监听用 Node 模拟过。
+
+## 投屏（`player/NativeCast.kt`）
+
+播放页 ⋯ 菜单 →「投屏」，弹「投屏到」面板（`ui/CastPickerDialog`，和脚本悬浮播放器共用同一个面板组件，状态在 `NativeCast.pickerUi`）：
+
+- **DLNA 设备**：`MediaHost.discoverDevices`（SSDP，绑 Wi-Fi 网络直连）搜索 → 选中后本地暂停，电视从当前进度 `setUriAndPlay`；
+  每秒 `query` 轮询进度，播放页盖 `CastOverlay` 遥控（后退 / 播放·暂停 / 快进 10 秒 / 结束投屏）。
+- **屏幕镜像**：`MediaHost.openSystemCast`（各厂商「无线显示」页，兜底系统 CAST_SETTINGS）。
+- **外部打开**：`MediaHost.launchExternal`（带 UA / Referer / Cookie 的 VIEW chooser）。
+- 结束（点结束 / 电视停止 / 播完 / 失联 / 关闭播放页）：电视 `Stop`；本地 seek 回电视上的进度并保持暂停。
+- 搜索 / 镜像 / 外部打开三个入口在 `MediaHost` 里改成 `internal` 并加了 `beforeLaunch` 参数（脚本宿主用来 3 秒内不自动进画中画，
+  播放页用自己的 `suppressPip()`），脚本侧行为不变。
+- Android 17 的「附近设备」权限由 `NativePlayerActivity.withLocalNetworkPermission` 申请（和 `MainActivity` 同一套）。
+- 面板打开时播放页窗口临时铺满（背景仍透明），避免面板被「只有卡片那么高」的窗口裁掉。
+- 限制：DLNA 由电视自己拉流，带不了 Referer / Cookie，防盗链源会失败（25 秒没开始播放会提示）；blob: / data: 流没有可投的地址。

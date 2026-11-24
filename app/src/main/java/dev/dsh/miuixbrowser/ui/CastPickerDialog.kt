@@ -46,8 +46,9 @@ import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 脚本悬浮播放器「投屏」按钮弹出的「投屏到」面板。
- * 状态由 [dev.dsh.miuixbrowser.script.MediaHost.pickerUi] 提供；对话框与按钮走材质抽象层（AppGlassDialog / AppDialogButton），
+ * 「投屏到」面板：脚本悬浮播放器的「投屏」按钮（状态在 [dev.dsh.miuixbrowser.script.MediaHost.pickerUi]）和
+ * 原生播放页菜单里的「投屏」（状态在 NativeCast.pickerUi）共用。
+ * 状态由 [CastPickerUi] 提供；对话框与按钮走材质抽象层（AppGlassDialog / AppDialogButton），
  * 随「高级材质」三选一变化，和其它应用内弹窗一致。
  */
 @Composable

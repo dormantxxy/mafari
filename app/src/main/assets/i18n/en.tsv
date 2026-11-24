@@ -2236,3 +2236,9 @@ TextureView 支持玻璃模糊；SurfaceView 更省电、延迟更低，但没�
 长按播放画面时临时加速，松手恢复	Temporarily speeds up playback while you press and hold the video; releases back to normal speed
 切到后台 / 锁屏继续播放，并在通知栏显示控制条；关闭后离开界面就暂停	Keeps playing when you switch apps or lock the screen, with controls in the notification shade. When off, playback pauses when you leave the player
 {0} 倍速播放中	{0} speed playback
+投屏	Cast
+正在投屏到 {0}	Casting to {0}
+正在连接「{0}」…	Connecting to "{0}"…
+等待电视开始播放…	Waiting for the TV to start playing…
+结束投屏	Stop casting
+这个视频地址无法投屏	This video address can't be cast

@@ -84,8 +84,8 @@ object MediaHost {
     private const val EXTRA_ACT = "a"
     private const val TAG = "MediaHost"
 
-    private val main = Handler(Looper.getMainLooper())
-    private val io = Executors.newCachedThreadPool { r -> Thread(r, "media-host-io").apply { isDaemon = true } }
+    internal val main = Handler(Looper.getMainLooper())
+    internal val io = Executors.newCachedThreadPool { r -> Thread(r, "media-host-io").apply { isDaemon = true } }
 
     private class Sink(val fn: String, val reply: Reply)
 
@@ -362,7 +362,8 @@ object MediaHost {
 
     // ------------------------------------------------------------------ 外部播放器
 
-    private fun launchExternal(a: Activity, o: JSONObject): Boolean {
+    /** [beforeLaunch]：拉起别的 Activity 之前的准备（脚本宿主用来 3 秒内不自动进画中画；原生播放页有自己的做法） */
+    internal fun launchExternal(a: Activity, o: JSONObject, beforeLaunch: () -> Unit = { suppressPip(a) }): Boolean {
         val url = o.optString("url")
         if (!isHttp(url)) return false
         val mime = DlnaCast.mimeOf(url, o.optString("type"))
@@ -378,7 +379,7 @@ object MediaHost {
         val chooser = Intent.createChooser(i, tr("选择播放器 / 投屏 App")).putExtra(
             Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(ComponentName(a, MainActivity::class.java)),
         )
-        suppressPip(a)
+        beforeLaunch()
         return runCatching { a.startActivity(chooser) }.isSuccess
     }
 
@@ -387,8 +388,8 @@ object MediaHost {
      * 一个都起不来才退回 AOSP 的 ACTION_CAST_SETTINGS（那个在国内 ROM 上往往是 Google Cast 页）。
      * 组件名在不同机型 / 系统版本上并不稳定，所以按「厂商候选 → 通用候选 → 系统兜底」逐个尝试，起不来（不存在 / 未导出）就换下一个。
      */
-    private fun openSystemCast(a: Activity) {
-        suppressPip(a)
+    internal fun openSystemCast(a: Activity, beforeLaunch: () -> Unit = { suppressPip(a) }) {
+        beforeLaunch()
         fun comp(pkg: String, cls: String) = Intent().setClassName(pkg, cls)
         val vendorSpecific = when (Build.MANUFACTURER.lowercase()) {
             "xiaomi", "redmi", "poco", "blackshark" -> listOf(
@@ -443,7 +444,7 @@ object MediaHost {
     }
 
     /** SSDP 套接字和 HTTP 都绑到 Wi-Fi 网络，直连（不走应用里设置的代理 / 开着的 VPN） */
-    private fun newDlna(c: Context): DlnaCast {
+    internal fun newDlna(c: Context): DlnaCast {
         val net = wifiNetwork(c.applicationContext)
         return DlnaCast(
             bind = { s -> if (net != null) runCatching { net.bindSocket(s) } },
@@ -501,7 +502,8 @@ object MediaHost {
         }
     }
 
-    private fun discoverDevices(a: Activity, ui: CastPickerUi, picker: AtomicBoolean) {
+    /** 脚本宿主和原生播放器（[dev.dsh.miuixbrowser.player.NativeCast]）共用：搜索局域网 DLNA 设备，结果写进 [ui]。 */
+    internal fun discoverDevices(a: Activity, ui: CastPickerUi, picker: AtomicBoolean) {
         scanCancel?.set(true)
         val cancelled = AtomicBoolean(false).also { scanCancel = it }
         ui.scanning = true

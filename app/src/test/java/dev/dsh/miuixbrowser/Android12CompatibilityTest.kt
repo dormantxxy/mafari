@@ -15,6 +15,7 @@ class Android12CompatibilityTest {
             assertFalse(it.path, code.contains(".readNBytes("))
             assertFalse(it.path, code.contains("intent.getParcelableExtra("))
             assertFalse(it.path, code.contains("PackageManager.ApplicationInfoFlags"))
+            assertFalse(it.path, code.contains("webView.settings.setAlgorithmicDarkeningAllowed("))
         }
         listOf("AutofillAuthActivity.kt", "AutofillPickActivity.kt").forEach {
             assertTrue(it, File(source, it).readText().contains("IntentCompat.getParcelableExtra(intent,"))

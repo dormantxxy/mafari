@@ -61,6 +61,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-provider: basic
+          cache-read-only: false
 
       - name: Cache Android SDK packages
         uses: actions/cache@v5
@@ -121,7 +122,10 @@ jobs:
           TASKS=$(bash ./gradlew :app:tasks --all -Pandroid12ApiCheck=true --console=plain)
           printf '%s\n' "$TASKS"
           printf '%s\n' "$TASKS" | grep '^testLiteArm64ReleaseUnitTest ' > /dev/null
-          bash ./gradlew :app:lintLiteArm64Release -Pandroid12ApiCheck=true --stacktrace
+          if ! bash ./gradlew :app:lintLiteArm64Release -Pandroid12ApiCheck=true --stacktrace; then
+            cat app/build/intermediates/lint_intermediate_text_report/liteArm64Release/lintReportLiteArm64Release/lint-results-liteArm64Release.txt
+            exit 1
+          fi
 
       - name: Full JVM tests compared with original baseline
         if: env.IS_ANDROID12_BRANCH == 'true'
@@ -136,6 +140,8 @@ jobs:
           path: |
             dist/JVM_*
             app/build/test-results/testLiteArm64ReleaseUnitTest/*.xml
+            app/build/reports/lint-results-liteArm64Release.*
+            app/build/intermediates/lint_intermediate_text_report/liteArm64Release/lintReportLiteArm64Release/lint-results-liteArm64Release.txt
           retention-days: 3
           if-no-files-found: ignore
 

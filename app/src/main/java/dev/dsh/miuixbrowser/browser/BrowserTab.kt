@@ -52,6 +52,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import android.view.View
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -1205,7 +1207,7 @@ class BrowserTab(
 
     /**
      * 显示模式深浅色同步到 WebView（公开 API，不自造 CSS 覆盖）：
-     * 1. `WebSettings.setAlgorithmicDarkeningAllowed` — 系统/WebView 官方深色适配（API 33+）
+     * 1. `WebSettingsCompat.setAlgorithmicDarkeningAllowed` — 按 WebView 能力适配深色，兼容 Android 12
      * 2. `setBackgroundColor` — 空白/加载底色跟随应用主题
      * 3. 对齐 Activity `Configuration.uiMode` — 让算法深色跟随应用内「深色/浅色/跟随系统」
      */
@@ -1214,7 +1216,9 @@ class BrowserTab(
         if (isGecko) {
             gecko?.applyTheme(dark)
         } else {
-            runCatching { webView.settings.setAlgorithmicDarkeningAllowed(true) }
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+                runCatching { WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.settings, true) }
+            }
             webView.setBackgroundColor(
                 if (dark) 0xFF1A1A1A.toInt() else 0xFFFFFFFF.toInt(),
             )

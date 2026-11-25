@@ -1,4 +1,9 @@
 # Changelog
+## [2.1.89]
+- 修复： 解决了一些已知的问题
+- 新增：Gecko调试内新增渲染方式选项，可选 SurfaceView/TextureView
+- 新增：Gecko在切换至TextureView渲染时，网页浏览支持高级材质和各种模糊及动效，但性能表现不如SurfaceView
+- 修复：gecko内核下使用必应搜索引擎无法加载更多页面问题
 ## [2.1.88]
 - 新增：Gecko调试内新增渲染方式选项，可选 SurfaceView/TextureView
 - 新增：Gecko在切换至TextureView渲染时，网页浏览支持高级材质和各种模糊及动效，但性能表现不如SurfaceView

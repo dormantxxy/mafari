@@ -17,7 +17,6 @@ import android.app.PendingIntent
 import android.app.assist.AssistStructure
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.service.autofill.AutofillService
@@ -392,9 +391,10 @@ class MafariAutofillService : AutofillService() {
         )
 
         /** 原生 App 的显示名；查不到（包可见性限制 / 已卸载）退回包名。 */
+        @Suppress("DEPRECATION") // 这里只用 flags=0，旧重载兼容 Android 12。
         internal fun appLabel(ctx: Context, pkg: String): String = runCatching {
             val pm = ctx.packageManager
-            pm.getApplicationLabel(pm.getApplicationInfo(pkg, PackageManager.ApplicationInfoFlags.of(0))).toString()
+            pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
         }.getOrDefault(pkg)
 
         /** 下拉里一行：主标题用户名，副标题站点。 */

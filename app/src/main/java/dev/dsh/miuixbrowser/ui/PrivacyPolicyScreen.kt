@@ -35,7 +35,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 隐私政策的最后更新日期；政策内容变化时同步修改。 */
 private const val POLICY_UPDATED = "2026-11-19"
-private const val ISSUES_URL = "https://github.com/rosenii/mafari/issues"
+private const val ISSUES_URL = "https://github.com/dormantxxy/mafari/issues"
 
 private data class PolicySection(val title: String, val paragraphs: List<String>)
 

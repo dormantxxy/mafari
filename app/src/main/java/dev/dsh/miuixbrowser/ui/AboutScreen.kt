@@ -335,7 +335,7 @@ fun AboutScreen(
                         Text(tr("项目地址"), fontSize = 16.sp, color = MiuixTheme.colorScheme.onSurface)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = "https://github.com/rosenii/mafari",
+                            text = PROJECT_URL,
                             fontSize = 12.sp,
                             color = MiuixTheme.colorScheme.primary,
                             maxLines = 1,
@@ -476,11 +476,11 @@ data class AppRelease(
     val publishedAt: Long = 0L,
 )
 
-private const val PROJECT_URL = "https://github.com/rosenii/mafari"
+private const val PROJECT_URL = "https://github.com/dormantxxy/mafari"
 private const val TG_CHANNEL_URL = "https://t.me/mafari_a"
 private const val TG_GROUP_URL = "https://t.me/Mafari_discuss"
 private const val COPYRIGHT = "Copyright © 2026 rosenii. All rights reserved."
-private const val RELEASES_API = "https://api.github.com/repos/rosenii/mafari/releases?per_page=100"
+private const val RELEASES_API = "https://api.github.com/repos/dormantxxy/mafari/releases?per_page=100"
 
 /** 最多翻几页：预发布每次构建都发一个，正式 release 会被挤到很靠后的页里 */
 private const val RELEASES_MAX_PAGES = 6

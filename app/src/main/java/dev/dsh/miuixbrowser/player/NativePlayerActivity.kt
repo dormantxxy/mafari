@@ -3,6 +3,7 @@
 package dev.dsh.miuixbrowser.player
 
 import android.Manifest
+import android.os.Build
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
 import android.app.RemoteAction
@@ -706,7 +707,9 @@ class NativePlayerActivity : ComponentActivity() {
     /** 界面可见时启动前台服务（后台启动前台服务会被系统拦）；Android 13+ 还要通知权限才看得到通知栏的控制条 */
     private fun startBgService() {
         val p = player ?: return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         PlayerService.start(this, p)

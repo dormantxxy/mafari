@@ -5,6 +5,7 @@ import dev.dsh.miuixbrowser.i18n.tr
 import dev.dsh.miuixbrowser.MainActivity
 import dev.dsh.miuixbrowser.R
 import android.Manifest
+import android.os.Build
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -28,7 +29,9 @@ class GeckoWebNotifications(private val app: Context) : WebNotificationDelegate 
 
     override fun onShowNotification(notification: WebNotification) {
         runCatching {
-            if (ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
                 return
             }
             val nm = app.getSystemService(NotificationManager::class.java)

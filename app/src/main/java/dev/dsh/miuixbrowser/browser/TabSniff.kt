@@ -18,6 +18,7 @@ import dev.dsh.miuixbrowser.sniff.MediaSniff
 import dev.dsh.miuixbrowser.sniff.SniffList
 import dev.dsh.miuixbrowser.sniff.SniffedMedia
 import dev.dsh.miuixbrowser.util.Diag
+import dev.dsh.miuixbrowser.util.readAtMost
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -127,7 +128,7 @@ private fun probeOne(m: SniffedMedia, referer: String, ua: String, cookie: Strin
             if (referer.isNotBlank()) c.setRequestProperty("Referer", referer)
             if (cookie.isNotBlank()) c.setRequestProperty("Cookie", cookie)
             if (c.responseCode !in 200..299) return null
-            c.inputStream.use { it.readNBytes(256 * 1024).toString(Charsets.UTF_8) }
+            c.inputStream.use { it.readAtMost(256 * 1024).toString(Charsets.UTF_8) }
         } finally {
             c.disconnect()
         }

@@ -41,7 +41,7 @@ import top.yukonga.miuix.kmp.icon.glass.ChevronBackward
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 玻璃材质是否真正生效：用户开关打开，且设备支持 RuntimeShader（minSdk 33 基本恒为 true）。
+ * 玻璃材质是否真正生效：用户开关打开，且设备支持 RuntimeShader（Android 13+，Android 12 使用底色回退）。
  * 关闭时所有玻璃组件传 backdrop = null，由 miuix-glass 自己退回不透明底色。
  */
 @Composable

@@ -29,7 +29,7 @@ import kotlin.math.sin
  * 去掉了平板 / OS2 配色，绘制范围固定为全屏。
  *
  * 引导页的玻璃卡片用 miuix-glass 采样这一层（见 OnboardingScreen 里的 layerBackdrop），所以卡片后面也是流动的色彩。
- * 不支持 RuntimeShader（minSdk 33 基本不会发生）时退回主题底色。
+ * Android 12 不支持 RuntimeShader 时退回主题底色。
  */
 
 private const val OS3_BG_FRAG = """

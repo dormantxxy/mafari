@@ -15,7 +15,7 @@ import org.json.JSONObject
  */
 object UpdateIntegrity {
 
-    private const val RELEASE_BY_TAG = "https://api.github.com/repos/rosenii/mafari/releases/tags/"
+    private const val RELEASE_BY_TAG = "https://api.github.com/repos/dormantxxy/mafari/releases/tags/"
     private val HEX64 = Regex("^[0-9a-f]{64}$")
 
     /** 直连 GitHub 取 [tag] 里文件名为 [fileName] 的资产 digest（sha256 十六进制小写）；取不到返回 null。阻塞调用。 */

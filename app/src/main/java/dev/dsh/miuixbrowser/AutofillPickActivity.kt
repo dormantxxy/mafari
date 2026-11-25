@@ -11,6 +11,7 @@ import dev.dsh.miuixbrowser.ui.AutofillPickDialog
 import dev.dsh.miuixbrowser.ui.LocalBlurMode
 import dev.dsh.miuixbrowser.ui.PickRow
 import android.content.Intent
+import androidx.core.content.IntentCompat
 import android.os.Bundle
 import android.service.autofill.Dataset
 import android.view.autofill.AutofillId
@@ -48,12 +49,12 @@ class AutofillPickActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val pkg = intent.getStringExtra(EXTRA_PKG)
-        val passId = intent.getParcelableExtra(EXTRA_PASS_ID, AutofillId::class.java)
+        val passId = IntentCompat.getParcelableExtra(intent, EXTRA_PASS_ID, AutofillId::class.java)
         if (pkg == null || passId == null) {
             cancel()
             return
         }
-        val userId = intent.getParcelableExtra(EXTRA_USER_ID, AutofillId::class.java)
+        val userId = IntentCompat.getParcelableExtra(intent, EXTRA_USER_ID, AutofillId::class.java)
         val label = MafariAutofillService.appLabel(this, pkg)
 
         setContent {

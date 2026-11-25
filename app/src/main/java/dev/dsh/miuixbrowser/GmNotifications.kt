@@ -3,6 +3,7 @@ package dev.dsh.miuixbrowser
 import dev.dsh.miuixbrowser.i18n.tr
 
 import android.Manifest
+import android.os.Build
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -52,7 +53,9 @@ object GmNotifications {
         callback: (String) -> Unit,
     ) {
         val app = context.applicationContext
-        if (ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
             throw IllegalStateException("notification permission denied")
         }
         val nm = app.getSystemService(NotificationManager::class.java)

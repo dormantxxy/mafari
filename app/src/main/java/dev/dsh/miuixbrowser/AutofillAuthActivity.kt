@@ -8,6 +8,7 @@ import dev.dsh.miuixbrowser.data.AppDatabase
 import dev.dsh.miuixbrowser.data.PasswordDb
 import android.app.Activity
 import android.content.Intent
+import androidx.core.content.IntentCompat
 import android.os.Bundle
 import android.service.autofill.Dataset
 import android.view.autofill.AutofillId
@@ -27,8 +28,8 @@ class AutofillAuthActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val guid = intent.getStringExtra(EXTRA_GUID)
-        val passId = intent.getParcelableExtra(EXTRA_PASS_ID, AutofillId::class.java)
-        val userId = intent.getParcelableExtra(EXTRA_USER_ID, AutofillId::class.java)
+        val passId = IntentCompat.getParcelableExtra(intent, EXTRA_PASS_ID, AutofillId::class.java)
+        val userId = IntentCompat.getParcelableExtra(intent, EXTRA_USER_ID, AutofillId::class.java)
         if (guid == null || passId == null) {
             cancel()
             return

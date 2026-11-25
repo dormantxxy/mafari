@@ -26,6 +26,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Rational
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -337,7 +338,7 @@ object MediaHost {
                         emit(JSONObject().put("ev", "act").put("a", act))
                     }
                 }
-                a.registerReceiver(r, IntentFilter(ACTION_PIP), Context.RECEIVER_NOT_EXPORTED)
+                ContextCompat.registerReceiver(a, r, IntentFilter(ACTION_PIP), ContextCompat.RECEIVER_NOT_EXPORTED)
                 receiver = r
             }
         } else {

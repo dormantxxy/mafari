@@ -2,7 +2,7 @@ name: Build & Release APK
 
 on:
   push:
-    branches: [ main, gecko, dual ]
+    branches: [ main, gecko, dual, android12 ]
     tags: [ "v*" ]
   workflow_dispatch:
 
@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     env:
       KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
       STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
@@ -25,14 +26,26 @@ jobs:
       # dual 分支：同时构建 gecko + lite 两个变体，直接发布为正式 release（tag = 应用版本名，如 v2.1.3，标 latest，进 lite / gecko 更新通道）；
       # 同一版本名重复构建会覆盖该 release 的安装包，要让用户收到更新请先提高版本名
       IS_DUAL_BRANCH: ${{ github.ref == 'refs/heads/dual' }}
-      # 预发布分支（gecko 或 dual）：tag 前缀 = 分支名
-      IS_PRE_BRANCH: ${{ github.ref == 'refs/heads/gecko' || github.ref == 'refs/heads/dual' }}
-      PRE_PREFIX: ${{ github.ref == 'refs/heads/dual' && 'dual' || 'gecko' }}
+      # 会发布 APK 的分支：gecko / dual / android12
+      IS_ANDROID12_BRANCH: ${{ github.ref == 'refs/heads/android12' }}
+      IS_PRE_BRANCH: ${{ github.ref == 'refs/heads/gecko' || github.ref == 'refs/heads/dual' || github.ref == 'refs/heads/android12' }}
+      PRE_PREFIX: ${{ github.ref == 'refs/heads/android12' && 'android12' || github.ref == 'refs/heads/dual' && 'dual' || 'gecko' }}
       # main 分支：构建签名的 release 包（不是 debug），但不发布——不建 GitHub Release、不推 Telegram，安装包只出现在本次运行的构建产物（Artifacts）里。
-      # 没配置签名密钥时退回 debug 包
+      # 发布签名参数不完整直接失败，绝不退回随机 debug 签名
       IS_MAIN_BRANCH: ${{ github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Require fixed release signing
+        if: env.IS_RELEASE_TAG == 'true' || env.IS_PRE_BRANCH == 'true' || env.IS_MAIN_BRANCH == 'true'
+        run: |
+          set -euo pipefail
+          for NAME in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!NAME}" ]; then
+              echo "::error::Missing signing Secret: $NAME; refusing debug fallback"
+              exit 1
+            fi
+          done
 
       # 拉取 miuix 上游（miuix.ref 指定版本）并自动打上 tools/miuix-patches 里的本地改造
       - name: Sync miuix
@@ -55,13 +68,14 @@ jobs:
           path: |
             ${{ env.ANDROID_HOME }}/platforms/android-37.2
             ${{ env.ANDROID_HOME }}/build-tools/36.0.0
+            ${{ env.ANDROID_HOME }}/build-tools/37.0.0
             ${{ env.ANDROID_HOME }}/platform-tools
-          key: android-sdk-${{ runner.os }}-37.0-36.0.0
+          key: android-sdk-${{ runner.os }}-37.2-36.0.0-37.0.0
 
       - name: Install Android SDK packages
         run: |
-          set -x
-          if [ -d "$ANDROID_HOME/platforms/android-37.2" ] && [ -d "$ANDROID_HOME/build-tools/36.0.0" ]; then
+          set -e
+          if [ -d "$ANDROID_HOME/platforms/android-37.2" ] && [ -d "$ANDROID_HOME/build-tools/36.0.0" ] && [ -d "$ANDROID_HOME/build-tools/37.0.0" ]; then
             echo "Android SDK packages cached, skip install"
             ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
             exit 0
@@ -69,7 +83,7 @@ jobs:
           SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
           echo "sdkmanager=$SDKMANAGER ANDROID_HOME=$ANDROID_HOME"
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          yes | "$SDKMANAGER" "platform-tools" "platforms;android-37.2" "build-tools;36.0.0" 2>&1 | tail -5 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-37.2" "build-tools;36.0.0" "build-tools;37.0.0"
           ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
 
       # 应用版本名 / 版本号（取自 app/build.gradle.kts），用于 dual 预发布标题与更新日志匹配
@@ -92,21 +106,29 @@ jobs:
           echo "version: $NAME ($CODE)"
 
       - name: Prepare keystore
-        if: (env.IS_RELEASE_TAG == 'true' || env.IS_PRE_BRANCH == 'true' || env.IS_MAIN_BRANCH == 'true') && env.KEYSTORE_BASE64 != ''
+        if: env.IS_RELEASE_TAG == 'true' || env.IS_PRE_BRANCH == 'true' || env.IS_MAIN_BRANCH == 'true'
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > mafari-release.jks
+          set -euo pipefail
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > mafari-release.jks
+          ACTUAL=$(keytool -exportcert -keystore mafari-release.jks -alias "$KEY_ALIAS" -storepass:env STORE_PASSWORD | sha256sum | cut -d' ' -f1)
+          EXPECTED=$(tr -d '\r\n' < docs/android12-signing.sha256)
+          [ "$ACTUAL" = "$EXPECTED" ] || { echo "::error::Signing key does not match the pinned certificate"; exit 1; }
+
+      - name: Android 12 API lint and JVM tests
+        if: env.IS_ANDROID12_BRANCH == 'true'
+        run: bash ./gradlew :app:lintLiteArm64Release :app:testLiteArm64ReleaseUnitTest -Pandroid12ApiCheck=true --stacktrace
 
       # 变体一次编完（共用 miuix 与 Gradle 缓存）：
       #   gecko = 内嵌 GeckoView 的双内核版（带 Firefox 同步）；lite = 无内核版（只用系统 WebView，不带 Firefox 同步，三种架构）；
       #   liteSync = 无内核版 + Firefox 同步（只构建 arm64）
-      # 其它分支，或没有 keystore 的 main / gecko / tag：编 debug
+      # 仅非发布分支编 debug；所有发布分支必须使用固定密钥
       - name: Build debug (gecko + lite + sync_lite)
-        if: (env.IS_RELEASE_TAG != 'true' && env.IS_PRE_BRANCH != 'true' && env.IS_MAIN_BRANCH != 'true') || env.KEYSTORE_BASE64 == ''
+        if: env.IS_RELEASE_TAG != 'true' && env.IS_PRE_BRANCH != 'true' && env.IS_MAIN_BRANCH != 'true'
         run: bash ./gradlew :app:assembleGeckoArm64Debug :app:assembleLiteArm64Debug :app:assembleLiteArm32Debug :app:assembleLiteX64Debug :app:assembleLiteSyncArm64Debug --stacktrace
 
       # tag、gecko / dual、main 且有签名：编 release（Gradle 用 MAFARI_* 直接签名并 zipalign，无需再手工签）；main 只上传构建产物，不发布
       - name: Build release (gecko + lite + sync_lite)
-        if: (env.IS_RELEASE_TAG == 'true' || env.IS_PRE_BRANCH == 'true' || env.IS_MAIN_BRANCH == 'true') && env.KEYSTORE_BASE64 != ''
+        if: env.IS_RELEASE_TAG == 'true' || env.IS_PRE_BRANCH == 'true' || env.IS_MAIN_BRANCH == 'true'
         env:
           MAFARI_KEYSTORE: mafari-release.jks
           MAFARI_STORE_PASS: ${{ secrets.STORE_PASSWORD }}
@@ -153,8 +175,35 @@ jobs:
             if [ -z "$SRC" ]; then echo "::error::缺少 $DIR/$TYPE 的 APK"; exit 1; fi
             cp "$SRC" "dist/Mafari-$LABEL-$SUFFIX.apk"
           done
+          if [ "$TYPE" = "release" ]; then python3 tools/verify-android12-apks.py dist; fi
           (cd dist && sha256sum Mafari-*.apk > SHA256SUMS.txt)
           ls -lh dist
+
+      - name: Enable KVM for Android 12 smoke test
+        if: env.IS_ANDROID12_BRANCH == 'true'
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Android 12 release smoke test
+        if: env.IS_ANDROID12_BRANCH == 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 31
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: python3 tools/android12-smoke.py dist/*-lite-x86_64.apk
+
+      - name: Upload Android 12 verification
+        if: always() && env.IS_ANDROID12_BRANCH == 'true'
+        uses: actions/upload-artifact@v7
+        continue-on-error: true
+        with:
+          name: android12-verification
+          path: dist/ANDROID12_*
+          retention-days: 3
+          if-no-files-found: ignore
 
       # 每个安装包单独一个构建产物（upload-artifact@v7 的 archive: false：不压缩、不套 zip，产物名就是 apk 文件名）。
       # archive: false 一次只能传 1 个文件，所以每个变体一步；lite-armeabi / lite-x86_64 在 canary 里不构建，找不到就跳过。
@@ -272,6 +321,15 @@ jobs:
                   "- `-lite-arm64-v8a.apk`：无内核版，只用系统 WebView；不含 Firefox 同步\n"
                   "- `-sync_lite-arm64.apk`：无内核版 + Firefox 账号同步\n"
               )
+          if os.environ.get("IS_ANDROID12_BRANCH") == "true":
+              body += (
+                  "\n\n### Android 12 非官方适配\n\n"
+                  "最低 API 31，修复自动填充、通知权限、画中画广播和有上限的文件读取。\n"
+                  "Android 12 的 AGSL 玻璃折射/渐进模糊回退为底色。\n"
+                  "独立固定签名；与原作者版本签名不同，不能覆盖安装，请先用应用内功能备份数据。\n"
+                  "CI 的 API 31 x86_64 模拟器完成 lite release 首次启动和本地网页请求冒烟验证；不等同全部真机/功能回归。\n"
+              )
+              body += "\n证书 SHA-256：`" + pathlib.Path("docs/android12-signing.sha256").read_text().strip() + "`\n"
           out = header + body + variants
           pathlib.Path("dist/RELEASE_NOTES.md").write_text(out + "\n", encoding="utf-8")
           print(out)
@@ -285,10 +343,13 @@ jobs:
           files: |
             dist/*.apk
             dist/SHA256SUMS.txt
+            dist/SIGNING_CERT_SHA256.txt
+            dist/ANDROID12_SMOKE.txt
           body_path: dist/RELEASE_NOTES.md
           generate_release_notes: true
           # tag 用 tag 名；gecko 自动生成 gecko-<run_number> 作为 tag
           tag_name: ${{ env.RELEASE_TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           # 分支推送的发布标题：应用版本名 (版本号)；tag 推送沿用 tag 名
           name: ${{ env.IS_PRE_BRANCH == 'true' && format('{0} ({1})', env.APP_VERSION_NAME, env.APP_VERSION_CODE) || '' }}
           # -canary 标预发布且不抢 latest；没有后缀 = 正式发布，标 latest

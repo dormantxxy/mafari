@@ -1,0 +1,26 @@
+From f9165f7a9f71d122a0ea5deb7a1388b23888fcac Mon Sep 17 00:00:00 2001
+From: dormantxxy <132353045+dormantxxy@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 11:43:33 +0800
+Subject: [PATCH] build: support Android 12 through guarded blur fallbacks
+
+---
+ miuix-blur/build.gradle.kts | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/miuix-blur/build.gradle.kts b/miuix-blur/build.gradle.kts
+index b5185f1..7cb89e4 100644
+--- a/miuix-blur/build.gradle.kts
++++ b/miuix-blur/build.gradle.kts
+@@ -28,7 +28,8 @@ kotlin {
+                     minorApiLevel = BuildConfig.COMPILE_SDK_MINOR
+                 }
+         }
+-        minSdk = 33
++        // RuntimeShader 调用已有能力判断；Android 12 走无 shader 的回退。
++        minSdk = 31
+         namespace = "${BuildConfig.LIBRARY_ID}.blur"
+         withHostTest {}
+     }
+-- 
+2.56.1
+

@@ -18,6 +18,7 @@ import dev.dsh.miuixbrowser.engine.EngineSupport
 import dev.dsh.miuixbrowser.engine.gecko.findActivity
 import dev.dsh.miuixbrowser.sync.fxa.FxaSync
 import dev.dsh.miuixbrowser.util.Diag
+import dev.dsh.miuixbrowser.util.readAtMost
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
@@ -571,7 +572,7 @@ private fun ConfirmButtons(confirmText: String, onCancel: () -> Unit, onConfirm:
 /** 读文件 → 解析 → 加密写库。在 IO 线程执行；任何异常都转成人能看懂的提示（提示里不带文件内容）。 */
 private fun runImport(context: Context, uri: android.net.Uri): ImportReport {
     return try {
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(PasswordCsv.MAX_BYTES + 1) }
+        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readAtMost(PasswordCsv.MAX_BYTES + 1) }
             ?: return ImportReport(tr("导入失败"), listOf(tr("无法读取所选文件")), false)
         if (bytes.size > PasswordCsv.MAX_BYTES) {
             return ImportReport(tr("导入失败"), listOf(tr("文件超过 {0} MB，不像是密码文件", PasswordCsv.MAX_BYTES / 1024 / 1024)), false)

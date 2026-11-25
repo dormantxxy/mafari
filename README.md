@@ -2,11 +2,14 @@
 
 # Mafari
 
+> **Android 12 非官方适配分支**：基于 [rosenii/mafari](https://github.com/rosenii/mafari)，支持 Android 12（API 31）及以上，使用独立固定签名。Android 12 的 AGSL 玻璃/渐进模糊会回退为底色，详见 [适配与签名说明](docs/ANDROID12.md)。
+
+
 **一款好看、好用、能装扩展的 Android 浏览器**
 
 **简体中文** · [English](README_EN.md) · [☕ 捐赠](#捐赠)
 
-📢 [Telegram 频道](https://t.me/mafari_a) · 💬 [Telegram 交流群](https://t.me/Mafari_discuss) · 📦 [下载](https://github.com/rosenii/mafari/releases)
+📢 [Telegram 频道](https://t.me/mafari_a) · 💬 [Telegram 交流群](https://t.me/Mafari_discuss) · 📦 [下载](https://github.com/dormantxxy/mafari/releases)
 
 </div>
 
@@ -144,7 +147,7 @@ Mafari 是一款基于 **miuix** 设计风格的 Android 浏览器：界面简�
 
 ## 下载与安装
 
-前往 [Releases](https://github.com/rosenii/mafari/releases) 下载，要求 **Android 13 及以上**。
+前往 [Releases](https://github.com/dormantxxy/mafari/releases) 下载，要求 **Android 12 及以上**。
 
 | 安装包 | 对应版本 |
 | --- | --- |

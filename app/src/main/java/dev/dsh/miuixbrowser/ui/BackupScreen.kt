@@ -3,6 +3,7 @@ package dev.dsh.miuixbrowser.ui
 import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import dev.dsh.miuixbrowser.i18n.tr
+import dev.dsh.miuixbrowser.util.readAtMost
 
 import dev.dsh.miuixbrowser.backup.BackupAuto
 import dev.dsh.miuixbrowser.backup.BackupCategory
@@ -266,7 +267,7 @@ fun BackupScreen(onBack: () -> Unit, onOpenFxa: () -> Unit = {}, blurEnabled: Bo
             scope.launch {
                 val text = withContext(Dispatchers.IO) {
                     runCatching {
-                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(32 * 1024 + 1) }
+                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readAtMost(32 * 1024 + 1) }
                             ?: error(tr("无法读取所选文件"))
                         if (bytes.size > 32 * 1024) error(tr("文件过大，不像是私钥"))
                         String(bytes, Charsets.UTF_8)

@@ -2,11 +2,14 @@
 
 # Mafari
 
+> **Unofficial Android 12 compatibility fork** of [rosenii/mafari](https://github.com/rosenii/mafari), with a separate fixed release signing key. Supports API 31 and later; AGSL glass/progressive blur falls back to solid surfaces on Android 12. See [compatibility and signing notes](docs/ANDROID12.md).
+
+
 **A good-looking, capable Android browser that supports extensions**
 
 [简体中文](README.md) · **English** · [☕ Donate](#donate)
 
-📢 [Telegram Channel](https://t.me/mafari_a) · 💬 [Telegram Group](https://t.me/Mafari_discuss) · 📦 [Download](https://github.com/rosenii/mafari/releases)
+📢 [Telegram Channel](https://t.me/mafari_a) · 💬 [Telegram Group](https://t.me/Mafari_discuss) · 📦 [Download](https://github.com/dormantxxy/mafari/releases)
 
 </div>
 
@@ -144,7 +147,7 @@ Supports the `GM_*` APIs and script menu commands, with import from a URL or fil
 
 ## Download and install
 
-Get the APK from [Releases](https://github.com/rosenii/mafari/releases). **Android 13 or later** is required.
+Get the APK from [Releases](https://github.com/dormantxxy/mafari/releases). **Android 12 or later** is required.
 
 | APK | Edition |
 | --- | --- |

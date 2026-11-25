@@ -117,10 +117,10 @@ android {
 
     defaultConfig {
         applicationId = "dev.dsh.miuixbrowser"
-        minSdk = 33
+        minSdk = 31
         targetSdk = 37
-        versionCode = 20089
-        versionName = "v2.1.89"
+        versionCode = 20090
+        versionName = "v2.1.90"
         // gecko 分支的 CI 构建号（GITHUB_RUN_NUMBER，与预发布 tag「gecko-<n>」一致）；dual 是正式发布，按版本号比较，不写构建号；其它构建为 0
         val geckoBuild = if (System.getenv("GITHUB_REF") == "refs/heads/gecko" || System.getenv("GITHUB_REF_NAME") == "gecko") {
             System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
@@ -176,6 +176,11 @@ android {
         buildConfig = true
     }
 
+    // CI 仅检查 SDK 兼容项，不改变普通构建的 lint 规则。
+    if (providers.gradleProperty("android12ApiCheck").isPresent) {
+        lint { checkOnly += setOf("NewApi", "InlinedApi") }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
@@ -183,7 +188,11 @@ android {
 
     signingConfigs {
         val keystorePath = System.getenv("MAFARI_KEYSTORE")
-        if (keystorePath != null && rootProject.file(keystorePath).exists()) {
+        if (keystorePath != null) {
+            require(rootProject.file(keystorePath).isFile) { "MAFARI_KEYSTORE 指向的签名文件不存在" }
+            require(listOf("MAFARI_STORE_PASS", "MAFARI_KEY_ALIAS", "MAFARI_KEY_PASS").all { !System.getenv(it).isNullOrBlank() }) {
+                "发布签名参数不完整，拒绝生成未签名 APK"
+            }
             create("release") {
                 storeFile = rootProject.file(keystorePath)
                 storePassword = System.getenv("MAFARI_STORE_PASS")

@@ -1,3 +1,5 @@
+import com.android.build.api.variant.HostTestBuilder
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -230,6 +232,17 @@ android {
             excludes += "/plugin.properties"
             excludes += "/about.html"
             excludes += "/.api_description"
+        }
+    }
+}
+
+androidComponents {
+    if (providers.gradleProperty("android12ApiCheck").isPresent) {
+        // AGP 9.5 不默认生成 release 单测组件；只为本次校验变体启用。
+        beforeVariants(selector().all()) { builder ->
+            if (builder.name == "liteArm64Release") {
+                builder.hostTests[HostTestBuilder.UNIT_TEST_TYPE]?.enable = true
+            }
         }
     }
 }

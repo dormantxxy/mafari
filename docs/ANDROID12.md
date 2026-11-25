@@ -31,6 +31,8 @@ CI 缺少任何参数直接失败，不退回随机 debug 签名。每个 APK �
 
 ## 构建与检查
 
+AGP 9.5 的 release 单测组件通过 `-Pandroid12ApiCheck=true` 为 liteArm64Release 显式启用；CI 先探测任务列表，再运行真实测试。
+
 ```bash
 bash tools/miuix-sync.sh
 # release 构建需要设置 MAFARI_KEYSTORE / MAFARI_STORE_PASS / MAFARI_KEY_ALIAS / MAFARI_KEY_PASS

@@ -116,7 +116,12 @@ jobs:
 
       - name: Android 12 API lint and JVM tests
         if: env.IS_ANDROID12_BRANCH == 'true'
-        run: bash ./gradlew :app:lintLiteArm64Release :app:testLiteArm64ReleaseUnitTest -Pandroid12ApiCheck=true --stacktrace
+        run: |
+          set -euo pipefail
+          TASKS=$(bash ./gradlew :app:tasks --all -Pandroid12ApiCheck=true --console=plain)
+          printf '%s\n' "$TASKS"
+          printf '%s\n' "$TASKS" | grep '^testLiteArm64ReleaseUnitTest ' > /dev/null
+          bash ./gradlew :app:lintLiteArm64Release :app:testLiteArm64ReleaseUnitTest -Pandroid12ApiCheck=true --stacktrace
 
       # 变体一次编完（共用 miuix 与 Gradle 缓存）：
       #   gecko = 内嵌 GeckoView 的双内核版（带 Firefox 同步）；lite = 无内核版（只用系统 WebView，不带 Firefox 同步，三种架构）；

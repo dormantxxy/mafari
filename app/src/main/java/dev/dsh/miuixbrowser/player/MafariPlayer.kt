@@ -87,7 +87,12 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
             this@MafariPlayer.isPlaying = isPlaying
         }
 
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            syncPageMediaGate()
+        }
+
         override fun onPlaybackStateChanged(state: Int) {
+            syncPageMediaGate()
             buffering = state == Player.STATE_BUFFERING
             if (state == Player.STATE_READY) error = null
             refresh()
@@ -434,7 +439,15 @@ class MafariPlayer(context: Context, val request: PlayerRequest) {
         exo.play()
     }
 
+    /** 想播放（含缓冲中）且没播完 / 没出错时，网页里的媒体一律停住；暂停 / 播完 / 释放后解除 */
+    private fun syncPageMediaGate() {
+        val active = exo.playWhenReady &&
+            (exo.playbackState == Player.STATE_READY || exo.playbackState == Player.STATE_BUFFERING)
+        dev.dsh.miuixbrowser.browser.PageMediaGate.setPlaying(this, active)
+    }
+
     fun release() {
+        dev.dsh.miuixbrowser.browser.PageMediaGate.setPlaying(this, false)
         endScrub()
         exo.removeListener(listener)
         exo.release()

@@ -307,6 +307,8 @@ internal fun BrowserTab.setupWebView() {
                 appContext.appContainer.webExtensionsOrNull?.onWebRequestMainFrameCompleted(id, pageUrl)
             }
             if (!pageUrl.isNullOrBlank()) lastVisitedHistoryUrl = pageUrl
+            // 原生播放器正在播放：新文档里的拦截标记已丢，重新套上
+            if (PageMediaGate.nativePlaying) refreshMediaBlock()
             if (!parked) pageUrl?.let { url = it }
             loading = false
             progress = 1f

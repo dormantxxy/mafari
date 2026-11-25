@@ -773,6 +773,11 @@ class BrowserState(private val context: Context, initialUserAgent: String = "") 
             current?.tabs?.forEach { it.pauseMedia() }
         }
 
+        /** 原生播放器开始 / 停止播放：所有标签重新套用网页媒体拦截。主线程。 */
+        fun refreshMediaBlockCurrent() {
+            current?.tabs?.forEach { it.refreshMediaBlock() }
+        }
+
         /** 系统内存吃紧：收紧后台引擎数量。主线程。 */
         fun trimCurrent() {
             current?.reclaimEngines(aggressive = true)

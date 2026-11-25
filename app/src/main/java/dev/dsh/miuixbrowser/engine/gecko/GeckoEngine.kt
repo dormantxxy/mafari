@@ -432,7 +432,7 @@ class GeckoTabEngine(
 
     /** 页面被主页盖住期间为 true：onPlay 一律补暂停 */
     @Volatile
-    private var mediaBlocked = false
+    private var mediaBlocked = dev.dsh.miuixbrowser.browser.PageMediaGate.nativePlaying
 
     fun setMediaBlocked(blocked: Boolean) {
         mediaBlocked = blocked

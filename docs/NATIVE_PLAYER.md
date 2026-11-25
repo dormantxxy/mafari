@@ -164,3 +164,13 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 - HDR 策略只对多清晰度流起作用；1.12 起 HLS `VIDEO-RANGE`（PQ / HLG）和 DASH CICP 描述会解析进 `Format.colorInfo`，`isHdr` 因此能识别这些流；单个 mp4 没得选。HDR 直出需要 SurfaceView，TextureView 下 HDR 片源可能发灰 —— 暂时没做「检测到 HDR 自动切 SurfaceView」。
 - 隧道播放在播放页里临时切回 TextureView 不会重建播放器，此时需要在设置里关掉它。
 - 快捷菜单 / 标题区底色不透明度见 `NativePlayerActivity.CARD_SURFACE_ALPHA`。
+
+## 原生播放器播放时停住网页媒体（`browser/PageMediaGate.kt`）
+
+原生播放器「想播放（含缓冲中）且没播完 / 没出错」期间，所有标签里的网页音视频一律暂停并拦住，不再和原生播放器同时出声。
+暂停 / 播完 / 出错 / 关掉播放页后解除（页面媒体不会自动恢复，由用户自己点播放）。
+
+- 触发在 `MafariPlayer`（`onPlayWhenReadyChanged` / `onPlaybackStateChanged` / `release`），由 `PageMediaGate` 记录持有者：切换媒体时新播放页先于旧页销毁，旧页释放不会把新页的状态解除。
+- 拦截复用「主页盖住页面」那一套（`BrowserTab.applyMediaBlock`）：Gecko 在 `MediaSession.onPlay` 里补暂停，WebView 用脚本暂停现有媒体并在捕获阶段拦 `play` 事件。
+- WebView 换文档后脚本里的拦截标记会丢，`onPageFinished` 里在播放期间重新套用；Gecko 的拦截标记在原生侧，新建引擎时直接继承。
+- 限制：WebView 页面在换文档到 `onPageFinished` 之间若自动开播，会短暂出声再被暂停；未编译、未真机验证。

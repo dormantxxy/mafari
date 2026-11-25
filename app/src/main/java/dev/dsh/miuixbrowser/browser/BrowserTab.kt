@@ -185,7 +185,7 @@ class BrowserTab(
             if (field == value) return
             field = value
             // 页面被主页盖住期间（同一个标签、引擎仍存活）禁止播放媒体：回到页面前一律保持暂停
-            applyMediaBlock(value)
+            applyMediaBlock(value || PageMediaGate.nativePlaying)
         }
 
     var closed = false
@@ -752,8 +752,13 @@ class BrowserTab(
         runCatching { webViewOrNull?.evaluateJavascript(PAUSE_MEDIA_JS, null) }
     }
 
+    /** 重新套用拦截：原生播放器开始 / 停止播放、页面换了文档（脚本里的拦截标记随文档丢失）后调用 */
+    internal fun refreshMediaBlock() {
+        applyMediaBlock(parked || PageMediaGate.nativePlaying)
+    }
+
     /**
-     * 主页盖住页面时：暂停并拦住页面里的媒体（含之后页面脚本自己触发的播放）；页面还原 / 重新加载后解除。
+     * 主页盖住页面时 / 原生播放器播放时：暂停并拦住页面里的媒体（含之后页面脚本自己触发的播放）；页面还原 / 重新加载后解除。
      * Gecko：onPlay 里补暂停；WebView：脚本暂停现有媒体 + 捕获阶段监听 play 事件。
      */
     private fun applyMediaBlock(block: Boolean) {

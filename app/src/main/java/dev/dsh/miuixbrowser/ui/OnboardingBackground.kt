@@ -1,5 +1,7 @@
 package dev.dsh.miuixbrowser.ui
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -153,6 +155,7 @@ private val PRESET_DARK = BgPreset(
 )
 
 /** 把一份配色 / 时间喂给着色器；缓冲区复用，逐帧只做数组写入，不产生新对象。 */
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 private class BgPainter {
     private val shader = RuntimeShader(OS3_BG_FRAG).also {
         it.setFloatUniform("uTranslateY", 0f)
@@ -221,7 +224,7 @@ private const val MIN_FRAME_NANOS = 25_000_000L
 @Composable
 internal fun OnboardingBackground(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit = {}) {
     val surface = MiuixTheme.colorScheme.surface
-    if (!remember { isRuntimeShaderSupported() }) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || !remember { isRuntimeShaderSupported() }) {
         Box(modifier = modifier.background(surface), content = content)
         return
     }

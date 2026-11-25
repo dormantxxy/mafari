@@ -233,7 +233,10 @@ class DownloadService : Service() {
                         .setProgress(progress.coerceIn(0, 100))
                         .setProgressSegments(listOf(Notification.ProgressStyle.Segment(100))),
                 )
-                builder.setRequestPromotedOngoing(true)
+                // SDK_INT 不能区分 36.0/36.1；完整版本号按 major * 100000 + minor 编码。
+                if (Build.VERSION.SDK_INT_FULL >= 3_600_001) {
+                    builder.setRequestPromotedOngoing(true)
+                }
                 // 状态栏胶囊里显示的短文本（最多约 7 个字符）
                 builder.setShortCriticalText(if (paused) tr("已暂停") else if (indeterminate) "…" else "$progress%")
             }

@@ -20,7 +20,6 @@ import dev.dsh.miuixbrowser.sync.fxa.FxaSync
 import dev.dsh.miuixbrowser.util.Diag
 import dev.dsh.miuixbrowser.util.readAtMost
 import android.content.ClipData
-import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -599,8 +598,9 @@ private fun runImport(context: Context, uri: android.net.Uri): ImportReport {
 private fun copySecret(context: Context, label: String, text: String, sensitive: Boolean = false) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val clip = ClipData.newPlainText(label, text)
+    // 使用官方兼容键，旧版本也保留敏感标记，不丢弃剪贴板保护信息。
     if (sensitive) {
-        clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
+        clip.description.extras = PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
     }
     cm.setPrimaryClip(clip)
     Toast.makeText(context, tr("已复制{0}", label), Toast.LENGTH_SHORT).show()

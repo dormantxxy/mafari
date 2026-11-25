@@ -41,5 +41,7 @@ bash ./gradlew :app:assembleLiteArm64Release
 bash ./gradlew :app:lintLiteArm64Release :app:testLiteArm64ReleaseUnitTest -Pandroid12ApiCheck=true
 ```
 
+CI 会完整运行 JVM 测试，并对照固定原版提交的同条件结果。新增 Android 12 的 10 项测试必须全通过，旧测试不得新增失败、改变失败类型或被跳过。原版已存在的失败不会改断言凑通过，明细保存在 `JVM_BASELINE.json` / 原始 JUnit 报告中；这不等同声称原项目全套测试全绿。
+
 `android12` 分支推送触发 CI 构建与 GitHub Release。发布包含各变体的 APK、SHA256SUMS.txt 和公开签名指纹。
-CI 的 Android 12（API 31）x86_64 模拟器用于 lite release 的首次启动/网页打开冒烟验证；这不等同所有厂商真机、Gecko、Firefox Sync、相机、投屏或长期后台播放都经过完整回归。
+CI 的 Android 12（API 31）x86_64 模拟器用于 lite release 的首次启动、自动填充入口缺参取消和本地网页请求冒烟验证；这不等同所有厂商真机、Gecko、Firefox Sync、相机、投屏或长期后台播放都经过完整回归。

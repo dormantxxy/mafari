@@ -24,7 +24,9 @@ def alive():
 
 
 def launch(*extra):
-    print(adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity", *extra))
+    result = adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity", *extra)
+    print(result)
+    assert "Status: ok" in result, "MainActivity did not start"
     time.sleep(8)
     alive()
 
@@ -43,6 +45,11 @@ def main():
     server = None
     try:
         launch()  # 没有 RuntimeShader 的 Android 12 必须能显示首次引导页。
+        for activity in ["AutofillAuthActivity", "AutofillPickActivity"]:
+            result = adb("shell", "am", "start", "-W", "-n", PACKAGE + "/." + activity)
+            assert "Status: ok" in result, activity + " did not start"
+            time.sleep(1)
+            alive()  # 缺失 extras 应安全取消；旧版 typed Parcelable 调用会在 API 31 崩溃。
         adb("shell", "am", "force-stop", PACKAGE)
         # 仅在一次性的 CI 模拟器设置引导完成的测试夹具，继续覆盖真正的 BrowserTab/WebView 初始化。
         uid = adb("shell", "stat", "-c", "%u", "/data/user/0/" + PACKAGE)
@@ -70,7 +77,7 @@ def main():
         launch("-a", "android.intent.action.VIEW", "-d", "http://127.0.0.1:" + port + "/android12")
         assert requested.wait(30), "WebView did not request the local smoke page"
         alive()
-        Path("dist/ANDROID12_SMOKE.txt").write_text("PASS: API 31 lite x86_64 release first launch and local WebView page request; no app crash.\n")
+        Path("dist/ANDROID12_SMOKE.txt").write_text("PASS: API 31 lite x86_64 release first launch, autofill entry cancellation, and local WebView page request; no app crash.\n")
         print("PASS: Android 12 first launch and WebView page request")
     finally:
         if server:

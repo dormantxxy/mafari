@@ -98,6 +98,8 @@ internal fun BrowserNav.SubPage(route: AppRoute) {
                 onMultiThreadMinMbChange = { settings.updateDownloadMultiThreadMinMb(it) },
                 externalDownloader = settings.externalDownloader,
                 onExternalDownloaderChange = { settings.updateExternalDownloader(it) },
+                deleteLocal = settings.downloadDeleteLocal,
+                onDeleteLocalChange = { settings.updateDownloadDeleteLocal(it) },
             )
         }
         AppRoute.MediaSniffPage -> {

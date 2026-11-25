@@ -506,6 +506,15 @@ class AppSettings(context: Context) {
         prefs.edit().putString(KEY_DL_EXTERNAL, value).apply()
     }
 
+    /** 删除下载记录时「同时删除本地文件」的勾选状态：勾选一次一直生效，直到下次取消勾选 */
+    var downloadDeleteLocal by mutableStateOf(prefs.getBoolean(KEY_DL_DELETE_LOCAL, false))
+        private set
+
+    fun updateDownloadDeleteLocal(value: Boolean) {
+        downloadDeleteLocal = value
+        prefs.edit().putBoolean(KEY_DL_DELETE_LOCAL, value).apply()
+    }
+
     init {
         ExternalDownloader.target = externalDownloader
         // 启动时把已保存的下载配置推给下载器
@@ -1290,6 +1299,7 @@ class AppSettings(context: Context) {
         const val KEY_DL_MULTI = "download_multithread_enabled"
         const val KEY_DL_EXTERNAL = "download_external_app"
         const val KEY_DL_HLS_MP4 = "download_hls_to_mp4"
+        const val KEY_DL_DELETE_LOCAL = "download_delete_local_file"
         const val KEY_UA = "ua"
         const val KEY_THEME = "theme_mode"
         const val KEY_SEARCH = "search_index"

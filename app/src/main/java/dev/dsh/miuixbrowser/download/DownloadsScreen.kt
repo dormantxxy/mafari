@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -51,6 +52,8 @@ import androidx.compose.ui.state.ToggleableState
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.icon.glass.Delete
+import top.yukonga.miuix.kmp.icon.glass.ChevronBackward
+import dev.dsh.miuixbrowser.ui.AppSmallButton
 import java.util.Calendar
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -220,6 +223,8 @@ fun DownloadsScreen(
     onMultiThreadMinMbChange: (Int) -> Unit = {},
     externalDownloader: String = "",
     onExternalDownloaderChange: (String) -> Unit = {},
+    deleteLocal: Boolean = false,
+    onDeleteLocalChange: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -231,10 +236,14 @@ fun DownloadsScreen(
     var pendingDelete by remember { mutableStateOf<DownloadTask?>(null) }
     val deleteTask = pendingDelete
     var showClearAll by remember { mutableStateOf(false) }
-    // 「同时删除本地文件」勾选项，每次打开删除弹窗都重置为不勾选
-    var deleteLocal by remember { mutableStateOf(false) }
+    // 「更多下载记录」（今天以外的记录）是否展开
+    var historyExpanded by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val groups = groupByDay(tasks.toList())
+    val allGroups = groupByDay(tasks.toList())
+    val todayGroups = allGroups.filter { it.isToday }
+    val olderGroups = allGroups.filter { !it.isToday }
+    val olderCount = olderGroups.sumOf { it.tasks.size }
+    val groups = if (historyExpanded) todayGroups + olderGroups else todayGroups
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     val topScrolled = rememberTopBarScrolled(scrollBehavior)
@@ -346,16 +355,19 @@ fun DownloadsScreen(
                                     color = Color(0xFFE53935),
                                     modifier = Modifier
                                         .squircleClip(8.dp)
-                                        .clickable {
-                                            deleteLocal = false
-                                            showClearAll = true
-                                        }
+                                        .clickable { showClearAll = true }
                                         .padding(horizontal = 8.dp, vertical = 6.dp),
                                 )
                             }
                         }
                     }
+                    var moreEmitted = false
                     groups.forEach { group ->
+                    // 今天的记录在上；「更多下载记录」行夹在今天与更早的记录之间
+                    if (!group.isToday && !moreEmitted) {
+                        moreEmitted = true
+                        moreDownloadsItem(olderCount, historyExpanded) { historyExpanded = !historyExpanded }
+                    }
                     item(key = "day-${group.key}") {
                         SmallTitle(
                             text = group.label,
@@ -468,10 +480,7 @@ fun DownloadsScreen(
                                         DownloadState.DONE -> Unit
                                     }
                                     IconButton(
-                                        onClick = {
-                                            deleteLocal = false
-                                            pendingDelete = task
-                                        },
+                                        onClick = { pendingDelete = task },
                                         minWidth = actionBtn,
                                         minHeight = actionBtn,
                                     ) {
@@ -489,6 +498,10 @@ fun DownloadsScreen(
                         }
                     }
                     }
+                    if (!moreEmitted && olderCount > 0) {
+                        moreEmitted = true
+                        moreDownloadsItem(olderCount, historyExpanded) { historyExpanded = !historyExpanded }
+                    }
                 }
             }
         }
@@ -505,7 +518,7 @@ fun DownloadsScreen(
             Column(modifier = Modifier.fillMaxWidth()) {
                 // 只有已完成的任务才有「本地文件」可选；未完成的残缺文件一律清掉
                 if (deleteTask?.state == DownloadState.DONE) {
-                    DeleteLocalFileRow(checked = deleteLocal, onToggle = { deleteLocal = !deleteLocal })
+                    DeleteLocalFileRow(checked = deleteLocal, onToggle = { onDeleteLocalChange(!deleteLocal) })
                     Spacer(Modifier.height(8.dp))
                 }
                 Row(
@@ -542,7 +555,7 @@ fun DownloadsScreen(
             onDismissRequest = { showClearAll = false },
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                DeleteLocalFileRow(checked = deleteLocal, onToggle = { deleteLocal = !deleteLocal })
+                DeleteLocalFileRow(checked = deleteLocal, onToggle = { onDeleteLocalChange(!deleteLocal) })
                 Spacer(Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -632,7 +645,7 @@ private fun DeleteLocalFileRow(checked: Boolean, onToggle: () -> Unit) {
     }
 }
 
-private class DayGroup(val key: Int, val label: String, val tasks: List<DownloadTask>)
+private class DayGroup(val key: Int, val label: String, val tasks: List<DownloadTask>, val isToday: Boolean)
 
 /**
  * 按下载日期（本地时区）分组，新的在前。任务 id = 创建时刻毫秒 × 1000 + 序号，
@@ -649,7 +662,12 @@ private fun groupByDay(tasks: List<DownloadTask>): List<DayGroup> {
         val ms = task.id / 1000
         val key: Int
         val label: String
-        if (ms < 946684800000L) { // 2000 年以前：旧版本留下的无效 id，没有可靠时间
+        // 还在进行 / 暂停中的任务一直算「今天」：否则隔天打开会被折进「更多下载记录」里看不到
+        val active = task.state == DownloadState.RUNNING || task.state == DownloadState.PAUSED
+        if (active) {
+            key = todayKey
+            label = tr("今天")
+        } else if (ms < 946684800000L) { // 2000 年以前：旧版本留下的无效 id，没有可靠时间
             key = 0
             label = tr("更早")
         } else {
@@ -665,5 +683,59 @@ private fun groupByDay(tasks: List<DownloadTask>): List<DayGroup> {
         }
         buckets.getOrPut(key) { label to mutableListOf() }.second.add(task)
     }
-    return buckets.map { (k, v) -> DayGroup(k, v.first, v.second) }
+    return buckets.map { (k, v) -> DayGroup(k, v.first, v.second, isToday = k == todayKey) }
+}
+
+/**
+ * 「更多下载记录」行：和下载记录条同高（14dp 内边距 + 44dp 图标行 = 72dp），
+ * 右侧是书签页同款的展开 / 收起按钮（ChevronBackward 旋转：收起朝右，展开朝下）。
+ */
+private fun androidx.compose.foundation.lazy.LazyListScope.moreDownloadsItem(
+    count: Int,
+    open: Boolean,
+    onToggle: () -> Unit,
+) {
+    item(key = "more-downloads") {
+        val angle by androidx.compose.animation.core.animateFloatAsState(if (open) 270f else 180f, label = "moreArrow")
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 8.dp),
+            insideMargin = PaddingValues(0.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .clickable(onClick = onToggle)
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = tr("更多下载记录"),
+                    fontSize = 15.sp,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "$count",
+                    fontSize = 14.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.weight(1f),
+                )
+                AppSmallButton(onClick = onToggle, size = 36.dp, inPage = true) {
+                    Icon(
+                        imageVector = MiuixIcons.Glass.ChevronBackward,
+                        contentDescription = if (open) tr("收起") else tr("展开"),
+                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.size(20.dp).graphicsLayer { rotationZ = angle },
+                    )
+                }
+            }
+        }
+    }
 }

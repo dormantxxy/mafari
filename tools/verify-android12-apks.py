@@ -28,6 +28,8 @@ def main():
         ], text=True)
         assert certificate_digest(signature) == expected, f"unexpected signing key: {apk.name}"
         badging = subprocess.check_output([str(build_tools / "aapt2"), "dump", "badging", str(apk)], text=True)
+        print("APK badging:", apk.name, "\n" + badging, flush=True)
+        (dist / (apk.name + ".badging.txt")).write_text(badging)
         assert re.search(r"^sdkVersion:'31'$", badging, re.M), f"APK does not support API 31: {apk.name}"
         assert "application-debuggable" not in badging, f"debug APK must not be released: {apk.name}"
         assert "package: name='dev.dsh.miuixbrowser'" in badging, f"unexpected package: {apk.name}"

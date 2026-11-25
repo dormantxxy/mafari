@@ -36,6 +36,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -511,10 +512,17 @@ fun BrowserScreen(
     )
     // 「拉伸取样」只在页面处于顶部的初始状态（含滑回顶部）使用；离开顶部后（下滑唤出状态栏等）直接采样下层网页、不拉伸。
     // 页面自带固定顶栏时顶边静止，仍用拉伸
+    // 顶栏停靠且页面已深入栏下：留白归零，网页铺到屏幕顶（栏的玻璃盖在网页上）
+    val topInsetTarget = if (topInsetCollapsed || (barLayout.reservesTop && ui.barOverlap)) 0.dp else topReserved
     val animatedTopPadding by animateDpAsState(
-        // 顶栏停靠且页面已深入栏下：留白归零，网页铺到屏幕顶（栏的玻璃盖在网页上）
-        targetValue = if (topInsetCollapsed || (barLayout.reservesTop && ui.barOverlap)) 0.dp else topReserved,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow),
+        targetValue = topInsetTarget,
+        // 非「固定在顶部」的栏：收起（网页铺满到状态栏）必须立即完成。用弹簧的话，过渡期间状态栏位置会露出一截底色，
+        // 小幅度滑动时就表现成「状态栏背景冒出来」。只有回到最顶部（留白放回、拉伸层立刻盖住）才用弹簧
+        animationSpec = if (topInsetTarget == 0.dp && !barLayout.reservesTop) {
+            snap()
+        } else {
+            spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow)
+        },
         label = "statusInset",
     )
     // 弹簧会过冲到负值，padding 不允许负数
@@ -730,8 +738,9 @@ fun BrowserScreen(
         } // backdrop capture layer ends before the floating toolbar
 
         // ---- 网页态的状态栏背景：高级材质，以网页最顶部一条区域为采样层（仅 WebView；Gecko 保持原样）----
-        // 页面处于初始状态（状态栏留白未收起）时显示；下滑沉浸收起后淡出。停靠在顶部的栏自己的底板已经铺到状态栏下，不叠加
-        // 初始 / 页面带固定顶栏：采样「拉伸的网页顶边」；上滑沉浸后（页面无固定顶栏）：直接采样下层网页（不镜像），避免拉伸残影闪烁
+        // 只有两种形态、硬切换（无透明度动画）：加载完成未滑动 / 滑回最顶部 / 页面带固定顶栏 → 采样「拉伸的网页顶边」；
+        // 其余所有时刻（上滑下滑都一样）网页铺满到状态栏，直接采样下层网页（不镜像不拉伸）的渐进模糊，半径 13。
+        // 停靠在顶部的栏自己的底板已经铺到状态栏下，不叠加
         if (statusBandActive) {
             StatusBarMaterialBand(
                 backdrop = browserBackdrop,

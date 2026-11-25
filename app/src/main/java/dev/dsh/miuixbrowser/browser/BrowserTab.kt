@@ -405,6 +405,14 @@ class BrowserTab(
     /** Gecko 标签且渲染后端是 TextureView：网页画面能被 layerBackdrop 采样（底栏 / 弹窗可用高级材质） */
     val geckoTextureGlass: Boolean get() = isGecko && geckoEngine?.usesTexture == true
 
+    /**
+     * 主页盖住网页时内容视图用的「隐藏」可见性。
+     * Gecko 的 SurfaceView 后端一旦 INVISIBLE 就会销毁 Surface，回到网页再重建，重建时 Gecko 合成器可能没接上而黑屏；
+     * 所以该后端只靠 alpha=0 隐藏（View 不绘制，也不会在窗口上打洞，Surface 保持存活）。其余情况仍用 INVISIBLE。
+     */
+    val hiddenVisibility: Int
+        get() = if (isGecko && geckoEngine?.usesTexture != true) View.VISIBLE else View.INVISIBLE
+
     /** 两种内核共有的基础操作（导航 / 查找 / 滚动 / 标题）：内核分支都收在 [TabEngineOps] 的两个实现里。 */
     private val ops: TabEngineOps by lazy {
         if (isGecko) GeckoTabOps(current = { geckoEngine }, ensure = { ensureGecko() })

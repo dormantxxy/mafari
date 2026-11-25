@@ -432,7 +432,7 @@ fun BrowserScreen(
         tab.contentView.apply {
             alpha = if (onHome) 0f else 1f
             visibility = if (onHome) {
-                android.view.View.INVISIBLE
+                tab.hiddenVisibility
             } else {
                 android.view.View.VISIBLE
             }

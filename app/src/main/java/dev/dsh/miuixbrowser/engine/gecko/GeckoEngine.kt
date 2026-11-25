@@ -133,10 +133,10 @@ class GeckoTabEngine(
     val usesTexture: Boolean = GeckoDebug.renderBackend == GeckoDebug.RENDER_TEXTURE
 
     // 渲染后端必须在 view 还没挂 session 时选好（open() 之后再 setViewBackend 会重建内部 View，Surface 生命周期会错位）
+    // SurfaceView 是 GeckoView 的默认后端：不要再显式 setViewBackend(SURFACE_VIEW)，它会 removeView / 重建 / addView 内部视图，
+    // 只有选了 TextureView 才需要切换。
     val view: GeckoView = GeckoView(context).apply {
-        runCatching {
-            setViewBackend(if (usesTexture) GeckoView.BACKEND_TEXTURE_VIEW else GeckoView.BACKEND_SURFACE_VIEW)
-        }
+        if (usesTexture) runCatching { setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW) }
     }
 
     var canGoBack = false

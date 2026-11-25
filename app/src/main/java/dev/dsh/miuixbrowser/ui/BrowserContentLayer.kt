@@ -132,7 +132,7 @@ internal fun BrowserUiState.BrowserContentLayer(
                         // 返回时仍能还原网页），这样采集层里只有 Compose 内容。
                         // 这里读取了 tab.url，主页/网页切换时 update 会重新执行。
                         val wantedVisibility = if (tab.url.isEmpty()) {
-                            android.view.View.INVISIBLE
+                            tab.hiddenVisibility
                         } else {
                             android.view.View.VISIBLE
                         }

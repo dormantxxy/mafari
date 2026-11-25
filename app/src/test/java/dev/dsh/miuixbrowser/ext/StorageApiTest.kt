@@ -104,7 +104,7 @@ class StorageApiTest {
         init {
             repo.put(ext)
             StorageApi({ File(tmp, "data/$it") }, { id, ev, p -> events.add(Triple(id, ev, p)) }).register(router)
-            RuntimeApi { _, target, msg -> JSONObject().put("echo", msg).put("target", target ?: JSONObject.NULL) }
+            RuntimeApi(RuntimeMessenger { _, target, msg -> JSONObject().put("echo", msg).put("target", target ?: JSONObject.NULL) })
                 .register(router)
         }
 

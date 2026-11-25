@@ -40,6 +40,8 @@ class SniffList {
                 durationMs = if (m.durationMs != -1L) m.durationMs else old.durationMs,
                 preview = m.preview ?: old.preview,
                 userPlayed = old.userPlayed || m.userPlayed,
+                referer = old.referer.ifEmpty { m.referer },
+                origin = old.origin.ifEmpty { m.origin },
             )
             if (merged != old) items = cur.toMutableList().also { it[idx] = merged }
             return false
@@ -77,6 +79,14 @@ class SniffList {
     @Synchronized
     fun markAutoPlayed(url: String) { autoPlayed.add(keyOf(url)) }
 
+    /** 上一次拉起播放器时列表里已有的个数：之后新增的才是「播放器开着时页面又换了视频」的候选 */
+    @Volatile
+    var launchedSize = 0
+        private set
+
+    @Synchronized
+    fun markLaunched() { launchedSize = items.size }
+
     @Synchronized
     fun autoPlayedUrls(): Set<String> = autoPlayed.toSet()
 
@@ -87,5 +97,6 @@ class SniffList {
         probing.clear()
         probed.clear()
         autoPlayed.clear()
+        launchedSize = 0
     }
 }

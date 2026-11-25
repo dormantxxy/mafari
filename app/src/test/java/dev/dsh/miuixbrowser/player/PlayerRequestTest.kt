@@ -10,9 +10,21 @@ class PlayerRequestTest {
     @Test fun headersOnlyIncludeNonBlank() {
         assertEquals(emptyMap<String, String>(), PlayerRequest("https://a/b.mp4").headers())
         assertEquals(
-            mapOf("Referer" to "https://a/", "Cookie" to "k=v"),
+            mapOf("Referer" to "https://a/", "Origin" to "https://a", "Cookie" to "k=v"),
             PlayerRequest("https://a/b.mp4", referer = "https://a/", cookie = "k=v").headers(),
         )
+    }
+
+    @Test fun originDerivedFromRefererOrExplicit() {
+        assertEquals("https://p.example.com:8443", PlayerRequest.originOf("https://p.example.com:8443/embed/1?x=2#y"))
+        assertEquals("", PlayerRequest.originOf("content://media/1"))
+        // 显式 origin 优先于从 referer 推出的
+        assertEquals(
+            "https://o.example",
+            PlayerRequest("https://a/b.mp4", referer = "https://a/p", origin = "https://o.example").headers()["Origin"],
+        )
+        // 本地文件不带 Origin
+        assertFalse(PlayerRequest("content://m/1", standalone = true, referer = "https://a/").headers().containsKey("Origin"))
     }
 
     @Test fun hlsDetection() {

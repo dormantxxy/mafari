@@ -174,3 +174,18 @@ GM_mafariHost('play', { url, title, referer: location.href, ua: navigator.userAg
 - 拦截复用「主页盖住页面」那一套（`BrowserTab.applyMediaBlock`）：Gecko 在 `MediaSession.onPlay` 里补暂停，WebView 用脚本暂停现有媒体并在捕获阶段拦 `play` 事件。
 - WebView 换文档后脚本里的拦截标记会丢，`onPageFinished` 里在播放期间重新套用；Gecko 的拦截标记在原生侧，新建引擎时直接继承。
 - 限制：WebView 页面在换文档到 `onPageFinished` 之间若自动开播，会短暂出声再被暂停；未编译、未真机验证。
+
+## 防盗链、提前嗅探、跟随换集
+
+**防盗链请求头**：播放带 Referer / Origin / UA / Cookie。WebView 的请求拦截会记下页面加载这条地址时真正带的 Referer / Origin（`SniffedMedia.referer / origin`），
+iframe 里的播放器带的是播放器页地址而不是顶层页，播放时优先用它，没有再退回顶层页地址；Origin 没有时从 Referer 推出（和浏览器对跨域媒体请求的行为一致）。
+Gecko 的 `onHeadersReceived` 看不到请求头，仍用顶层页地址。Cookie 仍是该标签对「视频所在域名」的 Cookie，对所有请求（含别的域名的分片）一视同仁。
+不覆盖：要求特定自定义头（如 `X-Requested-With`、签名头）、一次一密 / 限时且绑定 IP 的地址、需要页面脚本动态算出请求头的源。
+
+**没点播放也能嗅探到**（`mafari_sniff.js` 新增，只读）：页面加载后扫三遍（解析完 / load / 再过 1.5、4 秒）：
+`<video>` / `<source>` / `og:video`、苹果 CMS 的 `window.player_aaaa`（含 encrypt=1 / 2 解码）、内联脚本里的 `.m3u8 / .mp4 …` 地址（含 `\/` 转义）；
+fetch / XHR 返回的小 JSON（≤200KB，最多 8 个）里的视频地址。限制：播放器是点击后才由脚本拼地址 / 请求接口的站点，仍然要点了才抓得到。
+
+**跟随页面**（`BrowserDialogHost`）：播放器开着（或开了自动悬浮播放）时，用户在页面里手动点播放的视频改由原生播放器播。
+WebView：脚本在 `<video>` 开播、fetch / XHR 拿到清单时带上 userActivation / 5 秒内触摸标记（`ua`），原生看到 `userPlayed` 就切；
+Gecko 没有点击信号，只认「上次拉起播放器之后新出现」的合格正片。已经在播的地址、已经拉起过的地址不重复开。

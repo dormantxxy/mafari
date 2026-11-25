@@ -763,6 +763,12 @@ class NativePlayerActivity : ComponentActivity() {
 
         private var instance: NativePlayerActivity? = null
 
+        /** 播放页正在播的地址和它的全部源（去 #片段）：嗅探据此判断页面新出现的视频是不是已经在播的这一条 */
+        fun playingUrls(): Set<String> {
+            val p = instance?.player ?: return emptySet()
+            return (p.sources.map { it.url } + p.currentRequest.url).map { it.substringBefore('#') }.toSet()
+        }
+
         /** 关掉正开着的播放页（地址栏媒体弹窗里切换到另一条媒体前调用，避免叠出两个播放器）。 */
         fun closeCurrent() {
             instance?.let { if (!it.isFinishing) it.finish() }

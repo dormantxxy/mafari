@@ -458,6 +458,36 @@ BrowserChunk {
                 }
             }
         }
+        // 跟随页面：用户在页面里手动点了某个视频的播放（换集 / 换线路 / 点别的视频），原生播放器就改播这一条。
+        //   - WebView：页面脚本报 userActivation（点击后 5 秒内开播 / 发起清单请求），这一条标了 userPlayed 就跟；
+        //   - Gecko：没有点击信号，只认「上次拉起播放器之后新出现」的合格正片（时长 / 预览按自动悬浮播放同一套规则）。
+        //   播放器开着，或开了「自动悬浮播放」时才跟；已经在播的地址 / 已经拉起过的地址不重复开。
+        androidx.compose.runtime.LaunchedEffect(sniffList, sniffItems, settings.mediaSniffActive) {
+            if (!settings.mediaSniffActive) return@LaunchedEffect
+            val showing = dev.dsh.miuixbrowser.player.NativePlayerActivity.showing
+            if (!showing && !settings.mediaAutoFloatActive) return@LaunchedEffect
+            fun key(u: String) = u.substringBefore('#')
+            val skip = sniffList.autoPlayedUrls() + dev.dsh.miuixbrowser.player.NativePlayerActivity.playingUrls()
+            if (!tab.isGecko) {
+                val m = sniffItems.lastOrNull { it.userPlayed && it.preview != true && key(it.url) !in skip } ?: return@LaunchedEffect
+                sniffList.markAutoPlayed(m.url)
+                tab.playSniffed(context, m, sniffItems.toList())
+            } else if (showing) {
+                val from = sniffList.launchedSize
+                if (sniffItems.size <= from) return@LaunchedEffect
+                kotlinx.coroutines.delay(900) // 同一时刻到的其他线路一起到齐再选
+                tab.probeDurations(sniffList, 4000)
+                val fresh = sniffList.items.drop(from)
+                val pick = dev.dsh.miuixbrowser.sniff.MediaSniff.pickAutoPlay(
+                    fresh,
+                    sniffList.autoPlayedUrls() + dev.dsh.miuixbrowser.player.NativePlayerActivity.playingUrls(),
+                )
+                if (pick != null) {
+                    sniffList.markAutoPlayed(pick.url)
+                    tab.playSniffed(context, pick, sniffList.items.toList())
+                }
+            }
+        }
         // 弹窗开着时给没有时长的项探时长（结果写回列表，行里的时长随之出现）
         androidx.compose.runtime.LaunchedEffect(sniffDialogShow, sniffItems.size) {
             if (sniffDialogShow) tab.probeDurations(sniffList, 8000)

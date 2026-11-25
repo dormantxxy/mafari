@@ -27,6 +27,8 @@ data class PlayerRequest(
     val gecko: Boolean = false,
     /** 从系统「打开方式」直接打开的本地视频（见 VideoOpenActivity）：一开始就全屏、返回即退出；没有网页可浮在上面，也没有下载 / 投屏 */
     val standalone: Boolean = false,
+    /** 防盗链用的 Origin；空 = 由 [referer] 推出（浏览器对跨域媒体请求也会带） */
+    val origin: String = "",
 ) {
     /** 本地文件（content:// / file://）：没有可下载的网络地址，也不能投屏 */
     val isLocal: Boolean get() = !url.startsWith("http://", true) && !url.startsWith("https://", true)
@@ -34,6 +36,8 @@ data class PlayerRequest(
     /** 要附加到每个网络请求上的头（UA 单独走 setUserAgent，不放这里） */
     fun headers(): Map<String, String> = buildMap {
         if (referer.isNotBlank()) put("Referer", referer)
+        val o = origin.ifBlank { originOf(referer) }
+        if (o.isNotBlank() && !isLocal) put("Origin", o)
         if (cookie.isNotBlank()) put("Cookie", cookie)
     }
 
@@ -70,7 +74,7 @@ data class PlayerRequest(
         Intent(context, NativePlayerActivity::class.java)
             .putExtra(K_URL, url).putExtra(K_TITLE, title).putExtra(K_REFERER, referer)
             .putExtra(K_UA, ua).putExtra(K_COOKIE, cookie).putExtra(K_TYPE, type).putExtra(K_START, startMs)
-            .putExtra(K_GECKO, gecko).putExtra(K_STANDALONE, standalone)
+            .putExtra(K_GECKO, gecko).putExtra(K_STANDALONE, standalone).putExtra(K_ORIGIN, origin)
             .apply { if (sources.isNotEmpty()) putExtra(K_SOURCES, encodeSources(sources)) }
 
     companion object {
@@ -84,6 +88,15 @@ data class PlayerRequest(
         private const val K_GECKO = "gecko"
         private const val K_SOURCES = "sources"
         private const val K_STANDALONE = "standalone"
+        private const val K_ORIGIN = "origin"
+
+        /** scheme://host[:port]；不是 http(s) 地址返回空 */
+        fun originOf(url: String): String {
+            if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) return ""
+            val scheme = url.substringBefore("://").lowercase()
+            val hostPort = url.substringAfter("://").substringBefore('/').substringBefore('?').substringBefore('#').substringAfterLast('@')
+            return if (hostPort.isBlank()) "" else "$scheme://$hostPort"
+        }
 
         private val VIDEO_EXTS = setOf("mp4", "m4v", "mkv", "webm", "mov", "flv", "ts", "avi", "3gp")
 
@@ -105,6 +118,7 @@ data class PlayerRequest(
                 sources = decodeSources(i.getStringExtra(K_SOURCES)),
                 gecko = i.getBooleanExtra(K_GECKO, false),
                 standalone = standalone,
+                origin = i.getStringExtra(K_ORIGIN).orEmpty(),
             )
         }
 

@@ -13,6 +13,12 @@ data class SniffedMedia(
     val preview: Boolean? = null,
     /** 用户在页面里点过播放（页面报的 userActivation） */
     val userPlayed: Boolean = false,
+    /**
+     * 页面加载这条地址时实际带的 Referer / Origin（WebView 的请求拦截能读到请求头）。
+     * iframe 里的播放器带的是播放器页自己的地址，不是顶层页——防盗链按它校验，播放时优先用它。空 = 不知道（Gecko / 脚本报的）。
+     */
+    val referer: String = "",
+    val origin: String = "",
 )
 
 /**

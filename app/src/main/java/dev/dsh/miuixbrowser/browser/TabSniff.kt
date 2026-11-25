@@ -37,7 +37,15 @@ import org.json.JSONObject
 internal fun BrowserTab.sniffRequest(request: WebResourceRequest) {
     val u = request.url.toString()
     val type = MediaSniff.classify(u) ?: return
-    webSniffs.offer(SniffedMedia(u, type, MediaSniff.hostOf(u)))
+    // 页面加载这条地址时带的 Referer / Origin：iframe 播放器的防盗链按它校验，播放时原样带上
+    val h = runCatching { request.requestHeaders }.getOrNull()
+    webSniffs.offer(
+        SniffedMedia(
+            u, type, MediaSniff.hostOf(u),
+            referer = h?.get("Referer").orEmpty(),
+            origin = h?.get("Origin").orEmpty(),
+        ),
+    )
 }
 
 /** 安装页面脚本的消息桥并注册文档开始脚本。不支持 WebMessageListener / 文档开始脚本时只剩请求拦截这条路，不影响基本嗅探。 */
@@ -150,6 +158,7 @@ internal fun BrowserTab.playSniffed(context: Context, selected: SniffedMedia, al
     val pageUrl = url
     val pageTitle = title
     val gecko = isGecko
+    sniffs.markLaunched()
     val others = all.filter { it.url != selected.url }.map {
         PlayerSource(it.url, label = "${it.type.uppercase()} · ${MediaSniff.displayName(it)}", type = hintOf(it))
     }
@@ -157,7 +166,9 @@ internal fun BrowserTab.playSniffed(context: Context, selected: SniffedMedia, al
         val req = PlayerRequest(
             url = selected.url,
             title = pageTitle,
-            referer = pageUrl,
+            // 防盗链：优先用页面加载这条地址时真正带的 Referer / Origin（iframe 播放器是播放器页的地址），没有再退回顶层页
+            referer = selected.referer.ifBlank { pageUrl },
+            origin = selected.origin,
             ua = ua,
             cookie = cookie,
             type = hintOf(selected),
